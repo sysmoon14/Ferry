@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferry setup</title>
+<style>
+  :root {
+    --bg: #08111d; --panel: #0e1a2b; --line: #1d2c42; --text: #e8edf3; --muted: #8a99ad;
+    --gold: #f2c14e; --sea: #3fa7d6; --bad: #ef6b6b; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: rgba(8,17,29,.92); backdrop-filter: blur(8px);
+           border-bottom: 1px solid var(--line); padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+  header h1 { margin: 0; font-size: 18px; color: var(--gold); letter-spacing: .02em; }
+  header .dev { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: 0; color: var(--muted); padding: 8px 12px; border-radius: 999px; font: inherit; cursor: pointer; white-space: nowrap; }
+  nav button.on { background: var(--panel); color: var(--text); }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; }
+  section { display: none; } section.on { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  label { display: block; color: var(--muted); font-size: 13px; margin: 10px 0 4px; }
+  input, select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; }
+  input:focus, select:focus { outline: 2px solid var(--sea); border-color: transparent; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--gold); color: #08111d; border: 0;
+         border-radius: 8px; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .btn.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  .btn:disabled { opacity: .5; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .muted { color: var(--muted); } .bad { color: var(--bad); } .small { font-size: 13px; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; }
+  .grow { flex: 1; min-width: 0; } .grow > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logo { width: 44px; height: 28px; border-radius: 4px; background: var(--bg); object-fit: contain; flex: none; }
+  .icon { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 38px; height: 38px; cursor: pointer; font-size: 16px; flex: none; }
+  .icon.on { color: var(--gold); border-color: var(--gold); }
+  .now { display: flex; gap: 14px; align-items: center; }
+  .now img { width: 72px; height: 44px; object-fit: contain; background: var(--bg); border-radius: 6px; }
+  .bar { height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; background: var(--gold); }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+  #pair { max-width: 360px; margin: 12vh auto 0; text-align: center; }
+  #pair input { text-align: center; font-size: 28px; letter-spacing: .3em; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
+           padding: 10px 16px; border-radius: 999px; display: none; z-index: 5; }
+  code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px; font: inherit; cursor: pointer; }
+  .seg button.on { background: var(--sea); color: #08111d; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div id="pair" hidden>
+  <h1 style="color:var(--gold)">Ferry</h1>
+  <p class="muted">Enter the PIN shown on the TV under <b>Settings &amp; pairing</b>.</p>
+  <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000">
+  <div class="actions" style="justify-content:center"><button class="btn" id="pairBtn">Pair</button></div>
+  <p id="pairErr" class="bad"></p>
+</div>
+
+<div id="app" hidden>
+  <header><h1>Ferry</h1><span class="dev" id="devName"></span></header>
+  <nav id="tabs">
+    <button data-tab="now" class="on">Now</button>
+    <button data-tab="sources">Sources</button>
+    <button data-tab="channels">Channels</button>
+    <button data-tab="favs">Favourites</button>
+    <button data-tab="ha">Home Assistant</button>
+    <button data-tab="device">Device</button>
+  </nav>
+  <main>
+    <!-- Now playing -->
+    <section id="now" class="on">
+      <div class="card">
+        <div class="now">
+          <img id="npLogo" alt="" hidden>
+          <div class="grow">
+            <div class="small muted" id="npState">Idle</div>
+            <div style="font-size:18px;font-weight:600" id="npChannel">Nothing playing</div>
+            <div id="npProg" class="muted"></div>
+            <div class="bar" id="npBarWrap" hidden><i id="npBar"></i></div>
+            <div id="npNext" class="small muted" style="margin-top:6px"></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" data-key="up">▲ Ch</button>
+          <button class="btn ghost" data-key="down">▼ Ch</button>
+          <button class="btn ghost" data-key="pause">⏯</button>
+          <button class="btn ghost" data-key="stop">■ Stop</button>
+          <button class="btn ghost" data-key="last">↺ Last</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sources -->
+    <section id="sources">
+      <div class="card">
+        <h2>Playlists</h2>
+        <ul class="list" id="srcList"></ul>
+        <p class="muted small" id="srcEmpty">No sources yet — add one below.</p>
+      </div>
+      <div class="card">
+        <h2 id="srcFormTitle">Add a source</h2>
+        <div class="seg" id="srcType">
+          <button data-type="M3U" class="on">M3U URL</button>
+          <button data-type="XTREAM">Xtream Codes</button>
+        </div>
+        <label>Name</label><input id="sName" placeholder="My provider">
+        <label id="sUrlLabel">Playlist URL</label><input id="sUrl" placeholder="http://…/playlist.m3u" inputmode="url">
+        <div id="xtreamFields" hidden>
+          <label>Username</label><input id="sUser" autocomplete="off">
+          <label>Password</label><input id="sPass" type="password" autocomplete="new-password" placeholder="">
+        </div>
+        <label>EPG URL <span class="muted">(XMLTV, .xml or .xml.gz — optional for Xtream)</span></label>
+        <input id="sEpg" placeholder="http://…/epg.xml.gz" inputmode="url">
+        <label>Refresh every (hours)</label><input id="sRefresh" type="number" min="1" max="168" value="12">
+        <div class="actions">
+          <button class="btn" id="srcSave">Add source</button>
+          <button class="btn ghost" id="srcCancel" hidden>Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Channels -->
+    <section id="channels">
+      <div class="card">
+        <div class="row">
+          <input id="chQ" placeholder="Search channels" type="search">
+          <select id="chGroup" style="flex:.8"><option value="">All groups</option></select>
+        </div>
+        <div class="actions" id="groupActions" hidden>
+          <button class="btn ghost" id="hideGroup">Hide this group</button>
+          <button class="btn ghost" id="showGroup">Show this group</button>
+        </div>
+        <ul class="list" id="chList" style="margin-top:8px"></ul>
+        <div class="pager">
+          <button class="btn ghost" id="chPrev">‹ Prev</button>
+          <span class="muted small" id="chInfo"></span>
+          <button class="btn ghost" id="chNext">Next ›</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Favourites order -->
+    <section id="favs">
+      <div class="card">
+        <h2>Favourites order</h2>
+        <p class="muted small">This order is used on the TV and for the Home Assistant channel selector.</p>
+        <ul class="list" id="favList"></ul>
+        <div class="actions"><button class="btn" id="favSave" disabled>Save order</button></div>
+      </div>
+    </section>
+
+    <!-- Home Assistant -->
+    <section id="ha">
+      <div class="card">
+        <h2>MQTT (Home Assistant discovery)</h2>
+        <label class="row" style="color:var(--text)"><span>Enabled</span><input type="checkbox" id="mEnabled" style="width:auto;flex:none"></label>
+        <label>Broker host</label><input id="mHost" placeholder="homeassistant.local">
+        <label>Port</label><input id="mPort" type="number" value="1883">
+        <label>Username</label><input id="mUser" autocomplete="off">
+        <label>Password</label><input id="mPass" type="password" autocomplete="new-password">
+        <label>Discovery prefix</label><input id="mPrefix" value="homeassistant">
+        <label>Base topic</label><input id="mBase" value="ferry">
+        <div class="actions">
+          <button class="btn" id="mSave">Save</button>
+          <button class="btn ghost" id="mTest">Test connection</button>
+        </div>
+        <p id="mResult" class="small"></p>
+      </div>
+      <div class="card">
+        <h2>Deep links</h2>
+        <p class="muted small">Use these from the Android TV Remote integration (<code>media_player.play_media</code>, type <code>url</code>), ADB or NFC tags.</p>
+        <p><code>ferry://tvg/&lt;tvg-id&gt;</code> · <code>ferry://number/&lt;n&gt;</code> · <code>ferry://name/&lt;name&gt;</code> · <code>ferry://last</code> · <code>ferry://guide</code></p>
+        <p class="muted small" id="npLink"></p>
+      </div>
+    </section>
+
+    <!-- Device -->
+    <section id="device">
+      <div class="card">
+        <h2>Device</h2>
+        <label>Name <span class="muted">(shown in Home Assistant)</span></label>
+        <input id="dName">
+        <div class="actions"><button class="btn" id="dSave">Save</button></div>
+      </div>
+      <div class="card">
+        <h2>Paired devices</h2>
+        <p class="muted small">Unpairing signs out every phone and browser, including this one.</p>
+        <div class="actions"><button class="btn danger" id="unpair">Unpair all</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props = {}, ...kids) => {
+    const n = Object.assign(document.createElement(tag), props);
+    kids.flat().forEach(k => n.append(k instanceof Node ? k : document.createTextNode(k ?? "")));
+    return n;
+  };
+  const store = {
+    get: () => { try { return localStorage.getItem("ferry.token"); } catch { return null; } },
+    set: (t) => { try { t ? localStorage.setItem("ferry.token", t) : localStorage.removeItem("ferry.token"); } catch {} },
+  };
+  let token = store.get();
+
+  const toast = (msg) => {
+    const t = $("toast"); t.textContent = msg; t.style.display = "block";
+    clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2500);
+  };
+
+  async function api(path, opts = {}) {
+    const res = await fetch("/api" + path, {
+      method: opts.method || "GET",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    if (res.status === 401 && path !== "/pair") { store.set(null); token = null; showPair(); throw new Error("Not paired"); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    return data;
+  }
+
+  // ---------- Pairing
+  function showPair() { $("app").hidden = true; $("pair").hidden = false; $("pin").focus(); }
+  async function pair(pin) {
+    $("pairErr").textContent = "";
+    try {
+      const r = await api("/pair", { method: "POST", body: { pin } });
+      token = r.token; store.set(token);
+      history.replaceState(null, "", "/");
+      start();
+    } catch (e) { $("pairErr").textContent = e.message; }
+  }
+  $("pairBtn").onclick = () => pair($("pin").value);
+  $("pin").onkeydown = (e) => { if (e.key === "Enter") pair($("pin").value); };
+
+  // ---------- Tabs
+  const loaders = {};
+  $("tabs").onclick = (e) => {
+    const b = e.target.closest("button[data-tab]"); if (!b) return;
+    document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+    document.querySelectorAll("main section").forEach(s => s.classList.toggle("on", s.id === b.dataset.tab));
+    loaders[b.dataset.tab]?.();
+  };
+
+  // ---------- Now playing
+  const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  function renderStatus(s) {
+    $("devName").textContent = s.deviceName;
+    $("npState").textContent = s.state[0].toUpperCase() + s.state.slice(1) + (s.error ? ` · ${s.error}` : "");
+    $("npChannel").textContent = s.channel ? s.channel.name : "Nothing playing";
+    $("npLogo").hidden = !s.channel?.logo; if (s.channel?.logo) $("npLogo").src = s.channel.logo;
+    $("npProg").textContent = s.programme ? `${fmtTime(s.programmeStart)}–${fmtTime(s.programmeEnd)}  ${s.programme}` : "";
+    const has = s.programmeStart && s.programmeEnd;
+    $("npBarWrap").hidden = !has;
+    if (has) $("npBar").style.width = Math.min(100, Math.max(0, (Date.now() - s.programmeStart) / (s.programmeEnd - s.programmeStart) * 100)) + "%";
+    $("npNext").textContent = s.next ? `Next ${fmtTime(s.nextStart)}  ${s.next}` : "";
+    $("npLink").textContent = s.channel ? `Current channel: ${s.channel.tvgId ? "ferry://tvg/" + s.channel.tvgId : "ferry://channel/" + s.channel.id}` : "";
+  }
+  function connectWs() {
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
+    ws.onmessage = (m) => renderStatus(JSON.parse(m.data));
+    ws.onclose = () => { if (token) setTimeout(connectWs, 3000); };
+  }
+  document.querySelectorAll("[data-key]").forEach(b => b.onclick = () => api("/key", { method: "POST", body: { key: b.dataset.key } }).catch(e => toast(e.message)));
+
+  // ---------- Sources
+  let srcType = "M3U", editing = null;
+  $("srcType").onclick = (e) => { const b = e.target.closest("button"); if (b) setType(b.dataset.type); };
+  function setType(t) {
+    srcType = t;
+    document.querySelectorAll("#srcType button").forEach(b => b.classList.toggle("on", b.dataset.type === t));
+    $("xtreamFields").hidden = t !== "XTREAM";
+    $("sUrlLabel").textContent = t === "XTREAM" ? "Server URL" : "Playlist URL";
+    $("sUrl").placeholder = t === "XTREAM" ? "http://provider.example:8080" : "http://…/playlist.m3u";
+  }
+  function resetForm() {
+    editing = null; setType("M3U");
+    ["sName", "sUrl", "sUser", "sPass", "sEpg"].forEach(id => $(id).value = "");
+    $("sPass").placeholder = ""; $("sRefresh").value = 12;
+    $("srcFormTitle").textContent = "Add a source"; $("srcSave").textContent = "Add source"; $("srcCancel").hidden = true;
+  }
+  $("srcCancel").onclick = resetForm;
+  $("srcSave").onclick = async () => {
+    const body = {
+      name: $("sName").value, type: srcType, url: $("sUrl").value,
+      username: srcType === "XTREAM" ? $("sUser").value : null,
+      password: srcType === "XTREAM" ? ($("sPass").value || (editing ? null : "")) : null,
+      epgUrl: $("sEpg").value || null, refreshHours: +$("sRefresh").value || 12,
+    };
+    try {
+      if (editing) await api(`/sources/${editing}`, { method: "PUT", body });
+      else await api("/sources", { method: "POST", body });
+      toast(editing ? "Saved — refreshing" : "Added — importing channels");
+      resetForm(); loadSources(); setTimeout(loadSources, 5000);
+    } catch (e) { toast(e.message); }
+  };
+  async function loadSources() {
+    const list = await api("/sources");
+    $("srcEmpty").hidden = list.length > 0;
+    $("srcList").replaceChildren(...list.map(s => el("li", {},
+      el("div", { className: "grow" },
+        el("div", {}, s.name, " ", el("span", { className: "pill" }, s.type === "XTREAM" ? "Xtream" : "M3U")),
+        el("div", { className: "small " + (s.lastError ? "bad" : "muted") },
+          s.lastError ? `⚠ ${s.lastError}` :
+          s.lastRefreshed ? `${s.channelCount} channels · updated ${new Date(s.lastRefreshed).toLocaleString()}` : "Importing…")),
+      el("button", { className: "icon", title: "Refresh", onclick: async () => { await api(`/sources/${s.id}/refresh`, { method: "POST" }); toast("Refreshing"); setTimeout(loadSources, 4000); } }, "↻"),
+      el("button", { className: "icon", title: "Edit", onclick: () => edit(s) }, "✎"),
+      el("button", { className: "icon", title: "Delete", onclick: async () => { if (confirm(`Delete ${s.name} and its channels?`)) { await api(`/sources/${s.id}`, { method: "DELETE" }); loadSources(); } } }, "✕"),
+    )));
+  }
+  function edit(s) {
+    editing = s.id; setType(s.type);
+    $("sName").value = s.name; $("sUrl").value = s.url; $("sUser").value = s.username || "";
+    $("sPass").value = ""; $("sPass").placeholder = s.hasPassword ? "•••••• (unchanged)" : "";
+    $("sEpg").value = s.epgUrl || ""; $("sRefresh").value = s.refreshHours;
+    $("srcFormTitle").textContent = `Edit ${s.name}`; $("srcSave").textContent = "Save"; $("srcCancel").hidden = false;
+    $("sName").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  loaders.sources = loadSources;
+
+  // ---------- Channels
+  const PAGE = 100; let chOffset = 0, chTotal = 0, qTimer;
+  async function loadGroups() {
+    const groups = await api("/groups"), current = $("chGroup").value;
+    $("chGroup").replaceChildren(el("option", { value: "" }, "All groups"), ...groups.map(g => el("option", { value: g }, g)));
+    $("chGroup").value = current;
+  }
+  async function loadChannels() {
+    const q = encodeURIComponent($("chQ").value), g = encodeURIComponent($("chGroup").value);
+    const page = await api(`/channels?q=${q}&group=${g}&limit=${PAGE}&offset=${chOffset}`);
+    chTotal = page.total;
+    $("chInfo").textContent = chTotal ? `${chOffset + 1}–${Math.min(chOffset + PAGE, chTotal)} of ${chTotal}` : "No channels";
+    $("chPrev").disabled = chOffset === 0; $("chNext").disabled = chOffset + PAGE >= chTotal;
+    $("groupActions").hidden = !$("chGroup").value;
+    $("chList").replaceChildren(...page.items.map(c => {
+      const fav = el("button", { className: "icon" + (c.favourite ? " on" : ""), title: "Favourite" }, c.favourite ? "★" : "☆");
+      const hide = el("button", { className: "icon" + (c.hidden ? " on" : ""), title: c.hidden ? "Hidden" : "Visible" }, c.hidden ? "⊘" : "◉");
+      fav.onclick = async () => { c.favourite = !c.favourite; await api(`/channels/${c.id}`, { method: "PATCH", body: { favourite: c.favourite } }); fav.className = "icon" + (c.favourite ? " on" : ""); fav.textContent = c.favourite ? "★" : "☆"; };
+      hide.onclick = async () => { c.hidden = !c.hidden; await api(`/channels/${c.id}`, { method: "PATCH", body: { hidden: c.hidden } }); hide.className = "icon" + (c.hidden ? " on" : ""); hide.textContent = c.hidden ? "⊘" : "◉"; };
+      const play = el("button", { className: "icon", title: "Play on TV", onclick: () => api("/play", { method: "POST", body: { channelId: c.id } }).then(() => toast(`Playing ${c.name}`)).catch(e => toast(e.message)) }, "▶");
+      const logo = c.logo ? el("img", { className: "logo", src: c.logo, loading: "lazy", alt: "" }) : el("span", { className: "logo" });
+      return el("li", {}, logo,
+        el("div", { className: "grow" }, el("div", {}, c.name), el("div", { className: "small muted" }, [c.group, c.tvgId].filter(Boolean).join(" · "))),
+        play, fav, hide);
+    }));
+  }
+  $("chQ").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { chOffset = 0; loadChannels(); }, 250); };
+  $("chGroup").onchange = () => { chOffset = 0; loadChannels(); };
+  $("chPrev").onclick = () => { chOffset = Math.max(0, chOffset - PAGE); loadChannels(); };
+  $("chNext").onclick = () => { chOffset += PAGE; loadChannels(); };
+  $("hideGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: true } }); loadChannels(); };
+  $("showGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: false } }); loadChannels(); };
+  loaders.channels = () => { loadGroups(); loadChannels(); };
+
+  // ---------- Favourites order (buttons rather than drag: works on phones)
+  let favs = [];
+  function renderFavs() {
+    $("favList").replaceChildren(...favs.map((c, i) => el("li", {},
+      el("span", { className: "muted small", style: "width:24px" }, String(i + 1)),
+      el("div", { className: "grow" }, el("div", {}, c.name)),
+      el("button", { className: "icon", disabled: i === 0, onclick: () => move(i, -1) }, "↑"),
+      el("button", { className: "icon", disabled: i === favs.length - 1, onclick: () => move(i, 1) }, "↓"),
+    )));
+    if (!favs.length) $("favList").append(el("li", { className: "muted small" }, "Star channels in the Channels tab first."));
+  }
+  function move(i, d) { [favs[i], favs[i + d]] = [favs[i + d], favs[i]]; $("favSave").disabled = false; renderFavs(); }
+  $("favSave").onclick = async () => { await api("/favourites/order", { method: "POST", body: { ids: favs.map(c => c.id) } }); $("favSave").disabled = true; toast("Order saved"); };
+  loaders.favs = async () => { favs = await api("/favourites"); $("favSave").disabled = true; renderFavs(); };
+
+  // ---------- MQTT
+  const mqttBody = () => ({
+    enabled: $("mEnabled").checked, host: $("mHost").value, port: +$("mPort").value || 1883,
+    username: $("mUser").value, password: $("mPass").value || null,
+    discoveryPrefix: $("mPrefix").value, baseTopic: $("mBase").value,
+  });
+  loaders.ha = async () => {
+    const m = await api("/mqtt");
+    $("mEnabled").checked = m.enabled; $("mHost").value = m.host; $("mPort").value = m.port; $("mUser").value = m.username;
+    $("mPass").value = ""; $("mPass").placeholder = m.hasPassword ? "•••••• (unchanged)" : "";
+    $("mPrefix").value = m.discoveryPrefix; $("mBase").value = m.baseTopic;
+  };
+  $("mSave").onclick = async () => { try { await api("/mqtt", { method: "PUT", body: mqttBody() }); toast("Saved"); loaders.ha(); } catch (e) { toast(e.message); } };
+  $("mTest").onclick = async () => {
+    $("mResult").textContent = "Connecting…"; $("mResult").className = "small muted";
+    try { const r = await api("/mqtt/test", { method: "POST", body: mqttBody() }); $("mResult").textContent = r.ok ? "✓ Connected" : `✕ ${r.message}`; $("mResult").className = "small " + (r.ok ? "" : "bad"); }
+    catch (e) { $("mResult").textContent = e.message; $("mResult").className = "small bad"; }
+  };
+
+  // ---------- Device
+  loaders.device = async () => { $("dName").value = (await api("/status")).deviceName; };
+  $("dSave").onclick = async () => { await api("/device", { method: "PUT", body: { name: $("dName").value } }); toast("Saved — restart Ferry to update HA device name"); };
+  $("unpair").onclick = async () => { if (confirm("Unpair every device?")) { await api("/tokens/revoke", { method: "POST" }); store.set(null); token = null; showPair(); } };
+
+  // ---------- Boot
+  async function start() {
+    $("pair").hidden = true; $("app").hidden = false;
+    try { renderStatus(await api("/status")); connectWs(); } catch {}
+  }
+  const qpPin = new URLSearchParams(location.search).get("pin");
+  if (qpPin && !token) pair(qpPin);
+  else if (token) start();
+  else showPair();
+})();
+</script>
+</body>
+</html>

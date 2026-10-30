@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ferry</string>
+    <string name="service_channel">Background service</string>
+    <string name="service_running">Config server and Home Assistant bridge running</string>
+</resources>
