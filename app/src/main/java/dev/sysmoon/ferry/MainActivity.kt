@@ -32,8 +32,14 @@ class MainActivity : ComponentActivity() {
                         onOpenSettings = { screen = Screen.SETTINGS },
                     )
                     Screen.PLAYER -> {
-                        BackHandler { screen = Screen.GUIDE }
-                        PlayerScreen(onBack = { screen = Screen.GUIDE })
+                        // Leaving the player stops the stream; otherwise audio keeps playing behind
+                        // the guide with no picture. (A live preview tile is a later feature.)
+                        val leave = {
+                            screen = Screen.GUIDE
+                            lifecycleScope.launch { graph.player.stop() }
+                        }
+                        BackHandler { leave() }
+                        PlayerScreen(onBack = { leave() })
                     }
                     Screen.SETTINGS -> {
                         BackHandler { screen = Screen.GUIDE }
