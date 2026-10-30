@@ -71,12 +71,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onBack) { Text("Back to guide") }
-                OutlinedButton(onClick = { scope.launch { graph.repository.refreshDue(force = true) } }) {
+                Button(onClick = onBack, colors = ferryButtonColors()) { Text("Back to guide") }
+                OutlinedButton(colors = ferryOutlinedButtonColors(), onClick = { scope.launch { graph.repository.refreshDue(force = true) } }) {
                     Text("Refresh now")
                 }
-                OutlinedButton(onClick = { scope.launch { graph.settings.regeneratePin() } }) { Text("New PIN") }
-                OutlinedButton(onClick = { scope.launch { graph.settings.revokeAllTokens() } }) {
+                OutlinedButton(colors = ferryOutlinedButtonColors(), onClick = { scope.launch { graph.settings.regeneratePin() } }) { Text("New PIN") }
+                OutlinedButton(colors = ferryOutlinedButtonColors(), onClick = { scope.launch { graph.settings.revokeAllTokens() } }) {
                     Text("Unpair all")
                 }
             }

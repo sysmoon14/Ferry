@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.graph
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -79,33 +80,61 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
                         selected = key == effective,
                         onClick = { selected = key },
                         headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        colors = ferryListItemColors(),
+                        border = ferryListItemBorder(),
                     )
                 }
             }
-            Button(onClick = onOpenSettings, modifier = Modifier.padding(top = 12.dp)) { Text("Settings & pairing") }
+            Button(
+                onClick = onOpenSettings,
+                modifier = Modifier.padding(top = 12.dp),
+                colors = ferryButtonColors(),
+            ) { Text("Settings & pairing") }
         }
 
         Spacer(Modifier.width(24.dp))
 
         // Channel list
-        if (shown.isEmpty()) {
-            EmptyState(Modifier.weight(1f))
-        } else {
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(shown, key = { it.id }) { channel ->
-                    ChannelRow(
-                        channel = channel,
-                        index = indexById[channel.id] ?: 0,
-                        playing = nowPlaying.channel?.id == channel.id,
-                        onClick = {
-                            scope.launch { graph.player.play(channel) }
-                            onOpenPlayer()
-                        },
-                    )
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when (effective) { FAVOURITES -> "Favourites"; ALL -> "All channels"; else -> effective },
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Clock()
+            }
+            if (shown.isEmpty()) {
+                EmptyState(Modifier.weight(1f))
+            } else {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(shown, key = { it.id }) { channel ->
+                        ChannelRow(
+                            channel = channel,
+                            index = indexById[channel.id] ?: 0,
+                            playing = nowPlaying.channel?.id == channel.id,
+                            onClick = {
+                                scope.launch { graph.player.play(channel) }
+                                onOpenPlayer()
+                            },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun Clock() {
+    val format = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(60_000 - value % 60_000) // tick on the minute
+        }
+    }
+    Text(format.format(Date(now)), style = MaterialTheme.typography.headlineSmall, color = FerryColors.Muted)
 }
 
 @Composable
@@ -122,6 +151,8 @@ private fun ChannelRow(channel: ChannelEntity, index: Int, playing: Boolean, onC
     ListItem(
         selected = playing,
         onClick = onClick,
+        colors = ferryListItemColors(),
+        border = ferryListItemBorder(),
         leadingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(

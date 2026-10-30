@@ -1,9 +1,16 @@
 package dev.sysmoon.ferry.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Border
+import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
+import androidx.tv.material3.ListItemDefaults
+import androidx.tv.material3.OutlinedButtonDefaults
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
@@ -36,3 +43,41 @@ fun FerryTheme(content: @Composable () -> Unit) {
         CompositionLocalProvider(LocalContentColor provides FerryColors.Text, content = content)
     }
 }
+
+// ---- Shared component styling: navy surfaces, gold focus, so focus and selection read clearly on a TV.
+
+private val FocusFill = Color(0xFF1B2D47)
+
+@Composable
+fun ferryListItemColors() = ListItemDefaults.colors(
+    containerColor = Color.Transparent,
+    contentColor = FerryColors.Text,
+    focusedContainerColor = FocusFill,
+    focusedContentColor = FerryColors.Text,
+    selectedContainerColor = FerryColors.Navy,
+    selectedContentColor = FerryColors.Gold,
+    focusedSelectedContainerColor = FocusFill,
+    focusedSelectedContentColor = FerryColors.Gold,
+)
+
+@Composable
+fun ferryListItemBorder() = ListItemDefaults.border(
+    focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(10.dp)),
+    focusedSelectedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(10.dp)),
+)
+
+@Composable
+fun ferryButtonColors() = ButtonDefaults.colors(
+    containerColor = FerryColors.Navy,
+    contentColor = FerryColors.Text,
+    focusedContainerColor = FerryColors.Gold,
+    focusedContentColor = FerryColors.Deep,
+)
+
+@Composable
+fun ferryOutlinedButtonColors() = OutlinedButtonDefaults.colors(
+    containerColor = Color.Transparent,
+    contentColor = FerryColors.Text,
+    focusedContainerColor = FerryColors.Gold,
+    focusedContentColor = FerryColors.Deep,
+)
