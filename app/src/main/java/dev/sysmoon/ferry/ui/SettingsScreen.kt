@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -43,6 +45,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val pin by graph.settings.pin.collectAsState(initial = null)
     // Creates the PIN if this screen is reached before the service has (first launch race).
     LaunchedEffect(Unit) { graph.settings.pin() }
+    val backFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
     val name by graph.settings.deviceName.collectAsState(initial = "")
     val sources by graph.db.sources().observeAll().collectAsState(initial = emptyList())
     val ip = remember { Network.localIpv4() }
@@ -71,7 +75,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onBack, colors = ferryButtonColors()) { Text("Back to guide") }
+                Button(onClick = onBack, colors = ferryButtonColors(), modifier = Modifier.focusRequester(backFocus)) { Text("Back to guide") }
                 OutlinedButton(colors = ferryOutlinedButtonColors(), onClick = { scope.launch { graph.repository.refreshDue(force = true) } }) {
                     Text("Refresh now")
                 }

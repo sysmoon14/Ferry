@@ -91,7 +91,11 @@ class Settings(private val context: Context) {
     fun newToken(): String = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
 
     private fun newPin() = "%06d".format(random.nextInt(1_000_000))
-    private fun defaultName() = "Ferry ${Build.MODEL}".trim()
+    /** The name set in Android TV's own settings ("Living Room TV"), falling back to the model. */
+    private fun defaultName(): String =
+        android.provider.Settings.Global.getString(context.contentResolver, "device_name")
+            ?.takeIf { it.isNotBlank() }
+            ?: "Ferry ${Build.MODEL}".trim()
 
     private suspend fun getOrCreate(key: Preferences.Key<String>, create: () -> String): String {
         store.data.first()[key]?.let { return it }
