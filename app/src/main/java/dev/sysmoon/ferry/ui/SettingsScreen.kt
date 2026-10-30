@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -40,6 +41,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
     val pin by graph.settings.pin.collectAsState(initial = null)
+    // Creates the PIN if this screen is reached before the service has (first launch race).
+    LaunchedEffect(Unit) { graph.settings.pin() }
     val name by graph.settings.deviceName.collectAsState(initial = "")
     val sources by graph.db.sources().observeAll().collectAsState(initial = emptyList())
     val ip = remember { Network.localIpv4() }

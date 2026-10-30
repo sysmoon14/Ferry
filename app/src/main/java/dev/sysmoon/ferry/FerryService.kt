@@ -36,7 +36,10 @@ class FerryService : Service() {
         val g = graph
         server = ConfigServer(g).also { it.start(PORT) }
         nsd = NsdAdvertiser(this)
-        g.scope.launch { nsd.register(g.settings.deviceName(), PORT, g.settings.deviceId()) }
+        g.scope.launch {
+            g.settings.pin() // make sure a pairing PIN exists before anyone opens Settings
+            nsd.register(g.settings.deviceName(), PORT, g.settings.deviceId())
+        }
         g.mqtt.start()
         refreshJob = g.scope.launch {
             while (isActive) {
