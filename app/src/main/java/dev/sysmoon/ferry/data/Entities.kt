@@ -51,6 +51,8 @@ data class ChannelEntity(
     @ColumnInfo(defaultValue = "0") val quality: Int = 0,
     /** On a primary: how many streams the row has (itself + duplicates). */
     @ColumnInfo(defaultValue = "1") val streamCount: Int = 1,
+    /** On a primary: the longest catch-up any of its streams has (it may not be the best stream). */
+    @ColumnInfo(defaultValue = "0") val rowCatchupDays: Int = 0,
     // User-owned fields, preserved across refreshes
     val favourite: Boolean = false,
     val hidden: Boolean = false,
@@ -59,6 +61,9 @@ data class ChannelEntity(
 
 /** Key used to match XMLTV <programme channel="...">. Extension so Room doesn't try to map it. */
 val ChannelEntity.epgKey: String get() = tvgId ?: name
+
+/** Days of catch-up this row offers, from whichever of its streams has an archive. */
+val ChannelEntity.archiveDays: Int get() = maxOf(catchupDays, rowCatchupDays)
 
 /** Name for lists: merged rows drop the quality tags that only described one of their streams. */
 val ChannelEntity.displayName: String get() = if (streamCount > 1) StreamQuality.displayName(name) else name

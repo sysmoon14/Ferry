@@ -2,6 +2,7 @@ package dev.sysmoon.ferry.server
 
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.archiveDays
 import dev.sysmoon.ferry.data.MqttConfig
 import dev.sysmoon.ferry.data.SourceEntity
 import dev.sysmoon.ferry.data.SourceType
@@ -60,7 +61,7 @@ data class ChannelDto(
     val catchupDays: Int = 0,
 )
 
-fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle, number, favourite, hidden, streamCount, catchupDays)
+fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle, number, favourite, hidden, streamCount, archiveDays)
 
 @Serializable data class OptionsDto(val mergeDuplicates: Boolean)
 

@@ -16,6 +16,7 @@ import dev.sysmoon.ferry.data.BbcIplayer
 import dev.sysmoon.ferry.data.XtreamClient
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
+import dev.sysmoon.ferry.data.archiveDays
 import dev.sysmoon.ferry.data.ChannelRepository
 import dev.sysmoon.ferry.data.FerryDatabase
 import dev.sysmoon.ferry.data.ProgrammeEntity
@@ -277,9 +278,9 @@ class PlayerController(
 
     /** Catch-up is possible for programmes that have ended (or started) within the archive window. */
     fun canCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, now: Long = System.currentTimeMillis()): Boolean =
-        channel.catchupDays > 0 &&
+        channel.archiveDays > 0 &&
             programme.start < now &&
-            programme.start > now - channel.catchupDays * 86_400_000L &&
+            programme.start > now - channel.archiveDays * 86_400_000L &&
             XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, null) != null
 
     /** Plays [programme] from the provider's archive (Xtream timeshift). */
@@ -287,11 +288,13 @@ class PlayerController(
         playJob?.cancel()
         watchdog?.cancel()
         playJob = this.scope.launch {
-            streams = listOf(channel)
+            // A merged row's archive may live on one of its other streams.
+            val stream = if (channel.streamCount > 1) streamsFor(channel).firstOrNull { it.catchupDays > 0 } ?: channel else channel
+            streams = listOf(stream)
             streamIndex = 0
             zapScope = scope ?: zapScope
-            val tz = db.sources().get(channel.sourceId)?.serverTimezone
-            val url = XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, tz)
+            val tz = db.sources().get(stream.sourceId)?.serverTimezone
+            val url = XtreamClient.timeshiftUrl(stream.streamUrl, programme.start, programme.stop, tz)
             if (url == null) {
                 _state.update { NowPlaying(channel, programme, null, PlaybackState.ERROR, "Catch-up not available", true) }
                 return@launch

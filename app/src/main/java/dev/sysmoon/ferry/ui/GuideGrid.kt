@@ -60,6 +60,7 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.archiveDays
 import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.delay
@@ -157,7 +158,7 @@ fun GuideGrid(
                     now = now,
                     focusRequester = if (channel.id == returnTo) returnFocus else null,
                     canGoBack = { target ->
-                        val limit = if (channel.catchupDays > 0) nowSlot - channel.catchupDays.coerceAtMost(7) * DAY_MS
+                        val limit = if (channel.archiveDays > 0) nowSlot - channel.archiveDays.coerceAtMost(7) * DAY_MS
                             else nowSlot - NO_ARCHIVE_BACK_MS
                         target >= limit
                     },
@@ -365,8 +366,8 @@ private fun GridRow(
                             Text(
                                 when {
                                     p == null -> "No guide data"
-                                    p.stop <= now && channel.catchupDays > 0 &&
-                                        p.start > now - channel.catchupDays * 86_400_000L -> "↺ ${p.title}"
+                                    p.stop <= now && channel.archiveDays > 0 &&
+                                        p.start > now - channel.archiveDays * 86_400_000L -> "↺ ${p.title}"
                                     else -> p.title
                                 },
                                 maxLines = 1,

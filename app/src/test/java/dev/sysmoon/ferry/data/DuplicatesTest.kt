@@ -54,7 +54,7 @@ class DuplicatesTest {
             listOf(
                 ch("a", "Disney Jr. SD (576p)", "disneyjr.uk", 0, fav = true),
                 ch("b", "Disney Jr. FHD (1080p)", "disneyjr.uk", 1),
-                ch("c", "Disney Jr. HD (720p)", "disneyjr.uk", 2),
+                ch("c", "Disney Jr. HD (720p)", "disneyjr.uk", 2).copy(catchupDays = 7),
                 ch("d", "Channel 4 +1", "channel4.uk", 3),   // borrows Channel 4's EPG id
                 ch("e", "Channel 4 HD", "channel4.uk", 4),
                 ch("f", "No EPG HD", null, 5),
@@ -69,6 +69,7 @@ class DuplicatesTest {
         assertNull(primary.primaryId)
         assertEquals(4, primary.streamCount)
         assertEquals("UK", primary.groupTitle)
+        assertEquals(7, primary.archiveDays)     // catch-up comes from the 720p copy
         assertEquals(0, primary.position)        // takes the group's first slot
         assertTrue(primary.favourite)            // keeps the favourite from the SD copy
         assertEquals("b", merged.getValue("a").primaryId)

@@ -109,6 +109,7 @@ object Duplicates {
                 sortOrder = members.minOf { it.sortOrder },
                 hidden = members.all { it.hidden },
                 streamCount = members.size,
+                rowCatchupDays = members.maxOf { it.catchupDays },
             )
             listOf(primary) + ranked.drop(1).map {
                 it.copy(primaryId = primary.id, favourite = false, sortOrder = Int.MAX_VALUE)
