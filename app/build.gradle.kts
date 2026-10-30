@@ -18,6 +18,18 @@ android {
         versionName = "0.1.0"
     }
 
+    // A fixed, committed key so every CI build can update the last one in place
+    // (CI otherwise generates a new debug key per run and updates fail).
+    // This is a sideloading key, not a store key: swap in a private one before publishing.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/ferry-debug.keystore")
+            storePassword = "android"
+            keyAlias = "ferrydebug"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
