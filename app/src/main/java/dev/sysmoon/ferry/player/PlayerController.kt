@@ -116,13 +116,11 @@ class PlayerController(
     suspend fun resolve(target: PlayTarget): ChannelEntity? = when (target) {
         is PlayTarget.Id -> db.channels().get(target.id)
         is PlayTarget.Tvg -> db.channels().byTvgId(target.tvgId)
-        is PlayTarget.Number -> db.channels().visible().let { list ->
-            list.firstOrNull { it.number == target.number } ?: list.getOrNull(target.number - 1)
-        }
-        is PlayTarget.Name -> db.channels().favourites().firstOrNull { it.name.equals(target.name, true) }
-            ?: db.channels().visible().firstOrNull { it.name.equals(target.name, true) }
+        is PlayTarget.Number -> db.channels().byNumber(target.number)
+            ?: db.channels().atPosition((target.number - 1).coerceAtLeast(0))
+        is PlayTarget.Name -> db.channels().byName(target.name)
         PlayTarget.Last -> settings.lastChannelId()?.let { db.channels().get(it) }
-            ?: db.channels().visible().firstOrNull()
+            ?: db.channels().atPosition(0)
     }
 
     suspend fun play(target: PlayTarget): Boolean {
@@ -147,9 +145,18 @@ class PlayerController(
         refreshProgrammes()
     }
 
-    /** Channel up/down through the visible list (favourites first), wrapping at the ends. */
+    /**
+     * Channel up/down, wrapping at the ends. Zaps within favourites when the current channel
+     * is one, otherwise within its group (as TiviMate does), never across the whole lineup.
+     */
     suspend fun step(delta: Int) {
-        val list = db.channels().visible()
+        val current = _state.value.channel?.let { db.channels().get(it.id) }
+        val list = when {
+            current == null -> db.channels().favourites().ifEmpty { listOfNotNull(db.channels().atPosition(0)) }
+            current.favourite -> db.channels().favourites()
+            current.groupTitle != null -> db.channels().inGroup(current.groupTitle)
+            else -> listOf(current)
+        }
         if (list.isEmpty()) return
         val current = list.indexOfFirst { it.id == _state.value.channel?.id }
         val next = if (current < 0) 0 else Math.floorMod(current + delta, list.size)

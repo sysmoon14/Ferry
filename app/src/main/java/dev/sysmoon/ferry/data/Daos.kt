@@ -28,6 +28,8 @@ interface SourceDao {
     suspend fun delete(id: Long)
 }
 
+data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int)
+
 /** Ordering used everywhere a "channel list" is shown: favourites first, user order, then provider order. */
 private const val LIST_ORDER = "favourite DESC, sortOrder, COALESCE(number, 2147483647), position"
 
@@ -38,6 +40,28 @@ interface ChannelDao {
 
     @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER")
     suspend fun visible(): List<ChannelEntity>
+
+    /** Guide: one group at a time, capped, so huge lineups never load in full. */
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND groupTitle = :group ORDER BY $LIST_ORDER LIMIT :limit")
+    fun observeGroup(group: String, limit: Int): Flow<List<ChannelEntity>>
+
+    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER LIMIT :limit")
+    fun observeFirst(limit: Int): Flow<List<ChannelEntity>>
+
+    @Query("SELECT COUNT(*) FROM channels WHERE hidden = 0")
+    fun observeVisibleCount(): Flow<Int>
+
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND groupTitle = :group ORDER BY $LIST_ORDER")
+    suspend fun inGroup(group: String): List<ChannelEntity>
+
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND number = :number ORDER BY favourite DESC LIMIT 1")
+    suspend fun byNumber(number: Int): ChannelEntity?
+
+    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER LIMIT 1 OFFSET :offset")
+    suspend fun atPosition(offset: Int): ChannelEntity?
+
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND name = :name COLLATE NOCASE ORDER BY favourite DESC LIMIT 1")
+    suspend fun byName(name: String): ChannelEntity?
 
     @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 ORDER BY sortOrder, position")
     fun observeFavourites(): Flow<List<ChannelEntity>>
@@ -66,8 +90,12 @@ interface ChannelDao {
     @Query("SELECT DISTINCT groupTitle FROM channels WHERE groupTitle IS NOT NULL ORDER BY groupTitle")
     suspend fun groups(): List<String>
 
-    @Query("SELECT * FROM channels WHERE sourceId = :sourceId")
-    suspend fun forSource(sourceId: Long): List<ChannelEntity>
+    /** Only rows the user has customised; everything else is rebuilt from the playlist. */
+    @Query(
+        """SELECT id, favourite, hidden, sortOrder FROM channels
+           WHERE sourceId = :sourceId AND (favourite = 1 OR hidden = 1 OR sortOrder != 2147483647)"""
+    )
+    suspend fun prefsForSource(sourceId: Long): List<ChannelPrefs>
 
     @Query("SELECT DISTINCT COALESCE(tvgId, name) FROM channels WHERE sourceId = :sourceId")
     suspend fun epgKeys(sourceId: Long): List<String>

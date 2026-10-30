@@ -39,30 +39,40 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.graph
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
 private const val FAVOURITES = "\u0000fav"
 private const val ALL = "\u0000all"
+private const val GUIDE_LIMIT = 1_000
 
 @Composable
 fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
-    val channels by graph.db.channels().observeVisible().collectAsState(initial = emptyList())
-    val groups by graph.db.channels().observeGroups().collectAsState(initial = emptyList())
+    val dao = graph.db.channels()
+    // Only the selected group is ever loaded (capped), so 20k+ channel lineups stay light.
+    // .catch: a failed read (e.g. mid-refresh) shows an empty list instead of crashing.
+    val favourites by remember { dao.observeFavourites().catch { emit(emptyList()) } }
+        .collectAsState(initial = emptyList())
+    val groups by remember { dao.observeGroups().catch { emit(emptyList()) } }
+        .collectAsState(initial = emptyList())
+    val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
     val nowPlaying by graph.player.state.collectAsState()
     var selected by remember { mutableStateOf(FAVOURITES) }
 
-    val hasFavourites = channels.any { it.favourite }
+    val hasFavourites = favourites.isNotEmpty()
     val effective = if (selected == FAVOURITES && !hasFavourites) ALL else selected
-    val indexById = remember(channels) { channels.withIndex().associate { it.value.id to it.index + 1 } }
-    val shown = when (effective) {
-        FAVOURITES -> channels.filter { it.favourite }
-        ALL -> channels
-        else -> channels.filter { it.groupTitle == effective }
+    val shownFlow = remember(effective) {
+        when (effective) {
+            FAVOURITES -> dao.observeFavourites()
+            ALL -> dao.observeFirst(GUIDE_LIMIT)
+            else -> dao.observeGroup(effective, GUIDE_LIMIT)
+        }.catch { emit(emptyList()) }
     }
+    val shown by shownFlow.collectAsState(initial = emptyList())
 
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
         // Group rail
@@ -100,8 +110,15 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
                 Text(
                     when (effective) { FAVOURITES -> "Favourites"; ALL -> "All channels"; else -> effective },
                     style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f),
                 )
+                if (effective == ALL && total > GUIDE_LIMIT) {
+                    Text(
+                        "  first $GUIDE_LIMIT of $total — pick a group",
+                        color = FerryColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
                 Clock()
             }
             if (shown.isEmpty()) {
@@ -111,7 +128,7 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
                     items(shown, key = { it.id }) { channel ->
                         ChannelRow(
                             channel = channel,
-                            index = indexById[channel.id] ?: 0,
+                            index = channel.position + 1,
                             playing = nowPlaying.channel?.id == channel.id,
                             onClick = {
                                 scope.launch { graph.player.play(channel) }

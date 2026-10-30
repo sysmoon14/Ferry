@@ -78,7 +78,7 @@ class ChannelRepository(
 
     private suspend fun storeChannels(src: SourceEntity, entries: Sequence<M3uEntry>): Int {
         // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
-        val existing = db.channels().forSource(src.id).associateBy { it.id }
+        val existing = db.channels().prefsForSource(src.id).associateBy { it.id }
         val channels = entries
             .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing) }
             .distinctBy { it.id }
@@ -156,7 +156,7 @@ class ChannelRepository(
             return digest.take(8).joinToString("") { "%02x".format(it) }
         }
 
-        fun M3uEntry.toChannel(sourceId: Long, index: Int, existing: Map<String, ChannelEntity>): ChannelEntity {
+        fun M3uEntry.toChannel(sourceId: Long, index: Int, existing: Map<String, ChannelPrefs>): ChannelEntity {
             val id = channelId(sourceId, this)
             val prev = existing[id]
             return ChannelEntity(
