@@ -33,7 +33,9 @@ data class GroupSummary(val name: String, val count: Int)
 data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int)
 
 /** Ordering used everywhere a "channel list" is shown: favourites first, user order, then provider order. */
-private const val LIST_ORDER = "favourite DESC, sortOrder, COALESCE(number, 2147483647), position"
+// sourceId keeps each playlist together: otherwise two sources that both number from 1
+// (e.g. BBC iPlayer and an Xtream account) interleave in "All channels".
+private const val LIST_ORDER = "favourite DESC, sortOrder, sourceId, COALESCE(number, 2147483647), position"
 
 @Dao
 interface ChannelDao {
