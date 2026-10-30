@@ -40,6 +40,13 @@ sealed interface PlayTarget {
 
 enum class PlaybackState { IDLE, BUFFERING, PLAYING, PAUSED, ERROR }
 
+/** Which list channel up/down moves through: the one the user started from in the guide. */
+sealed interface ZapScope {
+    data object Favourites : ZapScope
+    data object All : ZapScope
+    data class Group(val name: String) : ZapScope
+}
+
 data class NowPlaying(
     val channel: ChannelEntity? = null,
     val now: ProgrammeEntity? = null,
@@ -125,21 +132,31 @@ class PlayerController(
             ?: db.channels().atPosition(0)
     }
 
+    private var zapScope: ZapScope = ZapScope.All
+
     suspend fun play(target: PlayTarget): Boolean {
         val channel = resolve(target) ?: return false
         play(channel)
         return true
     }
 
-    suspend fun play(channel: ChannelEntity) {
+    /** [scope] defaults to favourites (if starred) or the channel's group, e.g. for HA/deep links. */
+    suspend fun play(channel: ChannelEntity, scope: ZapScope? = null) {
+        zapScope = scope ?: when {
+            channel.favourite -> ZapScope.Favourites
+            channel.groupTitle != null -> ZapScope.Group(channel.groupTitle)
+            else -> ZapScope.All
+        }
+        // Look up now/next first so the banner never flashes "No guide data".
+        val (now, next) = programmesFor(channel)
         // BBC iPlayer channels store candidate service ids; fetch a current stream URL each play.
         val uri = if (BbcIplayer.isBbc(channel.streamUrl)) {
-            _state.update { NowPlaying(channel = channel, state = PlaybackState.BUFFERING) }
+            _state.update { NowPlaying(channel, now, next, PlaybackState.BUFFERING) }
             when (val r = withContext(Dispatchers.IO) { bbc.resolve(channel.streamUrl) }) {
                 is BbcIplayer.Resolved.Ok -> r.url
                 is BbcIplayer.Resolved.Failed -> {
                     withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
-                    _state.update { NowPlaying(channel = channel, state = PlaybackState.ERROR, error = r.reason) }
+                    _state.update { NowPlaying(channel, now, next, PlaybackState.ERROR, r.reason) }
                     return
                 }
             }
@@ -147,7 +164,7 @@ class PlayerController(
         // Set the new channel *before* starting the player, then let the player's own events
         // drive the state. Setting BUFFERING afterwards could overwrite a PLAYING event that
         // already arrived, leaving the status stuck on "buffering" (seen with BBC iPlayer).
-        _state.update { NowPlaying(channel = channel, state = PlaybackState.BUFFERING) }
+        _state.update { NowPlaying(channel, now, next, PlaybackState.BUFFERING) }
         withContext(Dispatchers.Main) {
             player.setMediaItem(
                 MediaItem.Builder()
@@ -160,25 +177,21 @@ class PlayerController(
             sync()
         }
         settings.setLastChannelId(channel.id)
-        refreshProgrammes()
     }
 
-    /**
-     * Channel up/down, wrapping at the ends. Zaps within favourites when the current channel
-     * is one, otherwise within its group (as TiviMate does), never across the whole lineup.
-     */
+    /** Channel up/down through the list playback started from, wrapping at the ends. */
     suspend fun step(delta: Int) {
-        val current = _state.value.channel?.let { db.channels().get(it.id) }
-        val list = when {
-            current == null -> db.channels().favourites().ifEmpty { listOfNotNull(db.channels().atPosition(0)) }
-            current.favourite -> db.channels().favourites()
-            current.groupTitle != null -> db.channels().inGroup(current.groupTitle)
-            else -> listOf(current)
+        val currentId = _state.value.channel?.id
+        val dao = db.channels()
+        val ids: List<String> = when (val z = zapScope) {
+            ZapScope.Favourites -> dao.favourites().map { it.id }
+            is ZapScope.Group -> dao.inGroup(z.name).map { it.id }
+            ZapScope.All -> dao.visibleIds()
         }
-        if (list.isEmpty()) return
-        val index = list.indexOfFirst { it.id == current?.id }
-        val next = if (index < 0) 0 else Math.floorMod(index + delta, list.size)
-        play(list[next])
+        if (ids.isEmpty()) return
+        val index = ids.indexOf(currentId)
+        val nextId = ids[if (index < 0) 0 else Math.floorMod(index + delta, ids.size)]
+        dao.get(nextId)?.let { play(it, zapScope) }
     }
 
     suspend fun stop() {
@@ -190,12 +203,17 @@ class PlayerController(
         if (player.isPlaying) player.pause() else player.play()
     }
 
-    private suspend fun refreshProgrammes() {
-        val channel = _state.value.channel ?: return
+    private suspend fun programmesFor(channel: ChannelEntity): Pair<ProgrammeEntity?, ProgrammeEntity?> {
         val now = System.currentTimeMillis()
-        val upcoming = db.programmes().upcoming(channel.epgKey, now, 2)
+        val upcoming = runCatching { db.programmes().upcoming(channel.epgKey, now, 2) }.getOrDefault(emptyList())
         val current = upcoming.firstOrNull()?.takeIf { it.start <= now }
         val next = if (current != null) upcoming.getOrNull(1) else upcoming.firstOrNull()
+        return current to next
+    }
+
+    private suspend fun refreshProgrammes() {
+        val channel = _state.value.channel ?: return
+        val (current, next) = programmesFor(channel)
         _state.update { if (it.channel?.id == channel.id) it.copy(now = current, next = next) else it }
     }
 }

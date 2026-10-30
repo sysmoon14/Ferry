@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import dev.sysmoon.ferry.ui.FAVOURITES
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
 import dev.sysmoon.ferry.ui.PlayerScreen
@@ -19,6 +20,9 @@ enum class Screen { GUIDE, PLAYER, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf(Screen.GUIDE)
+    // Kept here so the guide's list survives trips to the player and back.
+    private var guideGroup by mutableStateOf(FAVOURITES)
+    private var returnTo by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +32,9 @@ class MainActivity : ComponentActivity() {
             FerryTheme {
                 when (screen) {
                     Screen.GUIDE -> GuideScreen(
+                        selected = guideGroup,
+                        onSelect = { guideGroup = it },
+                        returnTo = returnTo,
                         onOpenPlayer = { screen = Screen.PLAYER },
                         onOpenSettings = { screen = Screen.SETTINGS },
                     )
@@ -35,6 +42,7 @@ class MainActivity : ComponentActivity() {
                         // Leaving the player stops the stream; otherwise audio keeps playing behind
                         // the guide with no picture. (A live preview tile is a later feature.)
                         val leave = {
+                            returnTo = graph.player.state.value.channel?.id
                             screen = Screen.GUIDE
                             lifecycleScope.launch { graph.player.stop() }
                         }

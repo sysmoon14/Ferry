@@ -38,12 +38,17 @@ class XtreamClient(private val http: OkHttpClient) {
     /** Returns live channels as M3uEntry so they share the import path with M3U sources. */
     fun liveChannels(account: Account): List<M3uEntry> {
         checkAuth(account)
-        val categories = getArray(account.api("get_live_categories"))
-            .mapNotNull { it.obj() }
-            .associate { it.str("category_id").orEmpty() to it.str("category_name") }
+        val categoryList = getArray(account.api("get_live_categories")).mapNotNull { it.obj() }
+        val categories = categoryList.associate { it.str("category_id").orEmpty() to it.str("category_name") }
+        // The provider's category order is the group order users expect.
+        val categoryRank = categoryList.withIndex().associate { (i, c) -> c.str("category_id").orEmpty() to i }
 
         return getArray(account.api("get_live_streams")).mapNotNull { el ->
             val o = el.obj() ?: return@mapNotNull null
+            o to (categoryRank[o.str("category_id")] ?: Int.MAX_VALUE)
+        }.sortedBy { it.second } // stable: keeps the provider's order within each group
+            .map { it.first }
+            .mapNotNull { o ->
             val streamId = o.str("stream_id") ?: return@mapNotNull null
             if (o.str("stream_type")?.let { it != "live" && it != "created_live" } == true) return@mapNotNull null
             M3uEntry(

@@ -56,6 +56,10 @@ interface ChannelDao {
     @Query("SELECT * FROM channels WHERE hidden = 0 AND groupTitle = :group ORDER BY $LIST_ORDER")
     suspend fun inGroup(group: String): List<ChannelEntity>
 
+    /** Ids only, in guide order: cheap even for 10k+ channels. */
+    @Query("SELECT id FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER")
+    suspend fun visibleIds(): List<String>
+
     @Query("SELECT * FROM channels WHERE hidden = 0 AND number = :number ORDER BY favourite DESC LIMIT 1")
     suspend fun byNumber(number: Int): ChannelEntity?
 
@@ -86,10 +90,11 @@ interface ChannelDao {
     )
     suspend fun count(q: String, group: String): Int
 
-    @Query("SELECT DISTINCT groupTitle FROM channels WHERE hidden = 0 AND groupTitle IS NOT NULL ORDER BY groupTitle")
+    /** Groups in the provider's order (first appearance), sources in the order they were added. */
+    @Query("SELECT groupTitle FROM channels WHERE hidden = 0 AND groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
     fun observeGroups(): Flow<List<String>>
 
-    @Query("SELECT DISTINCT groupTitle FROM channels WHERE groupTitle IS NOT NULL ORDER BY groupTitle")
+    @Query("SELECT groupTitle FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
     suspend fun groups(): List<String>
 
     /** Only rows the user has customised; everything else is rebuilt from the playlist. */
@@ -127,7 +132,7 @@ interface ChannelDao {
     @Query("UPDATE channels SET hidden = :hidden WHERE groupTitle IN (:groups)")
     suspend fun setGroupsHidden(groups: List<String>, hidden: Boolean)
 
-    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY groupTitle")
+    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
     suspend fun groupSummary(): List<GroupSummary>
 
     @Query("UPDATE channels SET sortOrder = :order WHERE id = :id")

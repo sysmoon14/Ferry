@@ -39,17 +39,31 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.graph
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private const val FAVOURITES = "\u0000fav"
-private const val ALL = "\u0000all"
+const val FAVOURITES = "\u0000fav"
+const val ALL = "\u0000all"
 private const val GUIDE_LIMIT = 1_000
 
 @Composable
-fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
+fun GuideScreen(
+    selected: String,
+    onSelect: (String) -> Unit,
+    /** Channel to scroll to and focus when coming back from the player. */
+    returnTo: String?,
+    onOpenPlayer: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
     val dao = graph.db.channels()
@@ -61,7 +75,6 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
         .collectAsState(initial = emptyList())
     val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
     val nowPlaying by graph.player.state.collectAsState()
-    var selected by remember { mutableStateOf(FAVOURITES) }
 
     val hasFavourites = favourites.isNotEmpty()
     val effective = if (selected == FAVOURITES && !hasFavourites) ALL else selected
@@ -74,12 +87,31 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
     }
     val shown by shownFlow.collectAsState(initial = emptyList())
 
+    // Back from the player: put the list and focus back on the channel that was playing.
+    val listState = rememberLazyListState()
+    val returnFocus = remember { FocusRequester() }
+    var restored by remember { mutableStateOf(false) }
+    LaunchedEffect(shown, returnTo) {
+        if (restored || returnTo == null || shown.isEmpty()) return@LaunchedEffect
+        val index = shown.indexOfFirst { it.id == returnTo }
+        restored = true
+        if (index < 0) return@LaunchedEffect
+        listState.scrollToItem((index - 2).coerceAtLeast(0))
+        withFrameNanos { } // let the row compose before focusing it
+        runCatching { returnFocus.requestFocus() }
+    }
+
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
         // Group rail
         Column(Modifier.width(240.dp).fillMaxHeight()) {
             Text("Ferry", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
             Spacer(Modifier.height(16.dp))
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                // Room for the focused item's scale-up and gold outline at the list edges.
+                contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp),
+            ) {
                 val rail = buildList {
                     if (hasFavourites) add(FAVOURITES to "★ Favourites")
                     add(ALL to "All channels")
@@ -88,7 +120,7 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
                 items(rail, key = { it.first }) { (key, label) ->
                     ListItem(
                         selected = key == effective,
-                        onClick = { selected = key },
+                        onClick = { onSelect(key) },
                         headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = ferryListItemColors(),
                         border = ferryListItemBorder(),
@@ -124,14 +156,26 @@ fun GuideScreen(onOpenPlayer: () -> Unit, onOpenSettings: () -> Unit) {
             if (shown.isEmpty()) {
                 EmptyState(Modifier.weight(1f))
             } else {
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                LazyColumn(
+                    Modifier.weight(1f),
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp),
+                ) {
                     items(shown, key = { it.id }) { channel ->
                         ChannelRow(
                             channel = channel,
                             index = channel.position + 1,
                             playing = nowPlaying.channel?.id == channel.id,
+                            modifier = if (channel.id == returnTo) Modifier.focusRequester(returnFocus) else Modifier,
                             onClick = {
-                                scope.launch { graph.player.play(channel) }
+                                // Zapping follows the list you started from, not the provider's group.
+                                val zap = when (effective) {
+                                    FAVOURITES -> ZapScope.Favourites
+                                    ALL -> ZapScope.All
+                                    else -> ZapScope.Group(effective)
+                                }
+                                scope.launch { graph.player.play(channel, zap) }
                                 onOpenPlayer()
                             },
                         )
@@ -155,7 +199,13 @@ private fun Clock() {
 }
 
 @Composable
-private fun ChannelRow(channel: ChannelEntity, index: Int, playing: Boolean, onClick: () -> Unit) {
+private fun ChannelRow(
+    channel: ChannelEntity,
+    index: Int,
+    playing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val graph = LocalContext.current.graph
     // Per-row lookup is indexed and cheap; swap for a windowed query when the grid view lands.
     val programmes by produceState(initialValue = emptyList(), channel.epgKey) {
@@ -168,6 +218,7 @@ private fun ChannelRow(channel: ChannelEntity, index: Int, playing: Boolean, onC
     ListItem(
         selected = playing,
         onClick = onClick,
+        modifier = modifier,
         colors = ferryListItemColors(),
         border = ferryListItemBorder(),
         leadingContent = {
