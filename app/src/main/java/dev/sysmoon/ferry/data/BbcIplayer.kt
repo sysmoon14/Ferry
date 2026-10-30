@@ -150,7 +150,10 @@ class BbcIplayer(private val http: OkHttpClient) {
             val end = b.str("scheduled_end")?.let(::parseTime) ?: return@mapNotNull null
             val episode = b["episode"] as? JsonObject
             val title = episode?.str("title") ?: b.str("title") ?: return@mapNotNull null
-            val subtitle = episode?.str("subtitle")?.takeIf { it.isNotBlank() && it != title }
+            // News bulletins use the date as their episode title ("30/10/2026"); drop that noise.
+            val subtitle = episode?.str("subtitle")
+                ?.replace(DATE_SUFFIX, "")?.trim()
+                ?.takeIf { it.isNotBlank() && it != title && !DATE_ONLY.matches(it) }
             val synopses = episode?.get("synopses") as? JsonObject
             ProgrammeEntity(
                 channelKey = EPG_PREFIX + ch.key,
@@ -198,6 +201,9 @@ class BbcIplayer(private val http: OkHttpClient) {
         fun atk(service: String): String =
             MessageDigest.getInstance("SHA-1").digest((ATK_KEY + service).toByteArray())
                 .joinToString("") { "%02x".format(it) }
+
+        private val DATE_ONLY = Regex("""\d{1,2}/\d{1,2}/\d{4}""")
+        private val DATE_SUFFIX = Regex(""":?\s*\d{1,2}/\d{1,2}/\d{4}$""")
 
         const val DEFAULT_REGION = "bbc_one_north_west"
         val REGIONS: Map<String, Region> = listOf(

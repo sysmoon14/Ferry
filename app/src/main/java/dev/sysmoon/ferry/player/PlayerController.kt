@@ -144,6 +144,10 @@ class PlayerController(
                 }
             }
         } else channel.streamUrl
+        // Set the new channel *before* starting the player, then let the player's own events
+        // drive the state. Setting BUFFERING afterwards could overwrite a PLAYING event that
+        // already arrived, leaving the status stuck on "buffering" (seen with BBC iPlayer).
+        _state.update { NowPlaying(channel = channel, state = PlaybackState.BUFFERING) }
         withContext(Dispatchers.Main) {
             player.setMediaItem(
                 MediaItem.Builder()
@@ -153,8 +157,8 @@ class PlayerController(
             )
             player.prepare()
             player.playWhenReady = true
+            sync()
         }
-        _state.update { NowPlaying(channel = channel, state = PlaybackState.BUFFERING) }
         settings.setLastChannelId(channel.id)
         refreshProgrammes()
     }
