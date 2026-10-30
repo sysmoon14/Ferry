@@ -46,18 +46,52 @@ class CatchupProbe(private val http: OkHttpClient) {
             add("device ${ZoneId.systemDefault().id}" to ZoneId.systemDefault())
         }.distinctBy { it.second.normalized() }
 
+        // The portal host often only redirects live streams to a separate streaming server;
+        // timeshift may need that server directly.
+        val bases = buildList {
+            add("portal" to base)
+            serverInfoBase(base, user, pass)?.let { add("server_info" to it) }
+            redirectBase(streamUrl)?.let { add("live redirect" to it) }
+        }.distinctBy { it.second }
+
         val attempts = mutableListOf<Attempt>()
-        for ((zoneLabel, zone) in zones) {
+        for ((baseLabel, b) in bases) for ((zoneLabel, zone) in zones) {
             val s = Instant.ofEpochMilli(start).atZone(zone).format(stamp)
             listOf(
-                "path .ts ($zoneLabel)" to "$base/timeshift/$user/$pass/$minutes/$s/$id.ts",
-                "path .m3u8 ($zoneLabel)" to "$base/timeshift/$user/$pass/$minutes/$s/$id.m3u8",
-                "timeshift.php ($zoneLabel)" to
-                    "$base/streaming/timeshift.php?username=$user&password=$pass&stream=$id&start=$s&duration=$minutes",
+                "$baseLabel path .ts ($zoneLabel)" to "$b/timeshift/$user/$pass/$minutes/$s/$id.ts",
+                "$baseLabel path .m3u8 ($zoneLabel)" to "$b/timeshift/$user/$pass/$minutes/$s/$id.m3u8",
+                "$baseLabel timeshift.php ($zoneLabel)" to
+                    "$b/streaming/timeshift.php?username=$user&password=$pass&stream=$id&start=$s&duration=$minutes",
             ).forEach { (label, url) -> attempts += attempt(label, url) }
         }
-        return Report(title, start, stop, serverTz, attempts, archive(base, user, pass, id, start))
+        val hosts = bases.map { (l, b) -> "$l=" + b.substringAfter("://").substringBefore('/') }
+        return Report(title, start, stop, serverTz, attempts, hosts + archive(base, user, pass, id, start))
     }
+
+    private val noRedirect by lazy { http.newBuilder().followRedirects(false).followSslRedirects(false).build() }
+
+    /** scheme://host:port of the streaming server a live URL redirects to, if it redirects. */
+    private fun redirectBase(streamUrl: String): String? = runCatching {
+        noRedirect.newCall(Request.Builder().url(streamUrl).header("User-Agent", ChannelRepository.USER_AGENT).build())
+            .execute().use { r ->
+                val loc = r.header("Location") ?: return null
+                val u = okhttp3.HttpUrl.Builder().let { r.request.url.resolve(loc) } ?: return null
+                "${u.scheme}://${u.host}:${u.port}"
+            }
+    }.getOrNull()
+
+    /** server_info from player_api: the panel's advertised streaming host and port. */
+    private fun serverInfoBase(base: String, user: String, pass: String): String? = runCatching {
+        val root = http.newCall(
+            Request.Builder().url("$base/player_api.php?username=$user&password=$pass")
+                .header("User-Agent", ChannelRepository.USER_AGENT).build()
+        ).execute().use { json.parseToJsonElement(it.body?.string().orEmpty()) }
+        val info = (root as? JsonObject)?.get("server_info") as? JsonObject ?: return null
+        val host = info.str("url")?.takeIf { it.isNotBlank() } ?: return null
+        val https = info.str("server_protocol") == "https"
+        val port = (if (https) info.str("https_port") else info.str("port"))?.takeIf { it.isNotBlank() }
+        "${if (https) "https" else "http"}://$host" + (port?.let { ":$it" } ?: "")
+    }.getOrNull()
 
     private fun attempt(label: String, url: String): Attempt = runCatching {
         http.newCall(
