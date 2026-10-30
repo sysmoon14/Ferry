@@ -117,7 +117,7 @@ class ChannelRepository(
         val cutoff = now - 3_600_000L
         // Channels with catch-up keep their past programmes for the archive window (max 7 days).
         val archive = db.channels().catchupKeys(src.id)
-            .associate { it.key to now - it.days.coerceAtMost(7) * 86_400_000L }
+            .associate { it.epgKey to now - it.days.coerceAtMost(7) * 86_400_000L }
         val batch = ArrayList<ProgrammeEntity>(BATCH)
         db.programmes().deleteForSource(src.id)
         open(url).use { input ->
