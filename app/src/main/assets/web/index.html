@@ -52,6 +52,13 @@
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line);
            padding: 10px 16px; border-radius: 999px; display: none; z-index: 5; }
   code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip.on { background: var(--gold); border-color: var(--gold); color: #08111d; font-weight: 600; }
+  .chip.part { border-color: var(--gold); }
+  label.grp { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); margin: 0; color: var(--text); font-size: 15px; cursor: pointer; }
+  label.grp input { width: 20px; height: 20px; flex: none; accent-color: var(--gold); }
+  .sticky { position: sticky; bottom: 0; background: var(--panel); padding: 12px 0 4px; border-top: 1px solid var(--line); }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--sea); color: #08111d; font-weight: 600; }
@@ -72,6 +79,7 @@
   <nav id="tabs">
     <button data-tab="now" class="on">Now</button>
     <button data-tab="sources">Sources</button>
+    <button data-tab="groups">Groups</button>
     <button data-tab="channels">Channels</button>
     <button data-tab="favs">Favourites</button>
     <button data-tab="ha">Home Assistant</button>
@@ -126,6 +134,27 @@
         <div class="actions">
           <button class="btn" id="srcSave">Add source</button>
           <button class="btn ghost" id="srcCancel" hidden>Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Groups -->
+    <section id="groups">
+      <div class="card">
+        <h2>Show only these groups</h2>
+        <p class="muted small">Unticked groups disappear from the TV and Home Assistant, including channels your provider adds to them later.</p>
+        <div class="chips" id="prefixChips"></div>
+        <div class="row">
+          <input id="grpQ" placeholder="Filter groups" type="search">
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="grpAll">Tick shown</button>
+          <button class="btn ghost" id="grpNone">Untick shown</button>
+        </div>
+        <div id="grpList" style="margin-top:8px"></div>
+        <div class="sticky">
+          <div class="row"><span class="muted small" id="grpSummary"></span>
+            <button class="btn" id="grpSave" style="flex:none" disabled>Save</button></div>
         </div>
       </div>
     </section>
@@ -366,6 +395,53 @@
   $("hideGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: true } }); loadChannels(); };
   $("showGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: false } }); loadChannels(); };
   loaders.channels = () => { loadGroups(); loadChannels(); };
+
+  // ---------- Groups ("show only these")
+  let groups = [], picked = new Set(), groupsDirty = false;
+  // Providers usually prefix groups by country/region: "UK | Sports", "US | News".
+  const prefixOf = (n) => { const i = n.indexOf(" | "); return i > 0 && i <= 8 ? n.slice(0, i).trim() : null; };
+  function groupsShown() {
+    const q = $("grpQ").value.trim().toLowerCase();
+    return q ? groups.filter(g => g.name.toLowerCase().includes(q)) : groups;
+  }
+  function renderGroups() {
+    const shown = groupsShown();
+    // prefix chips: on = all ticked, part = some ticked
+    const byPrefix = new Map();
+    groups.forEach(g => { const p = prefixOf(g.name); if (p) (byPrefix.get(p) || byPrefix.set(p, []).get(p)).push(g); });
+    const prefixes = [...byPrefix.entries()].filter(([, gs]) => gs.length > 1).sort((a, b) => a[0].localeCompare(b[0]));
+    $("prefixChips").replaceChildren(...prefixes.map(([p, gs]) => {
+      const n = gs.filter(g => picked.has(g.name)).length;
+      const chip = el("button", { className: "chip" + (n === gs.length ? " on" : n ? " part" : "") }, `${p} · ${gs.length}`);
+      chip.onclick = () => { const on = n !== gs.length; gs.forEach(g => on ? picked.add(g.name) : picked.delete(g.name)); dirty(); };
+      return chip;
+    }));
+    $("grpList").replaceChildren(...shown.map(g => {
+      const box = el("input", { type: "checkbox", checked: picked.has(g.name) });
+      box.onchange = () => { box.checked ? picked.add(g.name) : picked.delete(g.name); dirty(false); };
+      return el("label", { className: "grp" }, box, el("span", { className: "grow" }, g.name), el("span", { className: "muted small" }, String(g.count)));
+    }));
+    summary();
+  }
+  function summary() {
+    const chosen = groups.filter(g => picked.has(g.name));
+    $("grpSummary").textContent = `${chosen.length} of ${groups.length} groups · ${chosen.reduce((a, g) => a + g.count, 0).toLocaleString()} channels`;
+    $("grpSave").disabled = !groupsDirty;
+  }
+  function dirty(rerender = true) { groupsDirty = true; rerender ? renderGroups() : summary(); }
+  $("grpQ").oninput = renderGroups;
+  $("grpAll").onclick = () => { groupsShown().forEach(g => picked.add(g.name)); dirty(); };
+  $("grpNone").onclick = () => { groupsShown().forEach(g => picked.delete(g.name)); dirty(); };
+  $("grpSave").onclick = async () => {
+    $("grpSave").disabled = true;
+    try { await api("/groups/visible", { method: "PUT", body: { visible: [...picked] } }); groupsDirty = false; summary(); toast("Saved — the TV updates straight away"); }
+    catch (e) { toast(e.message); $("grpSave").disabled = false; }
+  };
+  loaders.groups = async () => {
+    groups = await api("/groups/detail");
+    picked = new Set(groups.filter(g => !g.hidden).map(g => g.name));
+    groupsDirty = false; renderGroups();
+  };
 
   // ---------- Favourites order (buttons rather than drag: works on phones)
   let favs = [];

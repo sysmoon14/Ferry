@@ -61,6 +61,8 @@ fun ChannelEntity.toDto() = ChannelDto(id, name, tvgId, logo, groupTitle, number
 @Serializable data class ChannelPage(val total: Int, val items: List<ChannelDto>)
 @Serializable data class ChannelPatch(val favourite: Boolean? = null, val hidden: Boolean? = null)
 @Serializable data class GroupPatch(val group: String, val hidden: Boolean)
+@Serializable data class GroupDto(val name: String, val count: Int, val hidden: Boolean)
+@Serializable data class VisibleGroupsRequest(val visible: List<String>)
 @Serializable data class OrderRequest(val ids: List<String>)
 
 @Serializable

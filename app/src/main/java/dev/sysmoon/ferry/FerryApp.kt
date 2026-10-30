@@ -33,7 +33,7 @@ class AppGraph(val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
-    val repository = ChannelRepository(db, http)
+    val repository = ChannelRepository(db, http, settings)
     val player = PlayerController(context, db, settings, scope)
     val commands = RemoteCommands(this)
     val mqtt = MqttBridge(this)

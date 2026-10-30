@@ -22,6 +22,7 @@ import java.util.zip.GZIPInputStream
 class ChannelRepository(
     private val db: FerryDatabase,
     private val http: OkHttpClient,
+    private val settings: Settings,
 ) {
     private val refreshLock = Mutex()
     private val xtream = XtreamClient(http)
@@ -79,8 +80,9 @@ class ChannelRepository(
     private suspend fun storeChannels(src: SourceEntity, entries: Sequence<M3uEntry>): Int {
         // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
         val existing = db.channels().prefsForSource(src.id).associateBy { it.id }
+        val hiddenGroups = settings.hiddenGroups()
         val channels = entries
-            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing) }
+            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing, hiddenGroups) }
             .distinctBy { it.id }
             .toList()
         require(channels.isNotEmpty()) { "No live channels found" }
@@ -156,7 +158,12 @@ class ChannelRepository(
             return digest.take(8).joinToString("") { "%02x".format(it) }
         }
 
-        fun M3uEntry.toChannel(sourceId: Long, index: Int, existing: Map<String, ChannelPrefs>): ChannelEntity {
+        fun M3uEntry.toChannel(
+            sourceId: Long,
+            index: Int,
+            existing: Map<String, ChannelPrefs>,
+            hiddenGroups: Set<String> = emptySet(),
+        ): ChannelEntity {
             val id = channelId(sourceId, this)
             val prev = existing[id]
             return ChannelEntity(
@@ -170,7 +177,7 @@ class ChannelRepository(
                 position = index,
                 number = number,
                 favourite = prev?.favourite ?: false,
-                hidden = prev?.hidden ?: false,
+                hidden = prev?.hidden ?: (group != null && group in hiddenGroups),
                 sortOrder = prev?.sortOrder ?: Int.MAX_VALUE,
             )
         }

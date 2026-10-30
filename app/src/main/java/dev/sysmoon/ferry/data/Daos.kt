@@ -28,6 +28,8 @@ interface SourceDao {
     suspend fun delete(id: Long)
 }
 
+data class GroupSummary(val name: String, val count: Int)
+
 data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int)
 
 /** Ordering used everywhere a "channel list" is shown: favourites first, user order, then provider order. */
@@ -120,6 +122,13 @@ interface ChannelDao {
 
     @Query("UPDATE channels SET hidden = :hidden WHERE groupTitle = :group")
     suspend fun setGroupHidden(group: String, hidden: Boolean)
+
+    /** Callers chunk [groups] to stay under SQLite's bound-variable limit. */
+    @Query("UPDATE channels SET hidden = :hidden WHERE groupTitle IN (:groups)")
+    suspend fun setGroupsHidden(groups: List<String>, hidden: Boolean)
+
+    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY groupTitle")
+    suspend fun groupSummary(): List<GroupSummary>
 
     @Query("UPDATE channels SET sortOrder = :order WHERE id = :id")
     suspend fun setSortOrder(id: String, order: Int)

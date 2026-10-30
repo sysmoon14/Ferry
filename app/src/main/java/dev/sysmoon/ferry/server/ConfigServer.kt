@@ -35,6 +35,7 @@ import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.Frame
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -160,7 +161,25 @@ class ConfigServer(private val g: AppGraph) {
                 get("/groups") { call.respond(g.db.channels().groups()) }
                 post("/groups/hidden") {
                     val req = call.receive<GroupPatch>()
+                    val hidden = g.settings.hiddenGroups()
+                    g.settings.setHiddenGroups(if (req.hidden) hidden + req.group else hidden - req.group)
                     g.db.channels().setGroupHidden(req.group, req.hidden)
+                    call.respond(OkDto())
+                }
+                get("/groups/detail") {
+                    val hidden = g.settings.hiddenGroups()
+                    call.respond(g.db.channels().groupSummary().map { GroupDto(it.name, it.count, it.name in hidden) })
+                }
+                // "Show only these groups": everything not listed is hidden, now and on future refreshes.
+                put("/groups/visible") {
+                    val visible = call.receive<VisibleGroupsRequest>().visible.toSet()
+                    val all = g.db.channels().groups().toSet()
+                    val hidden = all - visible
+                    g.settings.setHiddenGroups(hidden)
+                    g.db.withTransaction {
+                        hidden.chunked(500).forEach { g.db.channels().setGroupsHidden(it, true) }
+                        (all intersect visible).chunked(500).forEach { g.db.channels().setGroupsHidden(it, false) }
+                    }
                     call.respond(OkDto())
                 }
                 get("/channels") {

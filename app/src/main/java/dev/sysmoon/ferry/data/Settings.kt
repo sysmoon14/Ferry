@@ -37,6 +37,7 @@ class Settings(private val context: Context) {
         val pin = stringPreferencesKey("pair_pin")
         val tokens = stringSetPreferencesKey("tokens")
         val lastChannel = stringPreferencesKey("last_channel")
+        val hiddenGroups = stringSetPreferencesKey("hidden_groups")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -84,6 +85,10 @@ class Settings(private val context: Context) {
     suspend fun tokens(): Set<String> = store.data.first()[Keys.tokens] ?: emptySet()
     suspend fun addToken(token: String) = store.edit { it[Keys.tokens] = (it[Keys.tokens] ?: emptySet()) + token }
     suspend fun revokeAllTokens() = store.edit { it[Keys.tokens] = emptySet() }
+
+    /** Groups the user has hidden; applied to new channels on every refresh. */
+    suspend fun hiddenGroups(): Set<String> = store.data.first()[Keys.hiddenGroups] ?: emptySet()
+    suspend fun setHiddenGroups(groups: Set<String>) = store.edit { it[Keys.hiddenGroups] = groups }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]
     suspend fun setLastChannelId(id: String) = store.edit { it[Keys.lastChannel] = id }
