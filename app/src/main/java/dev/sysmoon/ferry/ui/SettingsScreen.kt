@@ -77,7 +77,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
                 OutlinedButton(onClick = { scope.launch { graph.settings.regeneratePin() } }) { Text("New PIN") }
                 OutlinedButton(onClick = { scope.launch { graph.settings.revokeAllTokens() } }) {
-                    Text("Unpair all devices")
+                    Text("Unpair all")
                 }
             }
         }
