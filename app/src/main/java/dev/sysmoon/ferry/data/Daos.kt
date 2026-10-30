@@ -158,6 +158,10 @@ interface ProgrammeDao {
     @Query("DELETE FROM programmes WHERE sourceId = :sourceId")
     suspend fun deleteForSource(sourceId: Long)
 
+    /** Re-emits whenever the programmes table changes (e.g. an EPG refresh lands). */
+    @Query("SELECT COUNT(*) FROM programmes")
+    fun observeCount(): Flow<Int>
+
     @Query("DELETE FROM programmes WHERE stop < :before")
     suspend fun deleteEndedBefore(before: Long)
 

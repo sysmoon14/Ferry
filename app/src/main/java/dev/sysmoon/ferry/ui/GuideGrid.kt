@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.catch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
@@ -72,7 +74,7 @@ private const val LOAD_BUCKET_MS = 3 * 3_600_000L   // programmes are loaded in 
 private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
-private val CHANNEL_COL: Dp = 230.dp
+private val CHANNEL_COL: Dp = 300.dp
 private val ROW_HEIGHT: Dp = 62.dp
 
 private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
@@ -108,8 +110,9 @@ fun GuideGrid(
     BackHandler(enabled = windowStart != nowSlot) { windowStart = nowSlot }
 
     val bucket = Math.floorDiv(windowStart, LOAD_BUCKET_MS)
-    val reload = now / (10 * 60_000L)
-    val programmes by produceState(emptyMap<String, List<ProgrammeEntity>>(), channels, bucket, reload) {
+    // Reload when guide data changes (a refresh replaces it), not just on a timer.
+    val epgVersion by remember { graph.db.programmes().observeCount().catch { emit(-1) } }.collectAsState(initial = 0)
+    val programmes by produceState(emptyMap<String, List<ProgrammeEntity>>(), channels, bucket, epgVersion) {
         val from = bucket * LOAD_BUCKET_MS - LOAD_BUCKET_MS
         val until = bucket * LOAD_BUCKET_MS + 3 * LOAD_BUCKET_MS
         val keys = channels.map { it.epgKey }.distinct()
