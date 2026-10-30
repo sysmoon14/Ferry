@@ -125,3 +125,6 @@ fun NowPlaying.toStatus(deviceName: String) = StatusDto(
     nextStart = next?.start,
     error = error,
 )
+
+@Serializable data class BbcRegionDto(val id: String, val label: String)
+@Serializable data class BbcCheckDto(val channel: String, val ok: Boolean, val service: String?, val detail: String)

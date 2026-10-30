@@ -4,14 +4,14 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-enum class SourceType { M3U, XTREAM }
+enum class SourceType { M3U, XTREAM, BBC }
 
 @Entity(tableName = "sources")
 data class SourceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val type: SourceType,
-    /** M3U: playlist URL. Xtream: server base URL (http://host:port). */
+    /** M3U: playlist URL. Xtream: server base URL (http://host:port). BBC: BBC One region service id. */
     val url: String,
     val username: String? = null,
     val password: String? = null,

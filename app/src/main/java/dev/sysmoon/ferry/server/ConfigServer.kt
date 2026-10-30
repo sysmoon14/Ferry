@@ -2,6 +2,9 @@ package dev.sysmoon.ferry.server
 
 import android.util.Log
 import dev.sysmoon.ferry.AppGraph
+import dev.sysmoon.ferry.data.BbcIplayer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import dev.sysmoon.ferry.data.SourceEntity
 import dev.sysmoon.ferry.mqtt.MqttBridge
 import dev.sysmoon.ferry.player.PlayTarget
@@ -157,6 +160,24 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(HttpStatusCode.Accepted, OkDto())
                 }
 
+                // ---- BBC iPlayer
+                get("/bbc/regions") {
+                    call.respond(BbcIplayer.REGIONS.values.map { BbcRegionDto(it.id, it.label) })
+                }
+                // Resolves every BBC channel from this device (UK checks need the TV's own connection).
+                get("/bbc/check") {
+                    val region = call.request.queryParameters["region"] ?: BbcIplayer.DEFAULT_REGION
+                    val results = withContext(Dispatchers.IO) {
+                        g.bbc.lineup(region).map { ch ->
+                            when (val r = g.bbc.resolve(BbcIplayer.SCHEME + ch.services.joinToString(","))) {
+                                is BbcIplayer.Resolved.Ok -> BbcCheckDto(ch.name, true, r.service, r.url.substringBefore('?').take(120))
+                                is BbcIplayer.Resolved.Failed -> BbcCheckDto(ch.name, false, null, r.reason)
+                            }
+                        }
+                    }
+                    call.respond(results)
+                }
+
                 // ---- Channels
                 get("/groups") { call.respond(g.db.channels().groups()) }
                 post("/groups/hidden") {
@@ -268,6 +289,12 @@ class ConfigServer(private val g: AppGraph) {
 
     private fun SourceInput.validated(): SourceInput {
         require(name.isNotBlank()) { "Name is required" }
+        if (type == dev.sysmoon.ferry.data.SourceType.BBC) {
+            // url carries the BBC One region; no credentials or EPG URL needed.
+            val region = url.trim().takeIf { it in BbcIplayer.REGIONS } ?: BbcIplayer.DEFAULT_REGION
+            return copy(name = name.trim(), url = region, username = null, password = null, epgUrl = null,
+                refreshHours = refreshHours.coerceIn(1, 168))
+        }
         require(url.startsWith("http://") || url.startsWith("https://")) { "URL must start with http:// or https://" }
         require(refreshHours in 1..168) { "Refresh must be 1–168 hours" }
         return copy(name = name.trim(), url = url.trim(), epgUrl = epgUrl?.trim()?.ifBlank { null })

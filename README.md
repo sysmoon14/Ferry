@@ -45,6 +45,18 @@ adb shell appops set dev.sysmoon.ferry SYSTEM_ALERT_WINDOW allow
 
 Without it, MQTT/API commands still work while Ferry is open; from the background, use the Android TV Remote deep link below instead.
 
+## BBC iPlayer (optional, UK only)
+
+Add a source of type **BBC iPlayer** in the web UI and pick your BBC One region. Ferry adds BBC One
+(your region), Two, Three, Four, News, Parliament, CBBC, CBeebies, Scotland, Alba and S4C as their
+own **BBC iPlayer** group, separate from your playlists, with schedules from iPlayer.
+
+- Stream addresses are fetched from the BBC each time a channel is played (HD first, SD fallback).
+- UK only; a TV Licence is required to watch live TV.
+- Unofficial: it uses the same public request as Streamlink (see `NOTICE.md`) and may break if the
+  BBC changes things. No DRM is involved and Ferry doesn't bypass any.
+- The ✓ button next to the source in the web UI checks every channel from the TV's own connection.
+
 ## Home Assistant
 
 ### MQTT entities (one device per TV)

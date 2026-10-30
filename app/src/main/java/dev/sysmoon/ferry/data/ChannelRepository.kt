@@ -23,6 +23,7 @@ class ChannelRepository(
     private val db: FerryDatabase,
     private val http: OkHttpClient,
     private val settings: Settings,
+    private val bbc: BbcIplayer,
 ) {
     private val refreshLock = Mutex()
     private val xtream = XtreamClient(http)
@@ -58,9 +59,11 @@ class ChannelRepository(
                         ).asSequence(),
                     )
                     SourceType.M3U -> refreshChannels(src, playlistUrl)
+                    SourceType.BBC -> storeChannels(src, bbc.entries(bbcRegion(src)).asSequence())
                 }
                 Log.i(TAG, "${src.name}: $count channels in ${System.currentTimeMillis() - started}ms")
-                epgUrl?.let { refreshEpg(src, it) }
+                if (src.type == SourceType.BBC) refreshBbcSchedules(src)
+                else epgUrl?.let { refreshEpg(src, it) }
                 db.sources().update(
                     src.copy(lastRefreshed = System.currentTimeMillis(), lastError = null, channelCount = count)
                 )
@@ -92,6 +95,16 @@ class ChannelRepository(
         }
         return channels.size
     }
+
+    private suspend fun refreshBbcSchedules(src: SourceEntity) {
+        val programmes = bbc.schedules(bbcRegion(src), src.id)
+        db.programmes().deleteForSource(src.id)
+        programmes.chunked(BATCH).forEach { db.programmes().insert(it) }
+        Log.i(TAG, "${src.name}: ${programmes.size} BBC schedule entries")
+    }
+
+    private fun bbcRegion(src: SourceEntity) =
+        src.url.takeIf { it in BbcIplayer.REGIONS } ?: BbcIplayer.DEFAULT_REGION
 
     private suspend fun refreshEpg(src: SourceEntity, url: String) {
         val keys = db.channels().epgKeys(src.id).toHashSet()
@@ -133,6 +146,7 @@ class ChannelRepository(
 
         fun resolveUrls(src: SourceEntity): Pair<String, String?> = when (src.type) {
             SourceType.M3U -> src.url to src.epgUrl?.takeIf { it.isNotBlank() }
+            SourceType.BBC -> "" to null
             SourceType.XTREAM -> {
                 val base = src.url.trimEnd('/')
                 val auth = "username=${enc(src.username)}&password=${enc(src.password)}"

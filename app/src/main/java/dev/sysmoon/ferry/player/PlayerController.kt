@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
+import dev.sysmoon.ferry.data.BbcIplayer
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.ChannelRepository
@@ -63,6 +64,7 @@ class PlayerController(
     private val db: FerryDatabase,
     private val settings: Settings,
     private val scope: CoroutineScope,
+    private val bbc: BbcIplayer,
 ) {
     private val _state = MutableStateFlow(NowPlaying())
     val state: StateFlow<NowPlaying> = _state.asStateFlow()
@@ -130,10 +132,22 @@ class PlayerController(
     }
 
     suspend fun play(channel: ChannelEntity) {
+        // BBC iPlayer channels store candidate service ids; fetch a current stream URL each play.
+        val uri = if (BbcIplayer.isBbc(channel.streamUrl)) {
+            _state.update { NowPlaying(channel = channel, state = PlaybackState.BUFFERING) }
+            when (val r = withContext(Dispatchers.IO) { bbc.resolve(channel.streamUrl) }) {
+                is BbcIplayer.Resolved.Ok -> r.url
+                is BbcIplayer.Resolved.Failed -> {
+                    withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
+                    _state.update { NowPlaying(channel = channel, state = PlaybackState.ERROR, error = r.reason) }
+                    return
+                }
+            }
+        } else channel.streamUrl
         withContext(Dispatchers.Main) {
             player.setMediaItem(
                 MediaItem.Builder()
-                    .setUri(channel.streamUrl)
+                    .setUri(uri)
                     .setMediaId(channel.id)
                     .build()
             )

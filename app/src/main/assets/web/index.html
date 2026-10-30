@@ -121,15 +121,24 @@
         <div class="seg" id="srcType">
           <button data-type="M3U" class="on">M3U URL</button>
           <button data-type="XTREAM">Xtream Codes</button>
+          <button data-type="BBC">BBC iPlayer</button>
+        </div>
+        <div id="bbcFields" hidden>
+          <p class="muted small" style="margin-top:12px">Adds BBC channels from iPlayer as their own <b>BBC iPlayer</b> group. UK only, and a TV Licence is required. Unofficial, so it may stop working if the BBC changes things.</p>
+          <label>BBC One region</label><select id="sRegion"></select>
         </div>
         <label>Name</label><input id="sName" placeholder="My provider">
+        <div id="urlFields">
         <label id="sUrlLabel">Playlist URL</label><input id="sUrl" placeholder="http://…/playlist.m3u" inputmode="url">
+        </div>
         <div id="xtreamFields" hidden>
           <label>Username</label><input id="sUser" autocomplete="off">
           <label>Password</label><input id="sPass" type="password" autocomplete="new-password" placeholder="">
         </div>
+        <div id="epgFields">
         <label>EPG URL <span class="muted">(XMLTV, .xml or .xml.gz — optional for Xtream)</span></label>
         <input id="sEpg" placeholder="http://…/epg.xml.gz" inputmode="url">
+        </div>
         <label>Refresh every (hours)</label><input id="sRefresh" type="number" min="1" max="168" value="12">
         <div class="actions">
           <button class="btn" id="srcSave">Add source</button>
@@ -314,9 +323,33 @@
     srcType = t;
     document.querySelectorAll("#srcType button").forEach(b => b.classList.toggle("on", b.dataset.type === t));
     $("xtreamFields").hidden = t !== "XTREAM";
+    $("bbcFields").hidden = t !== "BBC";
+    $("urlFields").hidden = t === "BBC";
+    $("epgFields").hidden = t === "BBC";
+    if (t === "BBC") { loadRegions(); if (!$("sName").value) $("sName").value = "BBC iPlayer"; }
     $("sUrlLabel").textContent = t === "XTREAM" ? "Server URL" : "Playlist URL";
     $("sUrl").placeholder = t === "XTREAM" ? "http://provider.example:8080" : "http://…/playlist.m3u";
   }
+  let regionsLoaded = false;
+  async function loadRegions(selected) {
+    if (!regionsLoaded) {
+      const regions = await api("/bbc/regions");
+      $("sRegion").replaceChildren(...regions.map(r => el("option", { value: r.id }, r.label)));
+      $("sRegion").value = "bbc_one_north_west";
+      regionsLoaded = true;
+    }
+    if (selected) $("sRegion").value = selected;
+  }
+  async function checkBbc(region) {
+    toast("Checking BBC streams from the TV…");
+    try {
+      const res = await api(`/bbc/check?region=${encodeURIComponent(region)}`);
+      const ok = res.filter(r => r.ok).length;
+      alert(`${ok} of ${res.length} BBC channels available\n\n` +
+        res.map(r => `${r.ok ? "✓" : "✕"} ${r.channel}${r.ok ? ` (${r.service})` : ` — ${r.detail}`}`).join("\n"));
+    } catch (e) { toast(e.message); }
+  }
+
   function resetForm() {
     editing = null; setType("M3U");
     ["sName", "sUrl", "sUser", "sPass", "sEpg"].forEach(id => $(id).value = "");
@@ -326,7 +359,7 @@
   $("srcCancel").onclick = resetForm;
   $("srcSave").onclick = async () => {
     const body = {
-      name: $("sName").value, type: srcType, url: $("sUrl").value,
+      name: $("sName").value, type: srcType, url: srcType === "BBC" ? $("sRegion").value : $("sUrl").value,
       username: srcType === "XTREAM" ? $("sUser").value : null,
       password: srcType === "XTREAM" ? ($("sPass").value || (editing ? null : "")) : null,
       epgUrl: $("sEpg").value || null, refreshHours: +$("sRefresh").value || 12,
@@ -343,18 +376,20 @@
     $("srcEmpty").hidden = list.length > 0;
     $("srcList").replaceChildren(...list.map(s => el("li", {},
       el("div", { className: "grow" },
-        el("div", {}, s.name, " ", el("span", { className: "pill" }, s.type === "XTREAM" ? "Xtream" : "M3U")),
+        el("div", {}, s.name, " ", el("span", { className: "pill" }, { XTREAM: "Xtream", BBC: "BBC", M3U: "M3U" }[s.type] || s.type)),
         el("div", { className: "small " + (s.lastError ? "bad" : "muted") },
           s.lastError ? `⚠ ${s.lastError}` :
           s.lastRefreshed ? `${s.channelCount} channels · updated ${new Date(s.lastRefreshed).toLocaleString()}` : "Importing…")),
       el("button", { className: "icon", title: "Refresh", onclick: async () => { await api(`/sources/${s.id}/refresh`, { method: "POST" }); toast("Refreshing"); setTimeout(loadSources, 4000); } }, "↻"),
+      s.type === "BBC" ? el("button", { className: "icon", title: "Check BBC streams", onclick: () => checkBbc(s.url) }, "✓") : "",
       el("button", { className: "icon", title: "Edit", onclick: () => edit(s) }, "✎"),
       el("button", { className: "icon", title: "Delete", onclick: async () => { if (confirm(`Delete ${s.name} and its channels?`)) { await api(`/sources/${s.id}`, { method: "DELETE" }); loadSources(); } } }, "✕"),
     )));
   }
   function edit(s) {
     editing = s.id; setType(s.type);
-    $("sName").value = s.name; $("sUrl").value = s.url; $("sUser").value = s.username || "";
+    $("sName").value = s.name; $("sUrl").value = s.type === "BBC" ? "" : s.url; $("sUser").value = s.username || "";
+    if (s.type === "BBC") loadRegions(s.url);
     $("sPass").value = ""; $("sPass").placeholder = s.hasPassword ? "•••••• (unchanged)" : "";
     $("sEpg").value = s.epgUrl || ""; $("sRefresh").value = s.refreshHours;
     $("srcFormTitle").textContent = `Edit ${s.name}`; $("srcSave").textContent = "Save"; $("srcCancel").hidden = false;
