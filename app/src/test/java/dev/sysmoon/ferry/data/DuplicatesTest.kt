@@ -39,6 +39,9 @@ class DuplicatesTest {
         assertEquals("Sky Sports F1", StreamQuality.displayName("Sky Sports F1 1080p50"))
         assertEquals("UK | ITV1", StreamQuality.displayName("UK | ITV1 HD"))
         assertEquals("BBC Alba", StreamQuality.displayName("BBC Alba"))
+        assertEquals("Sky Sports Main Event", StreamQuality.displayName("Sky Sports Main Event FHD (5.1)"))
+        assertEquals("Sky Sports Main Event", StreamQuality.displayName("Sky Sports Main Event HVEC HB (1080p)"))
+        assertTrue(StreamQuality.parse("X HVEC HB (1080p)").score > StreamQuality.parse("X HVEC LB (1080p)").score)
         assertEquals(StreamQuality.matchKey("Channel 4 HD"), StreamQuality.matchKey("Channel 4 SD"))
         assertTrue(StreamQuality.matchKey("Channel 4") != StreamQuality.matchKey("Channel 4 +1"))
     }
@@ -56,14 +59,16 @@ class DuplicatesTest {
                 ch("e", "Channel 4 HD", "channel4.uk", 4),
                 ch("f", "No EPG HD", null, 5),
                 ch("g", "No EPG SD", null, 6),
-                ch("h", "Disney Jr. HD", "disneyjr.uk", 7, group = "UK HEVC"), // other group
+                ch("h", "Disney Jr. HEVC HB (1080p)", "disneyjr.uk", 7, group = "UK HEVC"), // other group
+                ch("i", "Disney Jr. UHD", "disneyjr.uk", 8, group = "UK 4K").copy(hidden = true), // hidden group
             ),
             enabled = true,
         ).associateBy { it.id }
 
         val primary = merged.getValue("b")
         assertNull(primary.primaryId)
-        assertEquals(3, primary.streamCount)
+        assertEquals(4, primary.streamCount)
+        assertEquals("UK", primary.groupTitle)
         assertEquals(0, primary.position)        // takes the group's first slot
         assertTrue(primary.favourite)            // keeps the favourite from the SD copy
         assertEquals("b", merged.getValue("a").primaryId)
@@ -74,8 +79,9 @@ class DuplicatesTest {
         assertNull(merged.getValue("e").primaryId)
         assertNull(merged.getValue("f").primaryId)
         assertNull(merged.getValue("g").primaryId)
-        assertNull(merged.getValue("h").primaryId)
-        assertEquals(1, merged.getValue("h").streamCount)
+        assertEquals("b", merged.getValue("h").primaryId) // same channel from the HEVC group
+        assertNull(merged.getValue("i").primaryId)         // hidden 4K copy is never used
+        assertEquals(1, merged.getValue("i").streamCount)
     }
 
     @Test fun disabledLeavesEveryChannelStandalone() {
