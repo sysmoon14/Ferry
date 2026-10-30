@@ -24,6 +24,7 @@ class ChannelRepository(
     private val http: OkHttpClient,
 ) {
     private val refreshLock = Mutex()
+    private val xtream = XtreamClient(http)
 
     suspend fun addSource(source: SourceEntity): Long = db.sources().insert(source)
 
@@ -47,7 +48,17 @@ class ChannelRepository(
             val src = db.sources().get(sourceId) ?: return@withContext
             try {
                 val (playlistUrl, epgUrl) = resolveUrls(src)
-                val count = refreshChannels(src, playlistUrl)
+                val started = System.currentTimeMillis()
+                val count = when (src.type) {
+                    SourceType.XTREAM -> storeChannels(
+                        src,
+                        xtream.liveChannels(
+                            XtreamClient.Account(src.url.trimEnd('/'), src.username.orEmpty(), src.password.orEmpty())
+                        ).asSequence(),
+                    )
+                    SourceType.M3U -> refreshChannels(src, playlistUrl)
+                }
+                Log.i(TAG, "${src.name}: $count channels in ${System.currentTimeMillis() - started}ms")
                 epgUrl?.let { refreshEpg(src, it) }
                 db.sources().update(
                     src.copy(lastRefreshed = System.currentTimeMillis(), lastError = null, channelCount = count)
@@ -59,16 +70,20 @@ class ChannelRepository(
         }
     }
 
-    private suspend fun refreshChannels(src: SourceEntity, url: String): Int {
+    private suspend fun refreshChannels(src: SourceEntity, url: String): Int =
+        open(url).bufferedReader().use { reader ->
+            // Xtream-style M3Us also list films and series; Ferry is live TV only.
+            storeChannels(src, M3uParser.parse(reader).filterNot { it.isVod() })
+        }
+
+    private suspend fun storeChannels(src: SourceEntity, entries: Sequence<M3uEntry>): Int {
         // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
         val existing = db.channels().forSource(src.id).associateBy { it.id }
-        val channels = open(url).bufferedReader().use { reader ->
-            M3uParser.parse(reader)
-                .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing) }
-                .distinctBy { it.id }
-                .toList()
-        }
-        require(channels.isNotEmpty()) { "Playlist was empty or not M3U" }
+        val channels = entries
+            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing) }
+            .distinctBy { it.id }
+            .toList()
+        require(channels.isNotEmpty()) { "No live channels found" }
         db.withTransaction {
             db.channels().deleteForSource(src.id)
             channels.chunked(500).forEach { db.channels().upsert(it) }
@@ -127,7 +142,13 @@ class ChannelRepository(
         private fun enc(s: String?) = URLEncoder.encode(s.orEmpty(), "UTF-8")
 
         /** Never log or surface credentials in errors. */
-        fun redact(url: String) = url.replace(Regex("(username|password)=[^&]*"), "$1=***")
+        fun redact(url: String) = url
+            .replace(Regex("(username|password)=[^&]*"), "$1=***")
+            .replace(Regex("/(live|movie|series)/[^/]+/[^/]+/"), "/$1/***/***/")
+
+        private val VOD_PATH = Regex("/(movie|series)/[^/]+/[^/]+/")
+        private val VOD_EXT = Regex("\\.(mkv|mp4|avi|m4v)(\\?.*)?$", RegexOption.IGNORE_CASE)
+        fun M3uEntry.isVod() = VOD_PATH.containsMatchIn(url) || VOD_EXT.containsMatchIn(url)
 
         fun channelId(sourceId: Long, entry: M3uEntry): String {
             val raw = "$sourceId|${entry.tvgId.orEmpty()}|${entry.name}"
