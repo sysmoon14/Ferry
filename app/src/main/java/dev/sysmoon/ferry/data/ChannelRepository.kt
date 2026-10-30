@@ -42,7 +42,7 @@ class ChannelRepository(
         db.sources().all()
             .filter { force || now - it.lastRefreshed > it.refreshHours * 3_600_000L }
             .forEach { refresh(it.id) }
-        db.programmes().deleteEndedBefore(now - 6 * 3_600_000L)
+        db.programmes().deleteEndedBefore(now - 8 * 86_400_000L) // catch-up archive window
     }
 
     suspend fun refresh(sourceId: Long) = refreshLock.withLock {
@@ -51,13 +51,15 @@ class ChannelRepository(
             try {
                 val (playlistUrl, epgUrl) = resolveUrls(src)
                 val started = System.currentTimeMillis()
+                var timezone = src.serverTimezone
                 val count = when (src.type) {
-                    SourceType.XTREAM -> storeChannels(
-                        src,
-                        xtream.liveChannels(
+                    SourceType.XTREAM -> {
+                        val live = xtream.liveChannels(
                             XtreamClient.Account(src.url.trimEnd('/'), src.username.orEmpty(), src.password.orEmpty())
-                        ).asSequence(),
-                    )
+                        )
+                        timezone = live.timezone ?: timezone
+                        storeChannels(src, live.entries.asSequence())
+                    }
                     SourceType.M3U -> refreshChannels(src, playlistUrl)
                     SourceType.BBC -> storeChannels(src, bbc.entries(bbcRegion(src)).asSequence())
                 }
@@ -65,7 +67,10 @@ class ChannelRepository(
                 if (src.type == SourceType.BBC) refreshBbcSchedules(src)
                 else epgUrl?.let { refreshEpg(src, it) }
                 db.sources().update(
-                    src.copy(lastRefreshed = System.currentTimeMillis(), lastError = null, channelCount = count)
+                    src.copy(
+                        lastRefreshed = System.currentTimeMillis(), lastError = null, channelCount = count,
+                        serverTimezone = timezone,
+                    )
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "Refresh failed for ${src.name}", e)
@@ -108,12 +113,16 @@ class ChannelRepository(
 
     private suspend fun refreshEpg(src: SourceEntity, url: String) {
         val keys = db.channels().epgKeys(src.id).toHashSet()
-        val cutoff = System.currentTimeMillis() - 3_600_000L
+        val now = System.currentTimeMillis()
+        val cutoff = now - 3_600_000L
+        // Channels with catch-up keep their past programmes for the archive window (max 7 days).
+        val archive = db.channels().catchupKeys(src.id)
+            .associate { it.key to now - it.days.coerceAtMost(7) * 86_400_000L }
         val batch = ArrayList<ProgrammeEntity>(BATCH)
         db.programmes().deleteForSource(src.id)
         open(url).use { input ->
             XmltvParser.parse(input, Xml.newPullParser(), accept = { it in keys }) { p ->
-                if (p.stop < cutoff) return@parse
+                if (p.stop < (archive[p.channel] ?: cutoff)) return@parse
                 batch += ProgrammeEntity(p.channel, p.start, p.stop, p.title, p.description, src.id)
                 if (batch.size >= BATCH) {
                     // Parser callback isn't suspending; we're already on Dispatchers.IO.
@@ -190,6 +199,7 @@ class ChannelRepository(
                 streamUrl = url,
                 position = index,
                 number = number,
+                catchupDays = catchupDays ?: 0,
                 favourite = prev?.favourite ?: false,
                 hidden = prev?.hidden ?: (group != null && group in hiddenGroups),
                 sortOrder = prev?.sortOrder ?: Int.MAX_VALUE,

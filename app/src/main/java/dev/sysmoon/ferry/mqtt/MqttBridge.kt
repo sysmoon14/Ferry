@@ -194,6 +194,7 @@ class MqttBridge(private val g: AppGraph) {
         put("next_start", s.next?.start?.let { Instant.ofEpochMilli(it).toString() })
         put("progress", s.progress?.let { (it * 100).toInt() })
         put("error", s.error)
+        put("catchup", s.catchup)
         putJsonObject("deep_link") {
             s.channel?.let { ch -> put("url", ch.tvgId?.let { "ferry://tvg/$it" } ?: "ferry://channel/${ch.id}") }
         }

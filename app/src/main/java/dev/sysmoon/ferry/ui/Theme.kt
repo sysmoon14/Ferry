@@ -81,3 +81,12 @@ fun ferryOutlinedButtonColors() = OutlinedButtonDefaults.colors(
     focusedContainerColor = FerryColors.Gold,
     focusedContentColor = FerryColors.Deep,
 )
+
+/** Subtle, header-sized button: transparent until focused, then gold. */
+@Composable
+fun ferryOutlinedButtonColorsAsButton() = ButtonDefaults.colors(
+    containerColor = Color.Transparent,
+    contentColor = FerryColors.Muted,
+    focusedContainerColor = FerryColors.Gold,
+    focusedContentColor = FerryColors.Deep,
+)

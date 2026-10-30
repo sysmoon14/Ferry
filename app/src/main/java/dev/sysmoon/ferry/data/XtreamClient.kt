@@ -35,15 +35,34 @@ class XtreamClient(private val http: OkHttpClient) {
         val epgUrl get() = "$base/xmltv.php?username=${enc(username)}&password=${enc(password)}"
     }
 
-    /** Returns live channels as M3uEntry so they share the import path with M3U sources. */
-    fun liveChannels(account: Account): List<M3uEntry> {
-        checkAuth(account)
+    companion object {
+        private val LIVE_URL = Regex("""^(.*)/live/([^/]+)/([^/]+)/([^/.]+)\.\w+$""")
+        private val TIMESHIFT_START = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd:HH-mm")
+
+        /**
+         * Xtream catch-up ("timeshift") URL for a live stream URL, or null if it isn't an Xtream
+         * live URL. [start] is given in the server's time zone, [minutes] is the programme length.
+         */
+        fun timeshiftUrl(liveUrl: String, start: Long, stop: Long, timezone: String?): String? {
+            val (base, user, pass, id) = LIVE_URL.find(liveUrl)?.destructured ?: return null
+            val zone = runCatching { java.time.ZoneId.of(timezone ?: "") }.getOrNull() ?: java.time.ZoneId.systemDefault()
+            val startText = java.time.Instant.ofEpochMilli(start).atZone(zone).format(TIMESHIFT_START)
+            val minutes = ((stop - start + 59_999) / 60_000).coerceAtLeast(1)
+            return "$base/timeshift/$user/$pass/$minutes/$startText/$id.ts"
+        }
+    }
+
+    data class Live(val entries: List<M3uEntry>, val timezone: String?)
+
+    /** Live channels as M3uEntry (shared import path with M3U), plus the server's time zone. */
+    fun liveChannels(account: Account): Live {
+        val timezone = checkAuth(account)
         val categoryList = getArray(account.api("get_live_categories")).mapNotNull { it.obj() }
         val categories = categoryList.associate { it.str("category_id").orEmpty() to it.str("category_name") }
         // The provider's category order is the group order users expect.
         val categoryRank = categoryList.withIndex().associate { (i, c) -> c.str("category_id").orEmpty() to i }
 
-        return getArray(account.api("get_live_streams")).mapNotNull { el ->
+        val entries = getArray(account.api("get_live_streams")).mapNotNull { el ->
             val o = el.obj() ?: return@mapNotNull null
             o to (categoryRank[o.str("category_id")] ?: Int.MAX_VALUE)
         }.sortedBy { it.second } // stable: keeps the provider's order within each group
@@ -62,10 +81,14 @@ class XtreamClient(private val http: OkHttpClient) {
                 catchupDays = o.str("tv_archive_duration")?.toIntOrNull()?.takeIf { o.str("tv_archive") == "1" },
             )
         }
+        return Live(entries, timezone)
     }
 
-    /** player_api.php with no action returns user_info; auth failures come back as status/auth 0. */
-    private fun checkAuth(account: Account) {
+    /**
+     * player_api.php with no action returns user_info; auth failures come back as status/auth 0.
+     * Returns server_info.timezone, which catch-up URLs are expressed in.
+     */
+    private fun checkAuth(account: Account): String? {
         val info = open(account.api()).use { json.decodeFromStream<JsonElement>(it) }.obj()
             ?: error("Xtream server didn't return account info — check the server URL")
         val user = info["user_info"]?.obj() ?: error("Xtream login failed — check username and password")
@@ -73,6 +96,7 @@ class XtreamClient(private val http: OkHttpClient) {
         user.str("status")?.let { status ->
             if (!status.equals("Active", ignoreCase = true)) error("Xtream account status: $status")
         }
+        return (info["server_info"]?.obj())?.str("timezone")?.takeIf { it.isNotBlank() }
     }
 
     @OptIn(ExperimentalSerializationApi::class)

@@ -28,6 +28,8 @@ interface SourceDao {
     suspend fun delete(id: Long)
 }
 
+data class KeyDays(val key: String, val days: Int)
+
 data class GroupSummary(val name: String, val count: Int)
 
 data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int)
@@ -108,6 +110,13 @@ interface ChannelDao {
 
     @Query("SELECT DISTINCT COALESCE(tvgId, name) FROM channels WHERE sourceId = :sourceId")
     suspend fun epgKeys(sourceId: Long): List<String>
+
+    /** EPG keys that have catch-up, so their past programmes are kept for the archive window. */
+    @Query(
+        """SELECT COALESCE(tvgId, name) AS key, MAX(catchupDays) AS days FROM channels
+           WHERE sourceId = :sourceId AND catchupDays > 0 GROUP BY key"""
+    )
+    suspend fun catchupKeys(sourceId: Long): List<KeyDays>
 
     @Query("SELECT * FROM channels WHERE id = :id")
     suspend fun get(id: String): ChannelEntity?

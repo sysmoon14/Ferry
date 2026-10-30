@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     // Kept here so the guide's list survives trips to the player and back.
     private var guideGroup by mutableStateOf(FAVOURITES)
     private var returnTo by mutableStateOf<String?>(null)
+    private var gridView by mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +36,8 @@ class MainActivity : ComponentActivity() {
                         selected = guideGroup,
                         onSelect = { guideGroup = it },
                         returnTo = returnTo,
+                        gridView = gridView,
+                        onToggleView = { gridView = !gridView },
                         onOpenPlayer = { screen = Screen.PLAYER },
                         onOpenSettings = { screen = Screen.SETTINGS },
                     )

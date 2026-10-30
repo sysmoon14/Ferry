@@ -112,6 +112,7 @@ data class StatusDto(
     val next: String?,
     val nextStart: Long?,
     val error: String?,
+    val catchup: Boolean = false,
 )
 
 fun NowPlaying.toStatus(deviceName: String) = StatusDto(
@@ -124,6 +125,7 @@ fun NowPlaying.toStatus(deviceName: String) = StatusDto(
     next = next?.title,
     nextStart = next?.start,
     error = error,
+    catchup = catchup,
 )
 
 @Serializable data class BbcRegionDto(val id: String, val label: String)

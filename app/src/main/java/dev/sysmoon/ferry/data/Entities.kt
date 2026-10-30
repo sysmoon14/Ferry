@@ -1,5 +1,6 @@
 package dev.sysmoon.ferry.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -21,6 +22,8 @@ data class SourceEntity(
     val lastRefreshed: Long = 0,
     val lastError: String? = null,
     val channelCount: Int = 0,
+    /** Xtream server time zone (from server_info); catch-up start times are in this zone. */
+    val serverTimezone: String? = null,
 )
 
 @Entity(
@@ -40,6 +43,8 @@ data class ChannelEntity(
     val position: Int,
     /** Provider channel number (tvg-chno) if supplied. */
     val number: Int?,
+    /** Days of catch-up the provider keeps for this channel (0 = none). */
+    @ColumnInfo(defaultValue = "0") val catchupDays: Int = 0,
     // User-owned fields, preserved across refreshes
     val favourite: Boolean = false,
     val hidden: Boolean = false,

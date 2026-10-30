@@ -78,8 +78,9 @@ fun PlayerScreen(onBack: () -> Unit) {
             .onKeyEvent { e ->
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (e.key) {
-                    Key.DirectionUp, Key.ChannelUp -> { scope.launch { graph.player.step(-1) }; true }
-                    Key.DirectionDown, Key.ChannelDown -> { scope.launch { graph.player.step(1) }; true }
+                    // Up = next channel (higher in the list order), like a normal TV remote.
+                    Key.DirectionUp, Key.ChannelUp -> { graph.player.zap(1); true }
+                    Key.DirectionDown, Key.ChannelDown -> { graph.player.zap(-1); true }
                     Key.DirectionCenter, Key.Enter, Key.Info -> { overlayToken++; true }
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { scope.launch { graph.player.togglePause() }; true }
                     Key.Back, Key.Escape, Key.Guide, Key.DirectionLeft -> { onBack(); true }
@@ -124,6 +125,7 @@ fun PlayerScreen(onBack: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(ch.name, style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
                     Spacer(Modifier.width(16.dp))
+                    if (state.catchup) Text("CATCH-UP  ", color = FerryColors.Sea, style = MaterialTheme.typography.labelLarge)
                     if (state.state == PlaybackState.BUFFERING) Text("Tuning…", color = FerryColors.Muted)
                 }
                 Spacer(Modifier.height(8.dp))

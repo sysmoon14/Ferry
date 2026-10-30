@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import dev.sysmoon.ferry.data.BbcIplayer
+import dev.sysmoon.ferry.data.XtreamClient
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.ChannelRepository
@@ -21,6 +22,7 @@ import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +55,8 @@ data class NowPlaying(
     val next: ProgrammeEntity? = null,
     val state: PlaybackState = PlaybackState.IDLE,
     val error: String? = null,
+    /** True when playing a past programme from the provider's archive; [now] is that programme. */
+    val catchup: Boolean = false,
 ) {
     val progress: Float?
         get() = now?.let {
@@ -133,6 +137,22 @@ class PlayerController(
     }
 
     private var zapScope: ZapScope = ZapScope.All
+    private var playJob: Job? = null
+
+    /**
+     * Fire-and-forget start for UI callers. Runs in the app scope so it survives the guide
+     * leaving the screen (BBC channels fetch a stream URL first and were being cancelled),
+     * and cancels any start still in flight so rapid zapping can't land out of order.
+     */
+    fun start(channel: ChannelEntity, scope: ZapScope? = null) {
+        playJob?.cancel()
+        playJob = this.scope.launch { play(channel, scope) }
+    }
+
+    fun zap(delta: Int) {
+        playJob?.cancel()
+        playJob = scope.launch { step(delta) }
+    }
 
     suspend fun play(target: PlayTarget): Boolean {
         val channel = resolve(target) ?: return false
@@ -179,6 +199,34 @@ class PlayerController(
         settings.setLastChannelId(channel.id)
     }
 
+    /** Catch-up is possible for programmes that have ended (or started) within the archive window. */
+    fun canCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, now: Long = System.currentTimeMillis()): Boolean =
+        channel.catchupDays > 0 &&
+            programme.start < now &&
+            programme.start > now - channel.catchupDays * 86_400_000L &&
+            XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, null) != null
+
+    /** Plays [programme] from the provider's archive (Xtream timeshift). */
+    fun startCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, scope: ZapScope? = null) {
+        playJob?.cancel()
+        playJob = this.scope.launch {
+            zapScope = scope ?: zapScope
+            val tz = db.sources().get(channel.sourceId)?.serverTimezone
+            val url = XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, tz)
+            if (url == null) {
+                _state.update { NowPlaying(channel, programme, null, PlaybackState.ERROR, "Catch-up not available", true) }
+                return@launch
+            }
+            _state.update { NowPlaying(channel, programme, null, PlaybackState.BUFFERING, catchup = true) }
+            withContext(Dispatchers.Main) {
+                player.setMediaItem(MediaItem.Builder().setUri(url).setMediaId("${channel.id}@${programme.start}").build())
+                player.prepare()
+                player.playWhenReady = true
+                sync()
+            }
+        }
+    }
+
     /** Channel up/down through the list playback started from, wrapping at the ends. */
     suspend fun step(delta: Int) {
         val currentId = _state.value.channel?.id
@@ -212,6 +260,7 @@ class PlayerController(
     }
 
     private suspend fun refreshProgrammes() {
+        if (_state.value.catchup) return // [now] is the archived programme being watched
         val channel = _state.value.channel ?: return
         val (current, next) = programmesFor(channel)
         _state.update { if (it.channel?.id == channel.id) it.copy(now = current, next = next) else it }

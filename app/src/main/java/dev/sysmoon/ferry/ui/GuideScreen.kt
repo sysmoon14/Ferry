@@ -61,6 +61,8 @@ fun GuideScreen(
     onSelect: (String) -> Unit,
     /** Channel to scroll to and focus when coming back from the player. */
     returnTo: String?,
+    gridView: Boolean,
+    onToggleView: () -> Unit,
     onOpenPlayer: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -151,10 +153,28 @@ fun GuideScreen(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = onToggleView,
+                    colors = ferryOutlinedButtonColorsAsButton(),
+                    modifier = Modifier.padding(end = 20.dp),
+                ) { Text(if (gridView) "List view" else "Guide view") }
                 Clock()
+            }
+            val zapScope = when (effective) {
+                FAVOURITES -> ZapScope.Favourites
+                ALL -> ZapScope.All
+                else -> ZapScope.Group(effective)
             }
             if (shown.isEmpty()) {
                 EmptyState(Modifier.weight(1f))
+            } else if (gridView) {
+                GuideGrid(
+                    channels = shown,
+                    zap = zapScope,
+                    returnTo = returnTo,
+                    onOpenPlayer = onOpenPlayer,
+                    modifier = Modifier.weight(1f),
+                )
             } else {
                 LazyColumn(
                     Modifier.weight(1f),
@@ -168,14 +188,10 @@ fun GuideScreen(
                             index = channel.position + 1,
                             playing = nowPlaying.channel?.id == channel.id,
                             modifier = if (channel.id == returnTo) Modifier.focusRequester(returnFocus) else Modifier,
+                            onLongClick = { scope.launch { dao.setFavourite(channel.id, !channel.favourite) } },
                             onClick = {
                                 // Zapping follows the list you started from, not the provider's group.
-                                val zap = when (effective) {
-                                    FAVOURITES -> ZapScope.Favourites
-                                    ALL -> ZapScope.All
-                                    else -> ZapScope.Group(effective)
-                                }
-                                scope.launch { graph.player.play(channel, zap) }
+                                graph.player.start(channel, zapScope)
                                 onOpenPlayer()
                             },
                         )
@@ -205,6 +221,7 @@ private fun ChannelRow(
     playing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val graph = LocalContext.current.graph
     // Per-row lookup is indexed and cheap; swap for a windowed query when the grid view lands.
@@ -218,6 +235,7 @@ private fun ChannelRow(
     ListItem(
         selected = playing,
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = modifier,
         colors = ferryListItemColors(),
         border = ferryListItemBorder(),

@@ -13,8 +13,8 @@ class RemoteCommands(private val graph: AppGraph) {
 
     suspend fun key(key: String): Boolean {
         when (key.lowercase().trim()) {
-            "up", "channel_up", "prev", "previous" -> graph.player.step(-1)
-            "down", "channel_down", "next" -> graph.player.step(1)
+            "up", "channel_up", "next" -> graph.player.step(1)
+            "down", "channel_down", "prev", "previous" -> graph.player.step(-1)
             "stop" -> graph.player.stop()
             "pause", "play_pause", "toggle" -> graph.player.togglePause()
             "last" -> play(PlayTarget.Last)
