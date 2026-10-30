@@ -3,6 +3,8 @@ package dev.sysmoon.ferry.server
 import android.util.Log
 import dev.sysmoon.ferry.AppGraph
 import dev.sysmoon.ferry.data.BbcIplayer
+import dev.sysmoon.ferry.data.CatchupProbe
+import dev.sysmoon.ferry.data.epgKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import dev.sysmoon.ferry.data.SourceEntity
@@ -176,6 +178,24 @@ class ConfigServer(private val g: AppGraph) {
                         }
                     }
                     call.respond(results)
+                }
+
+                // ---- Diagnostics: which catch-up URL shape this provider accepts.
+                // ?channel=<id>[&ago=<minutes>] probes the latest programme that ended at least `ago` minutes ago.
+                get("/debug/catchup") {
+                    val id = call.request.queryParameters["channel"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorDto("channel required"))
+                    val ago = (call.request.queryParameters["ago"]?.toLongOrNull() ?: 0) * 60_000
+                    val channel = g.db.channels().get(id) ?: return@get call.respond(HttpStatusCode.NotFound, ErrorDto("no such channel"))
+                    val stream = g.player.streamsFor(channel).firstOrNull { it.catchupDays > 0 } ?: channel
+                    val now = System.currentTimeMillis()
+                    val programme = g.db.programmes().window(listOf(stream.epgKey), now - 6 * 3_600_000L, now)
+                        .filter { it.stop <= now - ago }.maxByOrNull { it.start }
+                        ?: return@get call.respond(HttpStatusCode.NotFound, ErrorDto("no recent programme"))
+                    val tz = g.db.sources().get(stream.sourceId)?.serverTimezone
+                    val report = withContext(Dispatchers.IO) {
+                        CatchupProbe(g.http).probe(stream.streamUrl, programme.title, programme.start, programme.stop, tz)
+                    }
+                    call.respond(report)
                 }
 
                 // ---- Options
