@@ -158,8 +158,8 @@ class PlayerController(
             else -> listOf(current)
         }
         if (list.isEmpty()) return
-        val current = list.indexOfFirst { it.id == _state.value.channel?.id }
-        val next = if (current < 0) 0 else Math.floorMod(current + delta, list.size)
+        val index = list.indexOfFirst { it.id == current?.id }
+        val next = if (index < 0) 0 else Math.floorMod(index + delta, list.size)
         play(list[next])
     }
 
