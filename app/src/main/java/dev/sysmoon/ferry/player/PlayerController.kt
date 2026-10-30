@@ -118,7 +118,7 @@ class PlayerController(
                 if (!_state.value.catchup && streamIndex + 1 < streams.size) {
                     failover("failed")
                 } else {
-                    _state.update { it.copy(state = PlaybackState.ERROR, error = error.errorCodeName) }
+                    _state.update { it.copy(state = PlaybackState.ERROR, error = describe(error, it.catchup)) }
                 }
             }
         })
@@ -345,6 +345,25 @@ class PlayerController(
 
     companion object {
         private const val STALL_TIMEOUT_MS = 12_000L
+
+        /** Plain-language reason for a playback failure; falls back to ExoPlayer's code name. */
+        fun describe(error: PlaybackException, catchup: Boolean): String {
+            var cause: Throwable? = error
+            while (cause != null) {
+                val code = (cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+                    ?: Regex("""\((\d{3})\)""").find(cause.message.orEmpty())?.groupValues?.get(1)?.toInt()
+                        ?.takeIf { cause is java.net.ProtocolException }
+                if (code != null) return when (code) {
+                    401, 403 -> "provider refused the stream (HTTP $code) — check the account is active"
+                    404 -> if (catchup) "provider has no recording of this programme (HTTP 404)" else "stream not found (HTTP 404)"
+                    407, 429, 458 -> "provider refused the stream (HTTP $code) — usually the account's connection limit is in use"
+                    in 500..599 -> "provider server error (HTTP $code)"
+                    else -> "HTTP $code from provider"
+                }
+                cause = cause.cause
+            }
+            return error.errorCodeName
+        }
     }
 
     private suspend fun refreshProgrammes() {

@@ -123,7 +123,8 @@ fun PlayerScreen(onBack: () -> Unit) {
 
         if (state.state == PlaybackState.ERROR) {
             Text(
-                if (state.streamCount > 1) "None of this channel's ${state.streamCount} streams would play (${state.error ?: "unknown error"}). Up/Down to try another channel."
+                if (state.catchup) "Couldn't play this recording (${state.error ?: "unknown error"}). Back to return to the guide."
+                else if (state.streamCount > 1) "None of this channel's ${state.streamCount} streams would play (${state.error ?: "unknown error"}). Up/Down to try another channel."
                 else "Couldn't play this channel (${state.error ?: "unknown error"}). Up/Down to try another.",
                 modifier = Modifier.align(Alignment.Center).background(FerryColors.Navy).padding(24.dp),
             )
