@@ -89,16 +89,18 @@ class ChannelRepository(
         // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
         val existing = db.channels().prefsForSource(src.id).associateBy { it.id }
         val hiddenGroups = settings.hiddenGroups()
-        val channels = entries
+        val parsed = entries
             .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing, hiddenGroups) }
             .distinctBy { it.id }
             .toList()
-        require(channels.isNotEmpty()) { "No live channels found" }
+        require(parsed.isNotEmpty()) { "No live channels found" }
+        val channels = Duplicates.merge(parsed, settings.mergeDuplicates())
+        Log.i(TAG, "${src.name}: ${channels.count { it.primaryId != null }} duplicate streams folded")
         db.withTransaction {
             db.channels().deleteForSource(src.id)
             channels.chunked(500).forEach { db.channels().upsert(it) }
         }
-        return channels.size
+        return channels.count { it.primaryId == null }
     }
 
     private suspend fun refreshBbcSchedules(src: SourceEntity) {

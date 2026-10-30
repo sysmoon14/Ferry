@@ -59,6 +59,7 @@ import coil.compose.AsyncImage
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.epgKey
+import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.delay
@@ -91,6 +92,8 @@ fun GuideGrid(
     zap: ZapScope,
     returnTo: String?,
     onOpenPlayer: () -> Unit,
+    /** Long press: open the channel menu (favourite, stream picker). */
+    onMenu: (ChannelEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = LocalContext.current.graph
@@ -175,7 +178,7 @@ fun GuideGrid(
                             // Future, or past without an archive: nothing to play.
                         }
                     },
-                    onLongPress = { scope.launch { graph.db.channels().setFavourite(channel.id, !channel.favourite) } },
+                    onLongPress = { onMenu(channel) },
                 )
             }
         }
@@ -190,7 +193,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     Column(Modifier.fillMaxWidth().height(132.dp).padding(start = 4.dp, bottom = 8.dp)) {
         val (channel, p) = focused ?: return@Column
         Text(
-            p?.title ?: channel.name,
+            p?.title ?: channel.displayName,
             style = MaterialTheme.typography.headlineSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -201,7 +204,8 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
                     val dayText = if (floorDay(p.start) == floorDay(now)) "Today" else day.format(Date(p.start))
                     add("$dayText ${time.format(Date(p.start))}–${time.format(Date(p.stop))}")
                 }
-                add(channel.name)
+                if (p != null) add(channel.displayName)
+                if (channel.streamCount > 1) add("${channel.streamCount} streams")
             }
             Text(bits.joinToString("  ·  "), color = FerryColors.Muted)
             when {
@@ -212,7 +216,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
         }
         p?.description?.let {
             Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
     }
 }
 
@@ -298,7 +302,7 @@ private fun GridRow(
                 else Text(channel.name.take(3).uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
             }
             Text(
-                (if (channel.favourite) "★ " else "") + channel.name,
+                (if (channel.favourite) "★ " else "") + channel.displayName,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
@@ -356,7 +360,8 @@ private fun GridRow(
                             focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(6.dp)),
                         ),
                     ) {
-                        Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Very short programmes are too narrow for any text; the detail panel names them.
+                        if (w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 when {
                                     p == null -> "No guide data"

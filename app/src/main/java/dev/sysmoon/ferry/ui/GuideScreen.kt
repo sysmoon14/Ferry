@@ -37,6 +37,10 @@ import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
+import dev.sysmoon.ferry.data.displayName
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import dev.sysmoon.ferry.graph
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.PaddingValues
@@ -88,6 +92,14 @@ fun GuideScreen(
         }.catch { emit(emptyList()) }
     }
     val shown by shownFlow.collectAsState(initial = emptyList())
+    val zapScope = when (effective) {
+        FAVOURITES -> ZapScope.Favourites
+        ALL -> ZapScope.All
+        else -> ZapScope.Group(effective)
+    }
+    // Long-press menu (favourite + stream picker) for this channel, if open.
+    var menuFor by remember { mutableStateOf<ChannelEntity?>(null) }
+    menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer) }
 
     // Back from the player: put the list and focus back on the channel that was playing.
     val listState = rememberLazyListState()
@@ -160,11 +172,6 @@ fun GuideScreen(
                 ) { Text(if (gridView) "List view" else "Guide view") }
                 Clock()
             }
-            val zapScope = when (effective) {
-                FAVOURITES -> ZapScope.Favourites
-                ALL -> ZapScope.All
-                else -> ZapScope.Group(effective)
-            }
             if (shown.isEmpty()) {
                 EmptyState(Modifier.weight(1f))
             } else if (gridView) {
@@ -173,6 +180,7 @@ fun GuideScreen(
                     zap = zapScope,
                     returnTo = returnTo,
                     onOpenPlayer = onOpenPlayer,
+                    onMenu = { menuFor = it },
                     modifier = Modifier.weight(1f),
                 )
             } else {
@@ -188,7 +196,7 @@ fun GuideScreen(
                             index = channel.position + 1,
                             playing = nowPlaying.channel?.id == channel.id,
                             modifier = if (channel.id == returnTo) Modifier.focusRequester(returnFocus) else Modifier,
-                            onLongClick = { scope.launch { dao.setFavourite(channel.id, !channel.favourite) } },
+                            onLongClick = { menuFor = channel },
                             onClick = {
                                 // Zapping follows the list you started from, not the provider's group.
                                 graph.player.start(channel, zapScope)
@@ -262,7 +270,13 @@ private fun ChannelRow(
         },
         headlineContent = {
             Text(
-                (if (channel.favourite) "★ " else "") + channel.name,
+                buildAnnotatedString {
+                    if (channel.favourite) append("★ ")
+                    append(channel.displayName)
+                    if (channel.streamCount > 1) {
+                        withStyle(SpanStyle(color = FerryColors.Muted)) { append("   ${channel.streamCount} streams") }
+                    }
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

@@ -28,7 +28,7 @@ data class SourceEntity(
 
 @Entity(
     tableName = "channels",
-    indices = [Index("sourceId"), Index("tvgId"), Index("favourite"), Index("groupTitle")],
+    indices = [Index("sourceId"), Index("tvgId"), Index("favourite"), Index("groupTitle"), Index("primaryId")],
 )
 data class ChannelEntity(
     /** Stable across refreshes: hash of source + tvg-id + name (URLs often carry rotating tokens). */
@@ -45,6 +45,12 @@ data class ChannelEntity(
     val number: Int?,
     /** Days of catch-up the provider keeps for this channel (0 = none). */
     @ColumnInfo(defaultValue = "0") val catchupDays: Int = 0,
+    /** Set on a duplicate (backup / other quality) of another channel: the id of the row shown in lists. */
+    val primaryId: String? = null,
+    /** Stream quality score from [StreamQuality]; higher plays first. */
+    @ColumnInfo(defaultValue = "0") val quality: Int = 0,
+    /** On a primary: how many streams the row has (itself + duplicates). */
+    @ColumnInfo(defaultValue = "1") val streamCount: Int = 1,
     // User-owned fields, preserved across refreshes
     val favourite: Boolean = false,
     val hidden: Boolean = false,
@@ -53,6 +59,9 @@ data class ChannelEntity(
 
 /** Key used to match XMLTV <programme channel="...">. Extension so Room doesn't try to map it. */
 val ChannelEntity.epgKey: String get() = tvgId ?: name
+
+/** Name for lists: merged rows drop the quality tags that only described one of their streams. */
+val ChannelEntity.displayName: String get() = if (streamCount > 1) StreamQuality.displayName(name) else name
 
 @Entity(
     tableName = "programmes",

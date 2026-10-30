@@ -1,6 +1,7 @@
 package dev.sysmoon.ferry.server
 
 import dev.sysmoon.ferry.data.ChannelEntity
+import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.data.MqttConfig
 import dev.sysmoon.ferry.data.SourceEntity
 import dev.sysmoon.ferry.data.SourceType
@@ -54,9 +55,14 @@ data class ChannelDto(
     val number: Int?,
     val favourite: Boolean,
     val hidden: Boolean,
+    /** Streams folded into this row (1 = no duplicates). */
+    val streams: Int = 1,
+    val catchupDays: Int = 0,
 )
 
-fun ChannelEntity.toDto() = ChannelDto(id, name, tvgId, logo, groupTitle, number, favourite, hidden)
+fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle, number, favourite, hidden, streamCount, catchupDays)
+
+@Serializable data class OptionsDto(val mergeDuplicates: Boolean)
 
 @Serializable data class ChannelPage(val total: Int, val items: List<ChannelDto>)
 @Serializable data class ChannelPatch(val favourite: Boolean? = null, val hidden: Boolean? = null)

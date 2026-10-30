@@ -41,47 +41,47 @@ private const val LIST_ORDER = "favourite DESC, sortOrder, sourceId, COALESCE(nu
 
 @Dao
 interface ChannelDao {
-    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL ORDER BY $LIST_ORDER")
     fun observeVisible(): Flow<List<ChannelEntity>>
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL ORDER BY $LIST_ORDER")
     suspend fun visible(): List<ChannelEntity>
 
     /** Guide: one group at a time, capped, so huge lineups never load in full. */
-    @Query("SELECT * FROM channels WHERE hidden = 0 AND groupTitle = :group ORDER BY $LIST_ORDER LIMIT :limit")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL AND groupTitle = :group ORDER BY $LIST_ORDER LIMIT :limit")
     fun observeGroup(group: String, limit: Int): Flow<List<ChannelEntity>>
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER LIMIT :limit")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL ORDER BY $LIST_ORDER LIMIT :limit")
     fun observeFirst(limit: Int): Flow<List<ChannelEntity>>
 
-    @Query("SELECT COUNT(*) FROM channels WHERE hidden = 0")
+    @Query("SELECT COUNT(*) FROM channels WHERE hidden = 0 AND primaryId IS NULL")
     fun observeVisibleCount(): Flow<Int>
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 AND groupTitle = :group ORDER BY $LIST_ORDER")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL AND groupTitle = :group ORDER BY $LIST_ORDER")
     suspend fun inGroup(group: String): List<ChannelEntity>
 
     /** Ids only, in guide order: cheap even for 10k+ channels. */
-    @Query("SELECT id FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER")
+    @Query("SELECT id FROM channels WHERE hidden = 0 AND primaryId IS NULL ORDER BY $LIST_ORDER")
     suspend fun visibleIds(): List<String>
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 AND number = :number ORDER BY favourite DESC LIMIT 1")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND number = :number ORDER BY primaryId IS NOT NULL, favourite DESC LIMIT 1")
     suspend fun byNumber(number: Int): ChannelEntity?
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 ORDER BY $LIST_ORDER LIMIT 1 OFFSET :offset")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL ORDER BY $LIST_ORDER LIMIT 1 OFFSET :offset")
     suspend fun atPosition(offset: Int): ChannelEntity?
 
-    @Query("SELECT * FROM channels WHERE hidden = 0 AND name = :name COLLATE NOCASE ORDER BY favourite DESC LIMIT 1")
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND name = :name COLLATE NOCASE ORDER BY primaryId IS NOT NULL, favourite DESC LIMIT 1")
     suspend fun byName(name: String): ChannelEntity?
 
-    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 ORDER BY sortOrder, position")
+    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 AND primaryId IS NULL ORDER BY sortOrder, position")
     fun observeFavourites(): Flow<List<ChannelEntity>>
 
-    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 ORDER BY sortOrder, position")
+    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 AND primaryId IS NULL ORDER BY sortOrder, position")
     suspend fun favourites(): List<ChannelEntity>
 
     @Query(
         """SELECT * FROM channels
-           WHERE (:q = '' OR name LIKE '%' || :q || '%')
+           WHERE primaryId IS NULL AND (:q = '' OR name LIKE '%' || :q || '%')
              AND (:group = '' OR groupTitle = :group)
            ORDER BY $LIST_ORDER LIMIT :limit OFFSET :offset"""
     )
@@ -89,7 +89,7 @@ interface ChannelDao {
 
     @Query(
         """SELECT COUNT(*) FROM channels
-           WHERE (:q = '' OR name LIKE '%' || :q || '%')
+           WHERE primaryId IS NULL AND (:q = '' OR name LIKE '%' || :q || '%')
              AND (:group = '' OR groupTitle = :group)"""
     )
     suspend fun count(q: String, group: String): Int
@@ -121,7 +121,11 @@ interface ChannelDao {
     @Query("SELECT * FROM channels WHERE id = :id")
     suspend fun get(id: String): ChannelEntity?
 
-    @Query("SELECT * FROM channels WHERE tvgId = :tvgId AND hidden = 0 ORDER BY favourite DESC LIMIT 1")
+    /** A row's streams, best first: the primary itself plus any duplicates folded into it. */
+    @Query("SELECT * FROM channels WHERE id = :primaryId OR primaryId = :primaryId ORDER BY primaryId IS NOT NULL, quality DESC, position")
+    suspend fun streamsOf(primaryId: String): List<ChannelEntity>
+
+    @Query("SELECT * FROM channels WHERE tvgId = :tvgId AND hidden = 0 ORDER BY primaryId IS NOT NULL, favourite DESC LIMIT 1")
     suspend fun byTvgId(tvgId: String): ChannelEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -143,7 +147,7 @@ interface ChannelDao {
     @Query("UPDATE channels SET hidden = :hidden WHERE groupTitle IN (:groups)")
     suspend fun setGroupsHidden(groups: List<String>, hidden: Boolean)
 
-    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
+    @Query("SELECT groupTitle AS name, SUM(primaryId IS NULL) AS count FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
     suspend fun groupSummary(): List<GroupSummary>
 
     @Query("UPDATE channels SET sortOrder = :order WHERE id = :id")

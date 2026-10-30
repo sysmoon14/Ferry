@@ -44,6 +44,8 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import dev.sysmoon.ferry.graph
+import dev.sysmoon.ferry.data.StreamQuality
+import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.player.PlaybackState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -60,9 +62,12 @@ fun PlayerScreen(onBack: () -> Unit) {
     var overlayToken by remember { mutableIntStateOf(0) }
     var overlayVisible by remember { mutableStateOf(true) }
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
+    var menuOpen by remember { mutableStateOf(false) }
+    // OK is acted on when released, so a long press can open the menu instead.
+    var okLongPressed by remember { mutableStateOf(false) }
 
     // Show the info banner on every channel change and on OK, hide after 5s.
-    LaunchedEffect(state.channel?.id, overlayToken) {
+    LaunchedEffect(state.channel?.id, state.stream?.id, overlayToken) {
         overlayVisible = true
         delay(5_000)
         overlayVisible = false
@@ -76,12 +81,26 @@ fun PlayerScreen(onBack: () -> Unit) {
             .focusRequester(focus)
             .focusable()
             .onKeyEvent { e ->
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter
+                if (ok && e.type == KeyEventType.KeyUp) {
+                    if (!okLongPressed) overlayToken++
+                    okLongPressed = false
+                    return@onKeyEvent true
+                }
                 if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                if (ok) {
+                    if (e.nativeKeyEvent.repeatCount == 1 && state.channel != null) {
+                        okLongPressed = true
+                        menuOpen = true
+                    }
+                    return@onKeyEvent true
+                }
                 when (e.key) {
                     // Up = next channel (higher in the list order), like a normal TV remote.
                     Key.DirectionUp, Key.ChannelUp -> { graph.player.zap(1); true }
                     Key.DirectionDown, Key.ChannelDown -> { graph.player.zap(-1); true }
-                    Key.DirectionCenter, Key.Enter, Key.Info -> { overlayToken++; true }
+                    Key.Info -> { overlayToken++; true }
+                    Key.Menu -> { if (state.channel != null) menuOpen = true; true }
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { scope.launch { graph.player.togglePause() }; true }
                     Key.Back, Key.Escape, Key.Guide, Key.DirectionLeft -> { onBack(); true }
                     else -> false
@@ -104,7 +123,8 @@ fun PlayerScreen(onBack: () -> Unit) {
 
         if (state.state == PlaybackState.ERROR) {
             Text(
-                "Couldn't play this channel (${state.error ?: "unknown error"}). Up/Down to try another.",
+                if (state.streamCount > 1) "None of this channel's ${state.streamCount} streams would play (${state.error ?: "unknown error"}). Up/Down to try another channel."
+                else "Couldn't play this channel (${state.error ?: "unknown error"}). Up/Down to try another.",
                 modifier = Modifier.align(Alignment.Center).background(FerryColors.Navy).padding(24.dp),
             )
         }
@@ -122,11 +142,23 @@ fun PlayerScreen(onBack: () -> Unit) {
                     .background(Brush.verticalGradient(listOf(Color.Transparent, FerryColors.Deep.copy(alpha = 0.95f))))
                     .padding(horizontal = 48.dp, vertical = 32.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(ch.name, style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(ch.displayName, style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
                     Spacer(Modifier.width(16.dp))
                     if (state.catchup) Text("CATCH-UP  ", color = FerryColors.Sea, style = MaterialTheme.typography.labelLarge)
                     if (state.state == PlaybackState.BUFFERING) Text("Tuning…", color = FerryColors.Muted)
+                    Spacer(Modifier.weight(1f))
+                    if (state.streamCount > 1) {
+                        val stream = state.stream
+                        val label = stream?.let { StreamQuality.parse(it.name).label }
+                        Text(
+                            listOfNotNull(label, "${state.streamCount} streams · hold OK to switch").joinToString("  ·  "),
+                            color = FerryColors.Muted,
+                        )
+                    }
+                }
+                state.notice?.let {
+                    Text(it, color = FerryColors.Sea, modifier = Modifier.padding(top = 4.dp))
                 }
                 Spacer(Modifier.height(8.dp))
                 state.now?.let { now ->
@@ -144,6 +176,21 @@ fun PlayerScreen(onBack: () -> Unit) {
                     Text("Next ${time.format(Date(it.start))}  ${it.title}", color = FerryColors.Muted)
                 }
             }
+        }
+    }
+
+    if (menuOpen) {
+        state.channel?.let { ch ->
+            ChannelMenu(
+                ch,
+                zap = null,
+                onDismiss = {
+                    menuOpen = false
+                    okLongPressed = false
+                    runCatching { focus.requestFocus() }
+                },
+                onPlayed = {},
+            )
         }
     }
 }

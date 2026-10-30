@@ -178,6 +178,17 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(results)
                 }
 
+                // ---- Options
+                get("/options") { call.respond(OptionsDto(g.settings.mergeDuplicates())) }
+                put("/options") {
+                    val o = call.receive<OptionsDto>()
+                    val changed = o.mergeDuplicates != g.settings.mergeDuplicates()
+                    g.settings.setMergeDuplicates(o.mergeDuplicates)
+                    // Merging happens at import, so re-import to apply it.
+                    if (changed) g.scope.launch { g.repository.refreshDue(force = true) }
+                    call.respond(OkDto())
+                }
+
                 // ---- Channels
                 get("/groups") { call.respond(g.db.channels().groups()) }
                 post("/groups/hidden") {

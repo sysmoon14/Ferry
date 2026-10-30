@@ -166,6 +166,11 @@
             <button class="btn" id="grpSave" style="flex:none" disabled>Save</button></div>
         </div>
       </div>
+      <div class="card">
+        <h2>Duplicate channels</h2>
+        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="mergeDup" style="width:auto;flex:none"> Merge duplicate channels</label>
+        <p class="muted small">Channels in the same group with the same guide ID and name (ignoring tags like FHD, 720p or backup) become one row. The TV plays the best stream — highest resolution, then frame rate — and falls back to the others if it fails. Hold OK on a channel to pick a stream yourself. Changing this refreshes your playlists.</p>
+      </div>
     </section>
 
     <!-- Channels -->
@@ -419,7 +424,7 @@
       const play = el("button", { className: "icon", title: "Play on TV", onclick: () => api("/play", { method: "POST", body: { channelId: c.id } }).then(() => toast(`Playing ${c.name}`)).catch(e => toast(e.message)) }, "▶");
       const logo = c.logo ? el("img", { className: "logo", src: c.logo, loading: "lazy", alt: "" }) : el("span", { className: "logo" });
       return el("li", {}, logo,
-        el("div", { className: "grow" }, el("div", {}, c.name), el("div", { className: "small muted" }, [c.group, c.tvgId].filter(Boolean).join(" · "))),
+        el("div", { className: "grow" }, el("div", {}, c.name), el("div", { className: "small muted" }, [c.group, c.tvgId, c.streams > 1 ? `${c.streams} streams` : null].filter(Boolean).join(" · "))),
         play, fav, hide);
     }));
   }
@@ -430,6 +435,18 @@
   $("hideGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: true } }); loadChannels(); };
   $("showGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: false } }); loadChannels(); };
   loaders.channels = () => { loadGroups(); loadChannels(); };
+
+  // ---------- Duplicate merging
+  async function loadOptions() {
+    const o = await api("/options");
+    $("mergeDup").checked = o.mergeDuplicates;
+  }
+  $("mergeDup").onchange = async () => {
+    try {
+      await api("/options", { method: "PUT", body: { mergeDuplicates: $("mergeDup").checked } });
+      toast("Saved — refreshing playlists");
+    } catch (e) { toast(e.message); loadOptions(); }
+  };
 
   // ---------- Groups ("show only these")
   let groups = [], picked = new Set(), groupsDirty = false;
@@ -473,6 +490,7 @@
     catch (e) { toast(e.message); $("grpSave").disabled = false; }
   };
   loaders.groups = async () => {
+    loadOptions().catch(() => {});
     groups = await api("/groups/detail");
     picked = new Set(groups.filter(g => !g.hidden).map(g => g.name));
     groupsDirty = false; renderGroups();

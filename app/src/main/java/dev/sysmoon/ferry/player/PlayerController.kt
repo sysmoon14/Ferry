@@ -20,6 +20,7 @@ import dev.sysmoon.ferry.data.ChannelRepository
 import dev.sysmoon.ferry.data.FerryDatabase
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.Settings
+import dev.sysmoon.ferry.data.StreamQuality
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,6 +58,12 @@ data class NowPlaying(
     val error: String? = null,
     /** True when playing a past programme from the provider's archive; [now] is that programme. */
     val catchup: Boolean = false,
+    /** The stream actually playing: [channel] itself, or one of its folded duplicates. */
+    val stream: ChannelEntity? = null,
+    /** How many streams [channel] has (1 unless duplicates were merged into it). */
+    val streamCount: Int = 1,
+    /** Short message for the banner, e.g. after falling back to a backup stream. */
+    val notice: String? = null,
 ) {
     val progress: Float?
         get() = now?.let {
@@ -101,9 +108,17 @@ class PlayerController(
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) = sync()
-            override fun onIsPlayingChanged(isPlaying: Boolean) = sync()
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) { streamStarted = true; watchdog?.cancel() }
+                sync()
+            }
             override fun onPlayerError(error: PlaybackException) {
-                _state.update { it.copy(state = PlaybackState.ERROR, error = error.errorCodeName) }
+                // A merged channel has backups: move on to the next stream instead of stopping.
+                if (!_state.value.catchup && streamIndex + 1 < streams.size) {
+                    failover("failed")
+                } else {
+                    _state.update { it.copy(state = PlaybackState.ERROR, error = error.errorCodeName) }
+                }
             }
         })
         // Keep now/next fresh while something is playing.
@@ -139,6 +154,12 @@ class PlayerController(
     private var zapScope: ZapScope = ZapScope.All
     private var playJob: Job? = null
 
+    // Streams of the channel being played, best first, and which one is on.
+    @Volatile private var streams: List<ChannelEntity> = emptyList()
+    @Volatile private var streamIndex = 0
+    @Volatile private var streamStarted = false
+    private var watchdog: Job? = null
+
     /**
      * Fire-and-forget start for UI callers. Runs in the app scope so it survives the guide
      * leaving the screen (BBC channels fetch a stream URL first and were being cancelled),
@@ -147,6 +168,18 @@ class PlayerController(
     fun start(channel: ChannelEntity, scope: ZapScope? = null) {
         playJob?.cancel()
         playJob = this.scope.launch { play(channel, scope) }
+    }
+
+    /** Plays a specific stream of a merged channel (chosen from the long-press menu). */
+    fun startStream(stream: ChannelEntity, scope: ZapScope? = null) {
+        playJob?.cancel()
+        playJob = this.scope.launch { play(stream, scope ?: zapScope.takeIf { _state.value.channel != null }) }
+    }
+
+    /** A channel's streams, best first. Works for a primary or any of its duplicates. */
+    suspend fun streamsFor(channel: ChannelEntity): List<ChannelEntity> {
+        val primaryId = channel.primaryId ?: channel.id
+        return db.channels().streamsOf(primaryId).ifEmpty { listOf(channel) }
     }
 
     fun zap(delta: Int) {
@@ -160,43 +193,86 @@ class PlayerController(
         return true
     }
 
-    /** [scope] defaults to favourites (if starred) or the channel's group, e.g. for HA/deep links. */
+    /**
+     * [scope] defaults to favourites (if starred) or the channel's group, e.g. for HA/deep links.
+     * [channel] may be a duplicate stream: the row it belongs to plays, starting from that stream.
+     */
     suspend fun play(channel: ChannelEntity, scope: ZapScope? = null) {
+        val primary = channel.primaryId?.let { db.channels().get(it) } ?: channel
         zapScope = scope ?: when {
-            channel.favourite -> ZapScope.Favourites
-            channel.groupTitle != null -> ZapScope.Group(channel.groupTitle)
+            primary.favourite -> ZapScope.Favourites
+            primary.groupTitle != null -> ZapScope.Group(primary.groupTitle)
             else -> ZapScope.All
         }
+        val list = if (primary.streamCount > 1) streamsFor(primary) else listOf(primary)
+        streams = list
+        streamIndex = list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0)
         // Look up now/next first so the banner never flashes "No guide data".
-        val (now, next) = programmesFor(channel)
+        val (now, next) = programmesFor(primary)
+        playCurrentStream(primary, now, next, notice = null)
+        settings.setLastChannelId(primary.id)
+    }
+
+    private suspend fun playCurrentStream(
+        channel: ChannelEntity,
+        now: ProgrammeEntity?,
+        next: ProgrammeEntity?,
+        notice: String?,
+    ) {
+        val stream = streams.getOrNull(streamIndex) ?: channel
+        fun state(s: PlaybackState, error: String? = null) =
+            NowPlaying(channel, now, next, s, error, stream = stream, streamCount = streams.size, notice = notice)
+        watchdog?.cancel()
+        streamStarted = false
         // BBC iPlayer channels store candidate service ids; fetch a current stream URL each play.
-        val uri = if (BbcIplayer.isBbc(channel.streamUrl)) {
-            _state.update { NowPlaying(channel, now, next, PlaybackState.BUFFERING) }
-            when (val r = withContext(Dispatchers.IO) { bbc.resolve(channel.streamUrl) }) {
+        val uri = if (BbcIplayer.isBbc(stream.streamUrl)) {
+            _state.value = state(PlaybackState.BUFFERING)
+            when (val r = withContext(Dispatchers.IO) { bbc.resolve(stream.streamUrl) }) {
                 is BbcIplayer.Resolved.Ok -> r.url
                 is BbcIplayer.Resolved.Failed -> {
                     withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
-                    _state.update { NowPlaying(channel, now, next, PlaybackState.ERROR, r.reason) }
+                    _state.value = state(PlaybackState.ERROR, r.reason)
                     return
                 }
             }
-        } else channel.streamUrl
+        } else stream.streamUrl
         // Set the new channel *before* starting the player, then let the player's own events
         // drive the state. Setting BUFFERING afterwards could overwrite a PLAYING event that
         // already arrived, leaving the status stuck on "buffering" (seen with BBC iPlayer).
-        _state.update { NowPlaying(channel, now, next, PlaybackState.BUFFERING) }
+        _state.value = state(PlaybackState.BUFFERING)
         withContext(Dispatchers.Main) {
             player.setMediaItem(
                 MediaItem.Builder()
                     .setUri(uri)
-                    .setMediaId(channel.id)
+                    .setMediaId(stream.id)
                     .build()
             )
             player.prepare()
             player.playWhenReady = true
             sync()
         }
-        settings.setLastChannelId(channel.id)
+        // Some dead streams never error, they just buffer forever. Give up on them too.
+        if (streamIndex + 1 < streams.size) {
+            watchdog = scope.launch {
+                delay(STALL_TIMEOUT_MS)
+                if (!streamStarted && _state.value.stream?.id == stream.id) failover("didn't start")
+            }
+        }
+    }
+
+    /** Moves to the next stream of the current channel, keeping the banner on the same channel. */
+    private fun failover(reason: String) {
+        val current = _state.value
+        val channel = current.channel ?: return
+        if (streamIndex + 1 >= streams.size) return
+        playJob?.cancel()
+        playJob = scope.launch {
+            streamIndex += 1
+            val label = StreamQuality.parse(streams[streamIndex].name).label
+            val notice = "Stream ${streamIndex} $reason — trying backup ${streamIndex + 1} of ${streams.size}" +
+                (label?.let { " ($it)" } ?: "")
+            playCurrentStream(channel, current.now, current.next, notice)
+        }
     }
 
     /** Catch-up is possible for programmes that have ended (or started) within the archive window. */
@@ -209,7 +285,10 @@ class PlayerController(
     /** Plays [programme] from the provider's archive (Xtream timeshift). */
     fun startCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, scope: ZapScope? = null) {
         playJob?.cancel()
+        watchdog?.cancel()
         playJob = this.scope.launch {
+            streams = listOf(channel)
+            streamIndex = 0
             zapScope = scope ?: zapScope
             val tz = db.sources().get(channel.sourceId)?.serverTimezone
             val url = XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, tz)
@@ -243,6 +322,8 @@ class PlayerController(
     }
 
     suspend fun stop() {
+        watchdog?.cancel()
+        streams = emptyList()
         withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
         _state.value = NowPlaying()
     }
@@ -257,6 +338,10 @@ class PlayerController(
         val current = upcoming.firstOrNull()?.takeIf { it.start <= now }
         val next = if (current != null) upcoming.getOrNull(1) else upcoming.firstOrNull()
         return current to next
+    }
+
+    companion object {
+        private const val STALL_TIMEOUT_MS = 12_000L
     }
 
     private suspend fun refreshProgrammes() {

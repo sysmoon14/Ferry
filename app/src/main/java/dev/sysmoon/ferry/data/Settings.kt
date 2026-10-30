@@ -38,6 +38,7 @@ class Settings(private val context: Context) {
         val tokens = stringSetPreferencesKey("tokens")
         val lastChannel = stringPreferencesKey("last_channel")
         val hiddenGroups = stringSetPreferencesKey("hidden_groups")
+        val mergeDuplicates = booleanPreferencesKey("merge_duplicates")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -89,6 +90,10 @@ class Settings(private val context: Context) {
     /** Groups the user has hidden; applied to new channels on every refresh. */
     suspend fun hiddenGroups(): Set<String> = store.data.first()[Keys.hiddenGroups] ?: emptySet()
     suspend fun setHiddenGroups(groups: Set<String>) = store.edit { it[Keys.hiddenGroups] = groups }
+
+    /** Fold backup / other-quality copies of a channel into one row (on by default). */
+    suspend fun mergeDuplicates(): Boolean = store.data.first()[Keys.mergeDuplicates] ?: true
+    suspend fun setMergeDuplicates(merge: Boolean) = store.edit { it[Keys.mergeDuplicates] = merge }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]
     suspend fun setLastChannelId(id: String) = store.edit { it[Keys.lastChannel] = id }
