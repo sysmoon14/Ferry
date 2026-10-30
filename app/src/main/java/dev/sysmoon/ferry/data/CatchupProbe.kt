@@ -64,8 +64,13 @@ class CatchupProbe(private val http: OkHttpClient) {
                     "$b/streaming/timeshift.php?username=$user&password=$pass&stream=$id&start=$s&duration=$minutes",
             ).forEach { (label, url) -> attempts += attempt(label, url) }
         }
+        val startSec = start / 1000
+        val nowSec = System.currentTimeMillis() / 1000
+        attempts += attempt("control: live stream", streamUrl)
+        attempts += attempt("live ?utc=", "$streamUrl?utc=$startSec&lutc=$nowSec")
+        attempts += attempt("live m3u8 ?utc=", streamUrl.replaceAfterLast('.', "m3u8") + "?utc=$startSec&lutc=$nowSec")
         val hosts = bases.map { (l, b) -> "$l=" + b.substringAfter("://").substringBefore('/') }
-        return Report(title, start, stop, serverTz, attempts, hosts + archive(base, user, pass, id, start))
+        return Report(title, start, stop, serverTz, attempts, hosts + m3uLine(base, user, pass, id) + archive(base, user, pass, id, start))
     }
 
     private val noRedirect by lazy { http.newBuilder().followRedirects(false).followSslRedirects(false).build() }
@@ -99,6 +104,26 @@ class CatchupProbe(private val http: OkHttpClient) {
                 .header("Range", "bytes=0-1023").build()
         ).execute().use { Attempt(label, it.code, it.header("Content-Type")) }
     }.getOrElse { Attempt(label, -1, it.javaClass.simpleName + ": " + (it.message ?: "")) }
+
+    /** The stream's #EXTINF line from the provider's M3U: catchup / catchup-source attributes give the URL scheme. */
+    private fun m3uLine(base: String, user: String, pass: String, id: String): List<String> = runCatching {
+        val url = "$base/get.php?username=$user&password=$pass&type=m3u_plus&output=ts"
+        http.newCall(Request.Builder().url(url).header("User-Agent", ChannelRepository.USER_AGENT).build()).execute().use { r ->
+            val reader = r.body!!.charStream().buffered()
+            var last = ""
+            var header = ""
+            var n = 0
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (n++ == 0) header = line.take(300)
+                if (line.startsWith("#EXTINF")) last = line
+                else if (line.contains("/$id.") || line.endsWith("/$id")) {
+                    return@use listOf("m3u header: $header", "m3u: ${last.take(600)}", "m3u url: " + line.replace(user, "U").replace(pass, "P"))
+                }
+            }
+            listOf("m3u: stream not found in $n lines; header: $header")
+        }
+    }.getOrElse { listOf("m3u lookup failed: ${it.javaClass.simpleName}") }
 
     /** get_simple_data_table lists the panel's archive with its own timestamps and has_archive flags. */
     private fun archive(base: String, user: String, pass: String, id: String, start: Long): List<String> = runCatching {
