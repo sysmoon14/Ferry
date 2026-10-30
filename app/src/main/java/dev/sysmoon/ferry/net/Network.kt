@@ -35,8 +35,8 @@ class NsdAdvertiser(context: Context) {
             setAttribute("api", "1")
         }
         val l = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(info: NsdServiceInfo) = Log.i(TAG, "Advertised ${info.serviceName}")
-            override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) = Log.w(TAG, "NSD register failed $code")
+            override fun onServiceRegistered(info: NsdServiceInfo) { Log.i(TAG, "Advertised ${info.serviceName}") }
+            override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) { Log.w(TAG, "NSD register failed $code") }
             override fun onServiceUnregistered(info: NsdServiceInfo) = Unit
             override fun onUnregistrationFailed(info: NsdServiceInfo, code: Int) = Unit
         }

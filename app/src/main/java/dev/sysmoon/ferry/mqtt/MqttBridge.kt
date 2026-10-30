@@ -64,7 +64,7 @@ class MqttBridge(private val g: AppGraph) {
         job = null
     }
 
-    private suspend fun runConnected(cfg: MqttConfig) = coroutineScope {
+    private suspend fun runConnected(cfg: MqttConfig): Unit = coroutineScope {
         val id = g.settings.deviceId()
         val name = g.settings.deviceName()
         val base = "${cfg.baseTopic}/$id"
