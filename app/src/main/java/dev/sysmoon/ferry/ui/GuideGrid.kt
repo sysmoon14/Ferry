@@ -97,6 +97,8 @@ fun GuideGrid(
     onOpenPlayer: () -> Unit,
     /** Long press: open the channel menu (favourite, stream picker). */
     onMenu: (ChannelEntity) -> Unit,
+    /** Back: return to now and hand focus to the group list. */
+    onBackToGroups: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = LocalContext.current.graph
@@ -112,8 +114,6 @@ fun GuideGrid(
     val nowSlot = floorSlot(now)
     var windowStart by remember { mutableLongStateOf(floorSlot(System.currentTimeMillis())) }
     val windowEnd = windowStart + WINDOW_MS
-    // Back while browsing another time jumps back to now, like TiviMate.
-    BackHandler(enabled = windowStart != nowSlot) { windowStart = nowSlot }
 
     val bucket = Math.floorDiv(windowStart, LOAD_BUCKET_MS)
     // Reload when guide data changes (a refresh replaces it), not just on a timer.
@@ -135,6 +135,15 @@ fun GuideGrid(
     var verticalNav by remember { mutableStateOf(false) }
     val requesters = remember { HashMap<Pair<String, Long>, FocusRequester>() }
     fun requester(channelId: String, start: Long) = requesters.getOrPut(channelId to start) { FocusRequester() }
+
+    // Back: jump back to now and go to the group list in one press (no scrolling back through
+    // catch-up to reach the groups).
+    var gridFocused by remember { mutableStateOf(false) }
+    BackHandler(enabled = gridFocused || windowStart != nowSlot) {
+        windowStart = nowSlot
+        cursorTime = System.currentTimeMillis()
+        onBackToGroups()
+    }
     fun cellAt(ch: ChannelEntity, t: Long): Long {
         val visible = programmes[ch.epgKey].orEmpty().filter { it.stop > windowStart && it.start < windowEnd }
         if (visible.isEmpty()) return -1L
@@ -155,7 +164,7 @@ fun GuideGrid(
         runCatching { returnFocus.requestFocus() }
     }
 
-    Column(modifier) {
+    Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
         DetailPanel(focused, now)
         TimeRuler(windowStart, now)
         LazyColumn(

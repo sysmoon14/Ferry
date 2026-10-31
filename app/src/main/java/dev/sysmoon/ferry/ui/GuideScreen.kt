@@ -51,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.activity.compose.BackHandler
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
@@ -141,6 +143,29 @@ fun GuideScreen(
         runCatching { returnFocus.requestFocus() }
     }
 
+    val rail = buildList {
+        if (hasFavourites) add(FAVOURITES to "★ Favourites")
+        add(ALL to if (sky) "All Sky channels" else "All channels")
+        if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
+        railGroups.forEach { add(it to it) }
+    }
+    // Back from the channels (list or guide) jumps to the selected group in the rail, so you
+    // never have to scroll back through days of catch-up to change group.
+    val railState = rememberLazyListState()
+    val railFocus = remember { FocusRequester() }
+    var channelsFocused by remember { mutableStateOf(false) }
+    val focusRail: () -> Unit = {
+        scope.launch {
+            val index = rail.indexOfFirst { it.first == effective }.coerceAtLeast(0)
+            if (railState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                railState.scrollToItem(index)
+                withFrameNanos { }
+            }
+            runCatching { railFocus.requestFocus() }
+        }
+    }
+    BackHandler(enabled = channelsFocused && !gridView) { focusRail() }
+
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
         // Group rail
         Column(Modifier.width(240.dp).fillMaxHeight()) {
@@ -148,18 +173,14 @@ fun GuideScreen(
             Spacer(Modifier.height(16.dp))
             LazyColumn(
                 Modifier.weight(1f),
+                state = railState,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 // Room for the focused item's scale-up and gold outline at the list edges.
                 contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp),
             ) {
-                val rail = buildList {
-                    if (hasFavourites) add(FAVOURITES to "★ Favourites")
-                    add(ALL to if (sky) "All Sky channels" else "All channels")
-                    if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
-                    railGroups.forEach { add(it to it) }
-                }
                 items(rail, key = { it.first }) { (key, label) ->
                     ListItem(
+                        modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
                         selected = key == effective,
                         onClick = { onSelect(key) },
                         headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -178,7 +199,7 @@ fun GuideScreen(
         Spacer(Modifier.width(24.dp))
 
         // Channel list
-        Column(Modifier.weight(1f).fillMaxHeight()) {
+        Column(Modifier.weight(1f).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus }) {
             Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
@@ -212,6 +233,7 @@ fun GuideScreen(
                     returnTo = returnTo,
                     onOpenPlayer = onOpenPlayer,
                     onMenu = { menuFor = it },
+                    onBackToGroups = focusRail,
                     modifier = Modifier.weight(1f),
                 )
             } else {
