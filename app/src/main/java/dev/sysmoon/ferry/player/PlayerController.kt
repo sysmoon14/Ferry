@@ -53,6 +53,8 @@ sealed interface ZapScope {
     data class Sky(val section: String?) : ZapScope
     /** Recently watched, newest first. */
     data object Recent : ZapScope
+    /** A fixed list, e.g. the streams that might show a football match. */
+    data class Ids(val label: String, val ids: List<String>) : ZapScope
 }
 
 data class NowPlaying(
@@ -438,6 +440,7 @@ class PlayerController(
             ZapScope.All -> dao.visibleIds()
             is ZapScope.Sky -> dao.skyIds(z.section)
             ZapScope.Recent -> settings.recents()
+            is ZapScope.Ids -> z.ids
         }
     }
 

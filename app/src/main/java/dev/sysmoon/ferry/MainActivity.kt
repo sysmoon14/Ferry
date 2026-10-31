@@ -27,6 +27,8 @@ import dev.sysmoon.ferry.ui.FAVOURITES
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
 import dev.sysmoon.ferry.ui.VideoLayer
+import dev.sysmoon.ferry.ui.FootballScreen
+import dev.sysmoon.ferry.ui.FootballState
 import dev.sysmoon.ferry.ui.ReminderPopup
 import dev.sysmoon.ferry.ui.SearchScreen
 import dev.sysmoon.ferry.ui.SleepWarning
@@ -39,7 +41,7 @@ import dev.sysmoon.ferry.ui.SettingsScreen
 import dev.sysmoon.ferry.player.PlayTarget
 import kotlinx.coroutines.launch
 
-enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH }
+enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH, FOOTBALL }
 
 @OptIn(ExperimentalComposeUiApi::class)
 class MainActivity : ComponentActivity() {
@@ -50,6 +52,16 @@ class MainActivity : ComponentActivity() {
     // channel after the player, on the group list after search/settings).
     private var returnSignal by mutableIntStateOf(0)
     private var returnToRail by mutableStateOf(false)
+
+    private val football = FootballState()
+    /** Where Back from the player goes: the guide, or the football stream list it was started from. */
+    private var playerReturn by mutableStateOf(Screen.GUIDE)
+
+    private fun openPlayer(from: Screen) { playerReturn = from; screen = Screen.PLAYER }
+
+    private fun leavePlayer() {
+        if (playerReturn == Screen.FOOTBALL) screen = Screen.FOOTBALL else backToGuide(rail = false)
+    }
 
     private fun backToGuide(rail: Boolean) {
         returnToRail = rail || graph.player.state.value.channel == null
@@ -90,7 +102,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         // Lowest priority: only reached when the guide itself has nothing to do
                         // with Back (focus already in the group list). Returns to the stream.
-                        BackHandler(enabled = guideActive && playing.channel != null) { screen = Screen.PLAYER }
+                        BackHandler(enabled = guideActive && playing.channel != null) { openPlayer(Screen.GUIDE) }
                         GuideScreen(
                             selected = guideGroup,
                             onSelect = { guideGroup = it },
@@ -101,15 +113,16 @@ class MainActivity : ComponentActivity() {
                             returnToRail = returnToRail,
                             gridView = gridView,
                             onToggleView = { gridView = !gridView },
-                            onOpenPlayer = { screen = Screen.PLAYER },
+                            onOpenPlayer = { openPlayer(Screen.GUIDE) },
                             onOpenSettings = { screen = Screen.SETTINGS },
                             onOpenSearch = { screen = Screen.SEARCH },
+                            onOpenFootball = { screen = Screen.FOOTBALL },
                         )
                     }
                     when (screen) {
                         Screen.SEARCH -> {
                             BackHandler { backToGuide(rail = true) }
-                            SearchScreen(onOpenPlayer = { screen = Screen.PLAYER })
+                            SearchScreen(onOpenPlayer = { openPlayer(Screen.GUIDE) })
                         }
                         Screen.SETTINGS -> {
                             BackHandler { backToGuide(rail = true) }
@@ -117,15 +130,25 @@ class MainActivity : ComponentActivity() {
                         }
                         else -> Unit
                     }
+                    // Kept composed under the player, so Back from a stream returns to the same list.
+                    if (screen == Screen.FOOTBALL || (screen == Screen.PLAYER && playerReturn == Screen.FOOTBALL)) {
+                        FootballScreen(
+                            football,
+                            active = screen == Screen.FOOTBALL,
+                            onOpenPlayer = { openPlayer(Screen.FOOTBALL) },
+                            onBack = { backToGuide(rail = true) },
+                        )
+                    }
                     // Full screen in the player; shrinks to the corner over the guide and search.
                     VideoLayer(
                         full = screen == Screen.PLAYER,
-                        show = screen == Screen.PLAYER || ((screen == Screen.GUIDE || screen == Screen.SEARCH) && playing.channel != null),
+                        show = screen == Screen.PLAYER ||
+                            ((screen == Screen.GUIDE || screen == Screen.SEARCH || screen == Screen.FOOTBALL) && playing.channel != null),
                     )
                     if (screen == Screen.PLAYER) {
                         // Leaving the player keeps the stream going in the corner mini player.
-                        BackHandler { backToGuide(rail = false) }
-                        PlayerScreen(onBack = { backToGuide(rail = false) })
+                        BackHandler { leavePlayer() }
+                        PlayerScreen(onBack = { leavePlayer() })
                     }
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
@@ -133,7 +156,7 @@ class MainActivity : ComponentActivity() {
                             r,
                             onWatch = {
                                 graph.reminders.dismiss()
-                                screen = Screen.PLAYER
+                                openPlayer(Screen.GUIDE)
                                 lifecycleScope.launch {
                                     if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
                                 }
@@ -158,7 +181,7 @@ class MainActivity : ComponentActivity() {
         pendingResume = false
         lifecycleScope.launch {
             if (!graph.settings.resumeLastChannel() || graph.settings.lastChannelId() == null) return@launch
-            screen = Screen.PLAYER
+            openPlayer(Screen.GUIDE)
             if (!graph.player.play(PlayTarget.Last)) backToGuide(rail = true)
         }
     }
@@ -177,7 +200,7 @@ class MainActivity : ComponentActivity() {
         if (action != null) pendingResume = false // a deep link says what to show
         when (action) {
             is LaunchAction.Play -> {
-                screen = Screen.PLAYER
+                openPlayer(Screen.GUIDE)
                 lifecycleScope.launch {
                     if (!graph.player.play(action.target)) backToGuide(rail = true)
                 }

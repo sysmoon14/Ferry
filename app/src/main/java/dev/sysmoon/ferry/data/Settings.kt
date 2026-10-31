@@ -36,6 +36,7 @@ class Settings(private val context: Context) {
         val deviceId = stringPreferencesKey("device_id")
         val owner = stringPreferencesKey("owner_android_id")
         val recents = stringPreferencesKey("recent_channels")
+        val myTeams = stringSetPreferencesKey("my_teams")
         val reminders = stringPreferencesKey("reminders")
         val syncUrl = stringPreferencesKey("sync_url")
         val syncToken = stringPreferencesKey("sync_token")
@@ -104,6 +105,13 @@ class Settings(private val context: Context) {
             }
             p[Keys.owner] = me
         }
+    }
+
+    /** Football: ESPN ids of the user's clubs. */
+    val myTeams: Flow<Set<String>> = store.data.map { it[Keys.myTeams] ?: emptySet() }
+    suspend fun toggleMyTeam(id: String) = store.edit { p ->
+        val old = p[Keys.myTeams] ?: emptySet()
+        p[Keys.myTeams] = if (id in old) old - id else old + id
     }
 
     /** Recently watched channel ids, newest first. */

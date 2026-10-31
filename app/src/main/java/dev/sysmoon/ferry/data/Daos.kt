@@ -127,6 +127,10 @@ interface ChannelDao {
     )
     suspend fun userPrefs(): List<UserPrefRow>
 
+    /** Every row shown in lists (hidden groups included), for the match finder. */
+    @Query("SELECT * FROM channels WHERE primaryId IS NULL")
+    suspend fun allPrimaries(): List<ChannelEntity>
+
     @Query("SELECT * FROM channels WHERE id IN (:ids)")
     fun observeByIds(ids: List<String>): Flow<List<ChannelEntity>>
 
@@ -242,6 +246,10 @@ interface ProgrammeDao {
 
     @Query("SELECT * FROM programmes WHERE channelKey IN (:keys) AND stop > :from AND start < :until ORDER BY channelKey, start")
     suspend fun window(keys: List<String>, from: Long, until: Long): List<ProgrammeEntity>
+
+    /** Programmes on air across [from]…[until] (started by [from], still on at [until]). */
+    @Query("SELECT * FROM programmes WHERE start <= :from AND stop >= :until")
+    suspend fun spanning(from: Long, until: Long): List<ProgrammeEntity>
 
     @Query("SELECT * FROM programmes WHERE title LIKE '%' || :q || '%' AND stop > :from ORDER BY start LIMIT :limit")
     suspend fun search(q: String, from: Long, limit: Int): List<ProgrammeEntity>

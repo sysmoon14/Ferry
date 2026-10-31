@@ -43,6 +43,8 @@ class AppGraph(val context: Context) {
     val reminders = dev.sysmoon.ferry.data.ReminderManager(settings, scope)
     val sleep = dev.sysmoon.ferry.player.SleepTimer(scope) { player.stop() }
     val sync = dev.sysmoon.ferry.server.SyncManager(this)
+    val football = dev.sysmoon.ferry.data.FootballData(http, context.cacheDir)
+    val matchFinder = dev.sysmoon.ferry.data.MatchFinder(db)
     /** True while Ferry's screen is showing (reminder pop-ups only appear then). */
     val uiVisible = kotlinx.coroutines.flow.MutableStateFlow(false)
     val mqtt = MqttBridge(this)

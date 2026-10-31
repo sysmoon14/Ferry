@@ -68,6 +68,8 @@ const val ALL = "\u0000all"
 const val RECENT = "\u0000recent"
 /** Not a group: opens the search screen. */
 const val SEARCH = "\u0000search"
+/** Not a group: opens the football screen. */
+const val FOOTBALL = "\u0000football"
 /** Rail keys for Sky layout sections ("\u0000sky:Sports"). */
 const val SKY_PREFIX = "\u0000sky:"
 private const val GUIDE_LIMIT = 1_000
@@ -91,6 +93,7 @@ fun GuideScreen(
     onOpenPlayer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenFootball: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
@@ -156,6 +159,7 @@ fun GuideScreen(
 
     val rail = buildList {
         add(SEARCH to "🔍  Search")
+        add(FOOTBALL to "⚽  Football")
         if (hasFavourites) add(FAVOURITES to "★ Favourites")
         if (recents.isNotEmpty()) add(RECENT to "🕘  Recently watched")
         add(ALL to if (sky) "All Sky channels" else "All channels")
@@ -232,7 +236,7 @@ fun GuideScreen(
                     ListItem(
                         modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
                         selected = key == effective,
-                        onClick = { if (key == SEARCH) onOpenSearch() else onSelect(key) },
+                        onClick = { when (key) { SEARCH -> onOpenSearch(); FOOTBALL -> onOpenFootball(); else -> onSelect(key) } },
                         headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = ferryListItemColors(),
                         border = ferryListItemBorder(),
