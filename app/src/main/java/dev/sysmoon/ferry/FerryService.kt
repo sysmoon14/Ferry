@@ -35,14 +35,19 @@ class FerryService : Service() {
         super.onCreate()
         startInForeground()
         val g = graph
-        server = ConfigServer(g).also { it.start(PORT) }
+        server = ConfigServer(g)
         nsd = NsdAdvertiser(this)
-        g.scope.launch {
+        // Off the main thread: starting the web server and reading settings here used to hold up
+        // Ferry's first screen by a couple of seconds.
+        g.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            g.settings.claimDevice() // before anything reads the device identity
+            runCatching { server.start(PORT) }.onFailure { Log.w(TAG, "Config server failed to start", it) }
             g.settings.pin() // make sure a pairing PIN exists before anyone opens Settings
+            g.mqtt.start()
             nsd.register(g.settings.deviceName(), PORT, g.settings.deviceId())
         }
-        g.mqtt.start()
         refreshJob = g.scope.launch {
+            delay(20_000) // a due refresh (thousands of channels) shouldn't compete with start-up
             while (isActive) {
                 runCatching { g.repository.refreshDue() }.onFailure { Log.w(TAG, "refresh loop", it) }
                 delay(30 * 60_000L)

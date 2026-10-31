@@ -22,8 +22,6 @@ class FerryApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
-        // Before anything (MQTT, pairing) reads the device identity.
-        kotlinx.coroutines.runBlocking { graph.settings.claimDevice() }
     }
 }
 
