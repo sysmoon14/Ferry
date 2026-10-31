@@ -22,6 +22,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Recently watched | A group in the guide with the channels you've watched lately |
 | Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
 | Keep in sync | A box can follow another Ferry and pick up its setup changes automatically |
+| Football | Premier League and Champions League fixtures; finds every stream in your playlist that might show a match |
 | Start-up | Optionally opens straight into the last watched channel |
 | Web config | Phone-friendly page with PIN/QR pairing at `http://<tv-ip>:8765`, including backup & sync between boxes |
 | Home Assistant | MQTT discovery, deep links, REST API, mDNS (`_ferry._tcp`) |
@@ -84,6 +85,23 @@ playlist to it by name and guide ID, including Sky's seasonal renames (Sky Sport
 TNT Sports). Anything it can't match by name is compared by schedule (same programmes at the same
 times). Channels still unmatched are listed in the web page with a **Pick…** search so you can match them
 by hand; manual picks stick across refreshes.
+
+### Football
+
+**⚽ Football** (top of the group list) shows Premier League and Champions League fixtures from ESPN's
+public data, live scores first, with **Clubs** to pick your teams (they get a **★ My teams** tab).
+Choosing a match lists every stream that might show it, best first, with the reason:
+
+1. **Channel name** with both teams (providers rename event channels on match day, e.g.
+   "EPL02: Bournemouth 15:00 Leeds 31/10"); dated channels for another day are ignored.
+2. **Guide data** around kick-off naming both teams, in any language/spelling, on any channel
+   (hidden groups included, so foreign sports channels count).
+3. One team plus the competition in the guide, the club's own channel, or a broadcaster ESPN lists.
+4. Just the competition at kick-off on a sports channel (weakest).
+
+Other sports, magazine shows ("Preview", "Highlights") and look-alike names are filtered out; UK streams
+rank first. Playing one makes that list the channel up/down list, so if a stream dies, ▲ tries the next;
+Back returns to the list.
 
 ### Reminders
 
