@@ -79,6 +79,9 @@ private enum class Control(val label: String) {
 
 private const val SKIP_MS = 30_000L
 
+/** Channel the info card last popped up for; survives the player screen leaving composition. */
+private var lastCardedChannel: String? = null
+
 /**
  * Full-screen playback with a Sky-style info card:
  *  - OK shows the card for what's on. ▲▼ browse other channels on the card without tuning
@@ -132,7 +135,12 @@ fun PlayerScreen(onBack: () -> Unit) {
             else list.indexOfFirst { it.start <= t && it.stop > t }
     }
     // Show the card on every channel change; hide it after a while without key presses.
-    LaunchedEffect(state.channel?.id) { if (state.channel != null) openCard() }
+    // The card pops up when the channel changes, not when coming back to full screen from the
+    // mini player on the same channel.
+    LaunchedEffect(state.channel?.id) {
+        val id = state.channel?.id ?: return@LaunchedEffect
+        if (id != lastCardedChannel) { lastCardedChannel = id; openCard() }
+    }
     LaunchedEffect(cardVisible, interaction, controlsVisible) {
         if (!cardVisible) return@LaunchedEffect
         delay(if (controlsVisible) 12_000 else 7_000)

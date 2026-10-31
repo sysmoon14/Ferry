@@ -100,9 +100,8 @@ class MainActivity : ComponentActivity() {
                             .focusProperties { enter = { if (guideActive) FocusRequester.Default else FocusRequester.Cancel } }
                             .focusGroup()
                     ) {
-                        // Lowest priority: only reached when the guide itself has nothing to do
-                        // with Back (focus already in the group list). Returns to the stream.
-                        BackHandler(enabled = guideActive && playing.channel != null) { openPlayer(Screen.GUIDE) }
+                        // Back in the group list isn't handled here, so it leaves the app (onStop
+                        // stops any stream that's still playing in the mini player).
                         GuideScreen(
                             selected = guideGroup,
                             onSelect = { guideGroup = it },
