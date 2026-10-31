@@ -112,7 +112,14 @@ class PlayerController(
             .setLoadControl(load)
             .build()
         player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) = sync()
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // A live channel never really "ends": the provider dropped the connection.
+                if (playbackState == Player.STATE_ENDED && !_state.value.catchup && _state.value.channel != null) {
+                    reconnect()
+                    return
+                }
+                sync()
+            }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) { streamStarted = true; watchdog?.cancel() }
                 sync()
@@ -273,6 +280,28 @@ class PlayerController(
                 delay(STALL_TIMEOUT_MS)
                 if (!streamStarted && _state.value.stream?.id == stream.id) failover("didn't start")
             }
+        }
+    }
+
+    private val drops = ArrayDeque<Long>()
+
+    /** Live stream dropped: try the next stream, else reconnect (giving up after 3 drops a minute). */
+    private fun reconnect() {
+        val current = _state.value
+        val channel = current.channel ?: return
+        if (streamIndex + 1 < streams.size) { failover("dropped"); return }
+        val now = System.currentTimeMillis()
+        drops.addLast(now)
+        while (drops.isNotEmpty() && drops.first() < now - 60_000) drops.removeFirst()
+        if (drops.size > 3) {
+            _state.update { it.copy(state = PlaybackState.ERROR, error = "the provider keeps dropping the stream — another device may be using the account") }
+            return
+        }
+        playJob?.cancel()
+        playJob = scope.launch {
+            _state.update { it.copy(state = PlaybackState.BUFFERING, notice = "Stream dropped — reconnecting…") }
+            delay(1_500)
+            playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream dropped")
         }
     }
 
