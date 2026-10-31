@@ -146,10 +146,15 @@ fun GuideGrid(
     // Back: jump back to now and go to the group list in one press (no scrolling back through
     // catch-up to reach the groups).
     var gridFocused by remember { mutableStateOf(false) }
-    BackHandler(enabled = active && (gridFocused || windowStart != nowSlot)) {
+    BackHandler(enabled = active && gridFocused) {
         windowStart = nowSlot
         cursorTime = System.currentTimeMillis()
         onBackToGroups()
+    }
+    // Outside the grid (group list, player) the guide follows the clock, so Back in the group
+    // list is free to leave the app and the grid is current when you come back to it.
+    LaunchedEffect(gridFocused, nowSlot) {
+        if (!gridFocused) { windowStart = nowSlot; cursorTime = System.currentTimeMillis() }
     }
     fun cellAt(ch: ChannelEntity, t: Long): Long {
         val visible = programmes[ch.epgKey].orEmpty().filter { it.stop > windowStart && it.start < windowEnd }
