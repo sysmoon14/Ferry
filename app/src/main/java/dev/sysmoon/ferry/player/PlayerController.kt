@@ -171,6 +171,13 @@ class PlayerController(
      * and cancels any start still in flight so rapid zapping can't land out of order.
      */
     fun start(channel: ChannelEntity, scope: ZapScope? = null) {
+        // Already playing this channel live (e.g. picked it in the guide while it's in the mini
+        // player): just carry on, don't retune.
+        val cur = _state.value
+        if (cur.channel?.id == (channel.primaryId ?: channel.id) && !cur.catchup && cur.error == null && streams.isNotEmpty()) {
+            if (scope != null) zapScope = scope
+            return
+        }
         playJob?.cancel()
         playJob = this.scope.launch { play(channel, scope) }
     }

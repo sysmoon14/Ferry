@@ -5,13 +5,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import dev.sysmoon.ferry.ui.FAVOURITES
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
+import dev.sysmoon.ferry.ui.MiniPlayer
 import dev.sysmoon.ferry.ui.PlayerScreen
 import dev.sysmoon.ferry.ui.SettingsScreen
 import dev.sysmoon.ferry.player.PlayTarget
@@ -35,30 +43,39 @@ class MainActivity : ComponentActivity() {
         handle(intent)
         setContent {
             FerryTheme {
-                when (screen) {
-                    Screen.GUIDE -> GuideScreen(
-                        selected = guideGroup,
-                        onSelect = { guideGroup = it; returnTo = null },
-                        returnTo = returnTo,
-                        gridView = gridView,
-                        onToggleView = { gridView = !gridView },
-                        onOpenPlayer = { screen = Screen.PLAYER },
-                        onOpenSettings = { screen = Screen.SETTINGS },
-                    )
-                    Screen.PLAYER -> {
-                        // Leaving the player stops the stream; otherwise audio keeps playing behind
-                        // the guide with no picture. (A live preview tile is a later feature.)
-                        val leave = {
-                            returnTo = graph.player.state.value.channel?.id
-                            screen = Screen.GUIDE
-                            lifecycleScope.launch { graph.player.stop() }
+                val playing by graph.player.state.collectAsState()
+                Box(Modifier.fillMaxSize()) {
+                    when (screen) {
+                        Screen.GUIDE -> {
+                            // Lowest priority: only reached when the guide itself has nothing to do
+                            // with Back (focus already in the group list). Returns to the stream.
+                            BackHandler(enabled = playing.channel != null) { screen = Screen.PLAYER }
+                            GuideScreen(
+                                selected = guideGroup,
+                                onSelect = { guideGroup = it; returnTo = null },
+                                returnTo = returnTo,
+                                gridView = gridView,
+                                onToggleView = { gridView = !gridView },
+                                onOpenPlayer = { screen = Screen.PLAYER },
+                                onOpenSettings = { screen = Screen.SETTINGS },
+                            )
                         }
-                        BackHandler { leave() }
-                        PlayerScreen(onBack = { leave() })
+                        Screen.PLAYER -> {
+                            // Leaving the player keeps the stream going in the corner mini player.
+                            val leave = {
+                                returnTo = graph.player.state.value.channel?.id
+                                screen = Screen.GUIDE
+                            }
+                            BackHandler { leave() }
+                            PlayerScreen(onBack = { leave() })
+                        }
+                        Screen.SETTINGS -> {
+                            BackHandler { screen = Screen.GUIDE }
+                            SettingsScreen(onBack = { screen = Screen.GUIDE })
+                        }
                     }
-                    Screen.SETTINGS -> {
-                        BackHandler { screen = Screen.GUIDE }
-                        SettingsScreen(onBack = { screen = Screen.GUIDE })
+                    if (screen != Screen.PLAYER && playing.channel != null) {
+                        MiniPlayer(Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = 24.dp))
                     }
                 }
             }
