@@ -198,6 +198,19 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(report)
                 }
 
+                // Raw Sky EPG lineup data (development aid while building the Sky layout).
+                get("/debug/sky") {
+                    val path = call.request.queryParameters["path"].orEmpty()
+                    if (!Regex("""regions|services/\d+/\d+""").matches(path)) return@get call.respond(HttpStatusCode.BadRequest, ErrorDto("bad path"))
+                    val body = withContext(Dispatchers.IO) {
+                        g.http.newCall(
+                            okhttp3.Request.Builder().url("https://awk.epgsky.com/hawk/linear/$path")
+                                .header("X-SkyOTT-Territory", "GB").build()
+                        ).execute().use { "HTTP ${it.code}\n" + it.body?.string().orEmpty() }
+                    }
+                    call.respondBytes(body.toByteArray(), ContentType.Text.Plain)
+                }
+
                 // ---- Options
                 get("/options") { call.respond(OptionsDto(g.settings.mergeDuplicates())) }
                 put("/options") {
