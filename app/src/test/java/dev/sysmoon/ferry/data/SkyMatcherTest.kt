@@ -105,7 +105,11 @@ class SkyMatcherTest {
             SkyMatcher.GuideEntry("bbcWM", t0, "Breakfast"), SkyMatcher.GuideEntry("bbcWM", t0 + 3 * h, "Morning Live"),
             SkyMatcher.GuideEntry("bbcWM", t0 + 4 * h, "Homes Under the Hammer"),
         )
-        val matches = SkyMatcher.matchBySchedule(listOf(nfl, bbcYl), sky, guide, t0 - h, t0 + 10 * h)
+        // A channel repeating one title all day is never matched on schedule alone.
+        val loop = SkyLineup.SkyChannel(700, "Loop TV", 3, "sid700")
+        val loopSky = (0..5).map { SkyLineup.SkyEvent(t0 + it * h, "Paid Programming") }
+        val loopGuide = (0..5).map { SkyMatcher.GuideEntry("other", t0 + it * h, "Paid Programming") }
+        val matches = SkyMatcher.matchBySchedule(listOf(nfl, bbcYl, loop), sky + ("sid700" to loopSky), guide + loopGuide, t0 - h, t0 + 10 * h)
         assertEquals(listOf(412 to "action"), matches.map { it.sky.number to it.channelId })
     }
 

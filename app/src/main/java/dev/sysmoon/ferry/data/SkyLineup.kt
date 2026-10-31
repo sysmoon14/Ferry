@@ -269,20 +269,26 @@ object SkyMatcher {
         val used = HashSet<String>()
         val out = mutableListOf<Match>()
         for (ch in unmatched) {
+            if (ch.genre == 1) continue // shopping: the same title all day matches anything
             val events = skySchedules[ch.sid].orEmpty().filter { it.start in from until until }
             if (events.size < 3) continue
             val score = HashMap<String, Int>()
+            val titles = HashMap<String, MutableSet<String>>() // distinct Sky titles matched per channel
             for (e in events) {
                 val slot = e.start / 300_000
                 val hits = (slot - 1..slot + 1).flatMap { buckets[it].orEmpty() }
                     .filter { kotlin.math.abs(it.start - e.start) <= 180_000 && similar(it.title, e.title) }
                     .map { it.channelId }.toSet()
-                hits.forEach { score[it] = (score[it] ?: 0) + 1 }
+                hits.forEach {
+                    score[it] = (score[it] ?: 0) + 1
+                    titles.getOrPut(it) { HashSet() } += words(e.title).sorted().joinToString(" ")
+                }
             }
             val ranked = score.entries.filter { it.key !in used }.sortedByDescending { it.value }
             val best = ranked.firstOrNull() ?: continue
             val second = ranked.getOrNull(1)?.value ?: 0
-            if (best.value >= 3 && best.value * 2 >= events.size && second * 5 < best.value * 4) {
+            val distinct = titles[best.key]?.size ?: 0
+            if (best.value >= 3 && distinct >= 3 && best.value * 2 >= events.size && second * 5 < best.value * 4) {
                 used += best.key
                 out += Match(best.key, ch)
             }
