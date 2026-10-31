@@ -1,6 +1,9 @@
 package dev.sysmoon.ferry.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -57,17 +60,29 @@ data class Fixture(
 class FootballData(private val http: OkHttpClient, private val cacheDir: File) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun fixtures(c: Competition, from: LocalDate, days: Int): List<Fixture> = withContext(Dispatchers.IO) {
+    /** ESPN only accepts single dates (ranges get HTTP 400), so days are fetched in parallel. */
+    suspend fun fixtures(c: Competition, from: LocalDate, days: Int): List<Fixture> = coroutineScope {
         val fmt = DateTimeFormatter.BASIC_ISO_DATE
-        val range = "${from.format(fmt)}-${from.plusDays(days.toLong()).format(fmt)}"
-        val body = cached("football_${c.espn}_$range.json", maxAgeMs = 5 * 60_000L) {
-            "$API/${c.espn}/scoreboard?dates=$range&limit=200"
-        }
-        parseScoreboard(body, c)
+        val today = today()
+        val results = (0..days).map { i ->
+            val date = from.plusDays(i.toLong())
+            async(Dispatchers.IO) {
+                runCatching {
+                    // Today's scores change minute to minute; other days rarely.
+                    val maxAge = if (!date.isBefore(today.minusDays(1)) && !date.isAfter(today)) 2 * 60_000L else 3 * 3_600_000L
+                    val body = cached("football_${c.espn}_${date.format(fmt)}.json", maxAge) {
+                        "$API/${c.espn}/scoreboard?dates=${date.format(fmt)}"
+                    }
+                    parseScoreboard(body, c)
+                }
+            }
+        }.awaitAll()
+        if (results.all { it.isFailure }) throw results.first().exceptionOrNull()!!
+        results.flatMap { it.getOrDefault(emptyList()) }.distinctBy { it.id }
     }
 
     suspend fun teams(c: Competition): List<Team> = withContext(Dispatchers.IO) {
-        val body = cached("football_${c.espn}_teams.json", maxAgeMs = 3 * 86_400_000L) { "$API/${c.espn}/teams?limit=100" }
+        val body = cached("football_${c.espn}_teams.json", maxAgeMs = 3 * 86_400_000L) { "$API/${c.espn}/teams" }
         parseTeams(body)
     }
 
