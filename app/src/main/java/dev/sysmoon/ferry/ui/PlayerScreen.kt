@@ -398,7 +398,7 @@ private fun InfoCard(
             .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         // Channel row
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("${channel.shownNumber}", style = MaterialTheme.typography.titleMedium, color = FerryColors.Muted)
             Spacer(Modifier.width(10.dp))
             Box(
