@@ -106,7 +106,7 @@ object SkyMatcher {
 
     private val EXPANSIONS = listOf(
         "skysp" to "sky sports ", "mainev" to "main event", "f'ball" to "football", "netwrk" to "network",
-        "cartoon net " to "cartoon network ", "comedycent" to "comedy central", "bbc parl" to "bbc parliament",
+        "cartoon net " to "cartoon network ", "bbc parl" to "bbc parliament",
         "disc." to "discovery ", "crime+inv" to "crime investigation", "tntsports" to "tnt sports ",
         "nickelodeonhd" to "nickelodeon", "bbcscotland" to "bbc scotland", "food netwrk" to "food network",
         "talkingpictures" to "talking pictures", "skypremiere" to "sky premiere", "skyanimation" to "sky animation",
@@ -114,7 +114,7 @@ object SkyMatcher {
         "great!" to "great ", "mstHveIdeas".lowercase() to "must have ideas", "boxoff" to " box office",
     )
     private val BBC_REGIONS = mapOf(
-        "nw" to "north west", "ne" to "north east", "yks" to "yorkshire", "y&l" to "yorkshire lincolnshire",
+        "nw" to "north west", "ne" to "north east and cumbria", "yks" to "yorkshire", "y&l" to "yorkshire lincolnshire",
         "wm" to "west midlands", "emid" to "east midlands", "east" to "east", "se" to "south east", "wst" to "west",
         "sth" to "south", "sw" to "south west", "ci" to "channel islands", "scot" to "scotland", "wal" to "wales",
         "ni" to "northern ireland", "lon" to "london",
@@ -127,6 +127,9 @@ object SkyMatcher {
         s = s.replace(Regex("""^uk\s*[:|]\s*"""), "")
         // "SkySp PL HD" → "sky sports premier league"
         EXPANSIONS.forEach { (a, b) -> s = s.replace(a, b) }
+        s = s.replace(Regex("""comedycent(?!ral)"""), "comedy central")
+            .replace(Regex("""^tnts\b"""), "tnt sports")
+            .replace(Regex("""\s+x$"""), " xtra")                 // "TRUE CRIME X"
         s = s.replace(Regex("""\bsky sports\s+pl\b"""), "sky sports premier league")
             .replace(Regex("""\bsky sports\s*\+(?!\s*1)"""), "sky sports plus")
             .replace(Regex("""\bcn\+1"""), "cartoon network+1")
@@ -180,6 +183,10 @@ object SkyMatcher {
                 add(key)
                 if (ch.genre == 6 && key.startsWith("sky") && !key.startsWith("skycinema")) add("skycinema" + key.removePrefix("sky"))
                 if (key.endsWith("hd")) add(key.removeSuffix("hd"))
+                if (key.endsWith("tv") && key.length > 4) add(key.removeSuffix("tv"))          // "LFCTV" → "LFC"
+                Regex("""^premier(\d)$""").find(key)?.let { m ->                               // Premier Sports
+                    add("premiersports${m.groupValues[1]}"); add("premiersports${m.groupValues[1]}ire")
+                }
             }
             val found = keys.firstNotNullOfOrNull { k -> index[k]?.filter { it.id !in usedChannels }?.takeIf { it.isNotEmpty() } }
             if (found == null) { unmatched += ch; continue }

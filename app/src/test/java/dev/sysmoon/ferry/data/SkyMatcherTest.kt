@@ -22,6 +22,10 @@ class SkyMatcherTest {
         assertEquals(SkyMatcher.canon("Dave"), SkyMatcher.canon("U&Dave"))
         assertEquals(SkyMatcher.canon("TNT Sports 1"), SkyMatcher.canon("TNTSports1 HD"))
         assertEquals(SkyMatcher.canon("Sky Showcase"), SkyMatcher.canon("Sky One"))
+        assertEquals(SkyMatcher.canon("Comedy Central"), SkyMatcher.canon("ComedyCentral"))
+        assertEquals(SkyMatcher.canon("True Crime Xtra SD (576p)"), SkyMatcher.canon("TRUE CRIME X"))
+        assertEquals(SkyMatcher.canon("TNT Sports Box Office"), SkyMatcher.canon("TNTSBoxOffHD"))
+        assertEquals(SkyMatcher.canon("BBC One North East and Cumbria FHD (1080p)"), SkyMatcher.canon("BBC One NE HD"))
         assertEquals("comedycentralplus1", SkyMatcher.tvgStem("comedycentralplus1.uk"))
     }
 
@@ -29,7 +33,7 @@ class SkyMatcherTest {
         val lineup = listOf(
             sky(101, "BBC One NW HD"), sky(103, "ITV1 HD"), sky(105, "5 HD"), sky(106, "Sky One"), sky(111, "U&Dave"),
             sky(203, "ITV1+1"), sky(301, "SkyPremiereHD", 6), sky(401, "SkySpMainEvHD", 7), sky(410, "TNTSports1 HD", 7),
-            sky(601, "Cartoon Netwrk", 2), sky(640, "Cartoon Net HD", 2), sky(806, "Sky One HD"), sky(999, "Nothing Like It"),
+            sky(423, "LFCTV HD", 7), sky(601, "Cartoon Netwrk", 2), sky(640, "Cartoon Net HD", 2), sky(806, "Sky One HD"), sky(999, "Nothing Like It"),
         )
         val playlist = listOf(
             ch("bbc1nw", "BBC One North West FHD (1080p)", "bbcnorthwest.uk", "UK | Regionals*"),
@@ -43,6 +47,7 @@ class SkyMatcherTest {
             ch("premiere", "Sky Cinema Premiere", "skypremiere.uk", "UK | Movies*"),
             ch("mainevent", "Sky Sports Main Event", "skysportsmainevent.uk", "UK | Sports*"),
             ch("tnt1", "TNT Sports 1", "btsport1.uk", "UK | Sports*"),
+            ch("lfc", "LFC", "liverpoolfctv.uk", "UK | Sports*"),
             ch("cn", "Cartoon Network", "cartoonnetwork.uk", "UK | Kids*"),
             ch("cnus", "Cartoon Network FHD", "CartoonNetwork.us", "US | Kids"),
         )
@@ -58,6 +63,7 @@ class SkyMatcherTest {
         assertEquals("mainevent", byNumber[401])
         assertEquals("tnt1", byNumber[410])
         assertEquals("cn", byNumber[601])
+        assertEquals("lfc", byNumber[423])
         assertTrue(640 !in byNumber && 806 !in byNumber) // HD duplicates don't take a second number
         assertEquals(listOf(999), result.unmatched.map { it.number })
     }
