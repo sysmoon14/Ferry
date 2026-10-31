@@ -39,10 +39,12 @@ import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.data.shownNumber
 import dev.sysmoon.ferry.graph
 
-val MINI_WIDTH: Dp = 240.dp
-val MINI_HEIGHT: Dp = 135.dp
+val MINI_WIDTH: Dp = 208.dp
+val MINI_HEIGHT: Dp = 117.dp
 private val MINI_END = 24.dp
-private val MINI_TOP = 20.dp
+/** Space to leave at the right of anything drawn level with the corner mini player. */
+val MINI_CLEARANCE: Dp = MINI_WIDTH + MINI_END + 12.dp
+private val MINI_TOP = 12.dp
 
 /**
  * The one video surface. Full screen while watching; Back shrinks it into the top-right corner

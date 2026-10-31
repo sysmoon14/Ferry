@@ -258,7 +258,7 @@ fun GuideScreen(
         Column(Modifier.weight(1f).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus }) {
             // Leave room on the right for the corner mini player when a stream is playing.
             Row(
-                Modifier.fillMaxWidth().padding(bottom = 6.dp, end = if (nowPlaying.channel != null) 250.dp else 0.dp),
+                Modifier.fillMaxWidth().padding(bottom = 6.dp, end = if (nowPlaying.channel != null) MINI_CLEARANCE else 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(

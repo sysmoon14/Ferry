@@ -261,7 +261,10 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     val graph = LocalContext.current.graph
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
-    Column(Modifier.fillMaxWidth().height(78.dp).padding(start = 4.dp, bottom = 4.dp)) {
+    // Keep clear of the corner mini player while a stream is playing; tall enough that the
+    // time ruler below starts under it.
+    val miniShowing = graph.player.state.collectAsState().value.channel != null
+    Column(Modifier.fillMaxWidth().height(84.dp).padding(start = 4.dp, bottom = 4.dp, end = if (miniShowing) MINI_CLEARANCE else 0.dp)) {
         val (channel, p) = focused ?: return@Column
         Text(
             p?.title ?: channel.displayName,
@@ -289,11 +292,8 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
             }
             if (channel.favourite) Tag("★", FerryColors.Gold)
         }
-        // Keep clear of the corner mini player while a stream is playing.
-        val miniShowing = graph.player.state.collectAsState().value.channel != null
         p?.description?.let {
-            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(end = if (miniShowing) 250.dp else 0.dp))
+            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
         } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
     }
 }
