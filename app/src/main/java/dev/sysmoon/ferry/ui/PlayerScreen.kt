@@ -410,7 +410,7 @@ private fun InfoCard(
             }
             Spacer(Modifier.width(10.dp))
             Text(channel.displayName, style = MaterialTheme.typography.titleMedium, color = FerryColors.Gold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 320.dp))
             Spacer(Modifier.width(14.dp))
             when {
                 !isCurrent -> Pill("PREVIEW — OK TO WATCH", FerryColors.Sea)
