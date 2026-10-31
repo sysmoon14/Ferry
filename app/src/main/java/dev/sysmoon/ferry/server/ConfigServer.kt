@@ -211,6 +211,18 @@ class ConfigServer(private val g: AppGraph) {
                     g.repository.applySky()
                     call.respond(skyStatus())
                 }
+                // Hand-pick the playlist channel for a Sky number (channelId null clears the pick).
+                put("/sky/override") {
+                    val input = call.receive<SkyOverrideInput>()
+                    val key = input.channelId?.let { id ->
+                        val ch = g.db.channels().get(id) ?: return@put call.respond(HttpStatusCode.NotFound, ErrorDto("no such channel"))
+                        val primary = ch.primaryId?.let { g.db.channels().get(it) } ?: ch
+                        dev.sysmoon.ferry.data.streamKey(primary.sourceId, primary.streamUrl)
+                    }
+                    g.settings.setSkyOverride(input.number, key)
+                    g.repository.applySky()
+                    call.respond(skyStatus())
+                }
 
                 // ---- Options
                 get("/options") { call.respond(OptionsDto(g.settings.mergeDuplicates())) }
@@ -372,6 +384,7 @@ class ConfigServer(private val g: AppGraph) {
             total = report?.total ?: 0,
             unmatched = report?.unmatched.orEmpty().map { SkyChannelDto(it.number, it.title, it.section) },
             error = report?.error,
+            notes = report?.notes.orEmpty().map { SkyNoteDto(it.number, it.title, it.channel, it.how) },
         )
     }
 }

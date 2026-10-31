@@ -16,7 +16,8 @@ import java.io.File
  * in Sky's sections in Sky order. Nothing is streamed from Sky; this is only the channel list.
  */
 class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
-    @Serializable data class SkyChannel(val number: Int, val title: String, val genre: Int) {
+    /** [sid] is Sky's service id: it stays the same when Sky renames a channel (Action → NFL). */
+    @Serializable data class SkyChannel(val number: Int, val title: String, val genre: Int, val sid: String = "") {
         val section: String get() = SECTIONS[genre] ?: "Other"
     }
 
@@ -24,7 +25,7 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
 
     /** The line-up for a Sky region, cached for a day. Falls back to the cache if Sky can't be reached. */
     fun channels(region: Int): List<SkyChannel> {
-        val cache = File(cacheDir, "sky_lineup_$region.json")
+        val cache = File(cacheDir, "sky_lineup_v2_$region.json")
         val fresh = cache.exists() && System.currentTimeMillis() - cache.lastModified() < 86_400_000L
         if (!fresh) {
             runCatching { fetch(region) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { raw ->
@@ -49,11 +50,41 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
                 if (c.startsWith("0")) return@mapNotNull null // radio uses 0xxx
                 val genre = o.str("sg")?.toIntOrNull() ?: return@mapNotNull null
                 if (genre == 0 || genre == 4) return@mapNotNull null // line-up info, radio
-                SkyChannel(c.toIntOrNull() ?: return@mapNotNull null, o.str("t") ?: return@mapNotNull null, genre)
+                SkyChannel(c.toIntOrNull() ?: return@mapNotNull null, o.str("t") ?: return@mapNotNull null, genre, o.str("sid").orEmpty())
             }
             if (list.isNotEmpty()) return list.sortedBy { it.number }
         }
         return emptyList()
+    }
+
+    /** A Sky schedule entry: start (epoch ms) and title. */
+    data class SkyEvent(val start: Long, val title: String)
+
+    /** Today's schedule for each Sky service id (Sky's own guide), batched as Sky's site does it. */
+    fun schedules(sids: List<String>, date: java.time.LocalDate): Map<String, List<SkyEvent>> {
+        val day = date.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+        val out = HashMap<String, MutableList<SkyEvent>>()
+        sids.filter { it.isNotBlank() }.distinct().chunked(20).forEach { batch ->
+            runCatching {
+                val body = http.newCall(
+                    Request.Builder().url("$API/schedule/$day/${batch.joinToString(",")}")
+                        .header("X-SkyOTT-Territory", "GB").build()
+                ).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: return@runCatching
+                val schedule = ((json.parseToJsonElement(body) as? JsonObject)?.get("schedule") as? JsonArray).orEmpty()
+                for (entry in schedule) {
+                    val o = entry as? JsonObject ?: continue
+                    val sid = o.str("sid") ?: continue
+                    val events = (o["events"] as? JsonArray).orEmpty()
+                    for (e in events) {
+                        val ev = e as? JsonObject ?: continue
+                        val st = ev.str("st")?.toLongOrNull() ?: continue
+                        val t = ev.str("t") ?: continue
+                        out.getOrPut(sid) { mutableListOf() } += SkyEvent(st * 1000, t)
+                    }
+                }
+            }
+        }
+        return out
     }
 
     private fun JsonObject.str(key: String): String? =
@@ -103,6 +134,17 @@ object SkyMatcher {
     )
     data class Match(val channelId: String, val sky: SkyLineup.SkyChannel)
     data class Result(val matches: List<Match>, val unmatched: List<SkyLineup.SkyChannel>)
+
+    /**
+     * Sky's seasonal renames that playlists are slow to pick up (same channel, old name). The
+     * schedule comparison in [matchBySchedule] catches renames not listed here.
+     */
+    private val SEASONAL = mapOf(
+        "skysportsnfl" to listOf("skysportsaction"),
+        "skysportsaction" to listOf("skysportsnfl"),
+        "skysportsdarts" to listOf("skysportsaction", "skysportsarena"),
+        "skysportsarena" to listOf("skysportsaction"),
+    )
 
     private val EXPANSIONS = listOf(
         "skysp" to "sky sports ", "mainev" to "main event", "f'ball" to "football", "netwrk" to "network",
@@ -184,6 +226,7 @@ object SkyMatcher {
                 if (ch.genre == 6 && key.startsWith("sky") && !key.startsWith("skycinema")) add("skycinema" + key.removePrefix("sky"))
                 if (key.endsWith("hd")) add(key.removeSuffix("hd"))
                 if (key.endsWith("tv") && key.length > 4) add(key.removeSuffix("tv"))          // "LFCTV" → "LFC"
+                SEASONAL[key]?.let { addAll(it) }
                 Regex("""^premier(\d)$""").find(key)?.let { m ->                               // Premier Sports
                     add("premiersports${m.groupValues[1]}"); add("premiersports${m.groupValues[1]}ire")
                 }
@@ -196,4 +239,55 @@ object SkyMatcher {
         }
         return Result(matches, unmatched)
     }
+
+    /** A programme in the playlist's guide, for schedule comparison. */
+    data class GuideEntry(val channelId: String, val start: Long, val title: String)
+
+    /**
+     * Finds playlist channels for Sky channels that the names couldn't match (typically a Sky
+     * rename the provider hasn't caught up with) by comparing schedules: the same programmes at
+     * the same times are the same channel. Ambiguous cases (e.g. BBC One regions, which air
+     * mostly the same programmes) are skipped rather than guessed.
+     */
+    fun matchBySchedule(
+        unmatched: List<SkyLineup.SkyChannel>,
+        skySchedules: Map<String, List<SkyLineup.SkyEvent>>,
+        guide: List<GuideEntry>,
+        from: Long,
+        until: Long,
+    ): List<Match> {
+        val stop = setOf("live", "new", "the", "and", "with", "from")
+        fun words(t: String) = t.lowercase().split(Regex("""[^a-z0-9]+""")).filter { it.length >= 3 && it !in stop }.toSet()
+        fun similar(a: String, b: String): Boolean {
+            val wa = words(a); val wb = words(b)
+            if (wa.isEmpty() || wb.isEmpty()) return false
+            return (wa intersect wb).size * 2 >= minOf(wa.size, wb.size)
+        }
+        // Bucket the playlist guide by 5-minute start slot.
+        val buckets = HashMap<Long, MutableList<GuideEntry>>()
+        for (g in guide) if (g.start in from until until) buckets.getOrPut(g.start / 300_000) { mutableListOf() } += g
+        val used = HashSet<String>()
+        val out = mutableListOf<Match>()
+        for (ch in unmatched) {
+            val events = skySchedules[ch.sid].orEmpty().filter { it.start in from until until }
+            if (events.size < 3) continue
+            val score = HashMap<String, Int>()
+            for (e in events) {
+                val slot = e.start / 300_000
+                val hits = (slot - 1..slot + 1).flatMap { buckets[it].orEmpty() }
+                    .filter { kotlin.math.abs(it.start - e.start) <= 180_000 && similar(it.title, e.title) }
+                    .map { it.channelId }.toSet()
+                hits.forEach { score[it] = (score[it] ?: 0) + 1 }
+            }
+            val ranked = score.entries.filter { it.key !in used }.sortedByDescending { it.value }
+            val best = ranked.firstOrNull() ?: continue
+            val second = ranked.getOrNull(1)?.value ?: 0
+            if (best.value >= 3 && best.value * 2 >= events.size && second * 5 < best.value * 4) {
+                used += best.key
+                out += Match(best.key, ch)
+            }
+        }
+        return out
+    }
+
 }

@@ -76,7 +76,10 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val total: Int,
     val unmatched: List<SkyChannelDto>,
     val error: String?,
+    val notes: List<SkyNoteDto> = emptyList(),
 )
+@Serializable data class SkyNoteDto(val number: Int, val title: String, val channel: String, val how: String)
+@Serializable data class SkyOverrideInput(val number: Int, val channelId: String? = null)
 @Serializable data class SkyInput(val enabled: Boolean, val region: Int, val extraGroups: List<String> = emptyList())
 
 @Serializable data class ChannelPage(val total: Int, val items: List<ChannelDto>)

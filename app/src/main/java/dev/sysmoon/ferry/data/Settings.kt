@@ -42,6 +42,7 @@ class Settings(private val context: Context) {
         val skyLayout = booleanPreferencesKey("sky_layout")
         val skyRegion = intPreferencesKey("sky_region")
         val skyExtraGroups = stringSetPreferencesKey("sky_extra_groups")
+        val skyOverrides = stringSetPreferencesKey("sky_overrides")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -108,6 +109,15 @@ class Settings(private val context: Context) {
         it[Keys.skyLayout] = enabled
         it[Keys.skyRegion] = region
         it[Keys.skyExtraGroups] = extraGroups
+    }
+
+    /** Hand-picked Sky matches: Sky number → the channel's [streamKey]. */
+    suspend fun skyOverrides(): Map<Int, String> = (store.data.first()[Keys.skyOverrides] ?: emptySet())
+        .mapNotNull { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (n, k) -> n.toIntOrNull()?.let { it to k } } }
+        .toMap()
+    suspend fun setSkyOverride(number: Int, streamKey: String?) = store.edit { prefs ->
+        val rest = (prefs[Keys.skyOverrides] ?: emptySet()).filterNot { it.startsWith("$number=") }.toSet()
+        prefs[Keys.skyOverrides] = if (streamKey == null) rest else rest + "$number=$streamKey"
     }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]

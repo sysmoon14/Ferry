@@ -30,13 +30,15 @@ interface SourceDao {
 
 data class SkyCandidateRow(
     val id: String, val name: String, val tvgId: String?, val groupTitle: String?, val quality: Int, val position: Int,
+    val streamUrl: String,
+    val sourceId: Long,
 )
 
 data class KeyDays(val epgKey: String, val days: Int)
 
 data class GroupSummary(val name: String, val count: Int)
 
-data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int)
+data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int, val streamUrl: String)
 
 /** Ordering used everywhere a "channel list" is shown: favourites first, user order, then provider order. */
 // sourceId keeps each playlist together: otherwise two sources that both number from 1
@@ -107,7 +109,7 @@ interface ChannelDao {
 
     /** Only rows the user has customised; everything else is rebuilt from the playlist. */
     @Query(
-        """SELECT id, favourite, hidden, sortOrder FROM channels
+        """SELECT id, favourite, hidden, sortOrder, streamUrl FROM channels
            WHERE sourceId = :sourceId AND (favourite = 1 OR hidden = 1 OR sortOrder != 2147483647)"""
     )
     suspend fun prefsForSource(sourceId: Long): List<ChannelPrefs>
@@ -126,7 +128,7 @@ interface ChannelDao {
     suspend fun get(id: String): ChannelEntity?
 
     // ---- Sky layout
-    @Query("SELECT id, name, tvgId, groupTitle, quality, position FROM channels WHERE primaryId IS NULL AND hidden = 0")
+    @Query("SELECT id, name, tvgId, groupTitle, quality, position, streamUrl, sourceId FROM channels WHERE primaryId IS NULL AND hidden = 0")
     suspend fun skyCandidates(): List<SkyCandidateRow>
 
     @Query("UPDATE channels SET skyNumber = NULL, skySection = NULL WHERE skyNumber IS NOT NULL")

@@ -155,7 +155,8 @@
         <p class="muted small">Ferry fetches Sky's channel list for your region and matches it to your playlist. Matched channels get their Sky number (101 BBC One, 401 Sky Sports Main Event) and appear in Sky's sections in Sky order; typing a number on the remote tunes it.</p>
         <div class="row"><label class="small muted" style="flex:none">Sky region</label><select id="skyRegion"></select></div>
         <p class="small" id="skyStatus"></p>
-        <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist</summary><div id="skyMissing" class="small muted" style="margin-top:6px;line-height:1.6"></div></details>
+        <div id="skyNotes" class="small" style="margin:6px 0"></div>
+        <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist — pick one by hand</summary><div id="skyMissing" class="small" style="margin-top:6px"></div></details>
         <h3 style="margin:14px 0 4px">Extra groups</h3>
         <p class="muted small">Provider groups to show after the Sky sections (everything else stays out of the guide).</p>
         <input id="skyExtraQ" placeholder="Filter groups" type="search">
@@ -477,7 +478,14 @@
       : sky.error ? `Couldn't load Sky's channel list: ${sky.error}`
       : `Matched ${sky.matched} of ${sky.total} Sky channels.`;
     $("skyMissingBox").hidden = !sky.enabled || !sky.unmatched.length;
-    $("skyMissing").textContent = sky.unmatched.map(c => `${c.number} ${c.title}`).join(" · ");
+    $("skyMissing").replaceChildren(...sky.unmatched.map(c => skyPickRow(c.number, c.title)));
+    $("skyNotes").replaceChildren(...(sky.enabled ? sky.notes : []).map(n => {
+      const row = el("div", { className: "row", style: "gap:8px;align-items:center" },
+        el("span", { className: "grow" }, `${n.number} ${n.title} → ${n.channel}`),
+        el("span", { className: "muted small" }, n.how === "picked" ? "picked by you" : "matched by schedule"));
+      if (n.how === "picked") row.append(el("button", { className: "btn ghost", style: "flex:none", onclick: () => skyOverride(n.number, null) }, "Clear"));
+      return row;
+    }));
     const q = $("skyExtraQ").value.trim().toLowerCase();
     const visible = (groups.length ? groups : []).filter(g => !g.hidden && (!q || g.name.toLowerCase().includes(q)));
     $("skyExtraList").replaceChildren(...visible.map(g => {
@@ -487,6 +495,27 @@
     }));
   }
   $("skyExtraQ").oninput = renderSky;
+  async function skyOverride(number, channelId) {
+    try { sky = await api("/sky/override", { method: "PUT", body: { number, channelId } }); renderSky(); toast(channelId ? "Matched" : "Cleared"); }
+    catch (e) { toast(e.message); }
+  }
+  // One unmatched Sky channel with a search box to pick the playlist channel that carries it.
+  function skyPickRow(number, title) {
+    const results = el("div", { className: "small" });
+    const q = el("input", { type: "search", placeholder: "Search your channels", style: "display:none;margin-top:4px" });
+    let timer;
+    q.oninput = () => { clearTimeout(timer); timer = setTimeout(async () => {
+      if (q.value.trim().length < 2) { results.replaceChildren(); return; }
+      const page = await api(`/channels?q=${encodeURIComponent(q.value.trim())}&limit=8`);
+      results.replaceChildren(...page.items.map(c => el("div", { className: "row", style: "gap:8px;align-items:center" },
+        el("span", { className: "grow" }, c.name), el("span", { className: "muted small" }, c.group || ""),
+        el("button", { className: "btn ghost", style: "flex:none", onclick: () => skyOverride(number, c.id) }, "Use"))));
+    }, 250); };
+    const pick = el("button", { className: "btn ghost", style: "flex:none" }, "Pick…");
+    pick.onclick = () => { q.style.display = ""; q.focus(); pick.remove(); };
+    return el("div", { style: "margin:6px 0" },
+      el("div", { className: "row", style: "gap:8px;align-items:center" }, el("span", { className: "grow" }, `${number} ${title}`), pick), q, results);
+  }
   $("skySave").onclick = async () => {
     $("skySave").disabled = true;
     try {

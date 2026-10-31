@@ -68,6 +68,14 @@ val ChannelEntity.epgKey: String get() = tvgId ?: name
 /** Days of catch-up this row offers, from whichever of its streams has an archive. */
 val ChannelEntity.archiveDays: Int get() = maxOf(catchupDays, rowCatchupDays)
 
+/**
+ * Identity that survives provider renames: Xtream's stream id (from the /live/user/pass/<id>.ts
+ * URL) when there is one, else the URL itself. Channel ids hash the name, so they change on rename.
+ */
+fun streamKey(sourceId: Long, streamUrl: String): String =
+    Regex("""/live/[^/]+/[^/]+/([^/.?]+)""").find(streamUrl)?.let { "$sourceId:x${it.groupValues[1]}" }
+        ?: "$sourceId:${streamUrl.substringBefore('?')}"
+
 /** Number to show: the Sky number when the Sky layout matched this channel, else the provider's. */
 val ChannelEntity.shownNumber: Int get() = skyNumber ?: number ?: (position + 1)
 

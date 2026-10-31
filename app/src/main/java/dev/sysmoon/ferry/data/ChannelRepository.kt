@@ -35,7 +35,10 @@ class ChannelRepository(
         val matched: Int,
         val unmatched: List<SkyLineup.SkyChannel>,
         val error: String? = null,
+        /** Matches found by comparing schedules or picked by hand (412 SkySp NFL HD → Sky Sports Action). */
+        val notes: List<SkyNote> = emptyList(),
     )
+    data class SkyNote(val number: Int, val title: String, val channel: String, val how: String)
 
     /** Outcome of the last Sky layout pass, for the web page. */
     @Volatile var skyReport: SkyReport? = null
@@ -59,17 +62,67 @@ class ChannelRepository(
             skyReport = SkyReport(region, 0, 0, emptyList(), e.message ?: e.javaClass.simpleName)
             return@withContext
         }
-        val candidates = db.channels().skyCandidates().map {
-            SkyMatcher.Candidate(it.id, it.name, it.tvgId, it.groupTitle, it.quality, it.position)
+        val rows = db.channels().skyCandidates()
+        val notes = mutableListOf<SkyNote>()
+
+        // 1. Hand-picked matches win, keyed by stream so they survive provider renames.
+        val rowByKey = rows.associateBy { streamKey(it.sourceId, it.streamUrl) }
+        val manual = settings.skyOverrides().mapNotNull { (number, key) ->
+            val sky = lineup.firstOrNull { it.number == number } ?: return@mapNotNull null
+            val row = rowByKey[key] ?: return@mapNotNull null
+            notes += SkyNote(sky.number, sky.title, row.name, "picked")
+            SkyMatcher.Match(row.id, sky)
         }
-        val result = SkyMatcher.match(lineup, candidates, region)
+        val manualIds = manual.map { it.channelId }.toSet()
+        val manualNumbers = manual.map { it.sky.number }.toSet()
+
+        // 2. Names and guide IDs.
+        val candidates = rows.filter { it.id !in manualIds }
+            .map { SkyMatcher.Candidate(it.id, it.name, it.tvgId, it.groupTitle, it.quality, it.position) }
+        val byName = SkyMatcher.match(lineup.filter { it.number !in manualNumbers }, candidates, region)
+
+        // 3. Schedules, for renames the playlist hasn't caught up with.
+        val usedIds = manualIds + byName.matches.map { it.channelId }
+        val bySchedule = runCatching { matchBySchedule(byName.unmatched, rows.filter { it.id !in usedIds }) }
+            .onFailure { Log.w(TAG, "Sky schedule matching failed", it) }
+            .getOrDefault(emptyList())
+        val nameById = rows.associate { it.id to it.name }
+        bySchedule.forEach { notes += SkyNote(it.sky.number, it.sky.title, nameById[it.channelId].orEmpty(), "schedule") }
+
+        val matches = manual + byName.matches + bySchedule
+        val unmatched = byName.unmatched.filter { u -> bySchedule.none { it.sky.number == u.number } }
         db.withTransaction {
             db.channels().clearSky()
-            result.matches.forEach { db.channels().setSky(it.channelId, it.sky.number, it.sky.section) }
+            matches.forEach { db.channels().setSky(it.channelId, it.sky.number, it.sky.section) }
         }
-        val total = result.matches.size + result.unmatched.size
-        skyReport = SkyReport(region, total, result.matches.size, result.unmatched)
-        Log.i(TAG, "Sky layout: matched ${result.matches.size} of $total for region $region")
+        val total = matches.size + unmatched.size
+        skyReport = SkyReport(region, total, matches.size, unmatched, notes = notes)
+        Log.i(TAG, "Sky layout: matched ${matches.size} of $total for region $region (${bySchedule.size} by schedule)")
+    }
+
+    /** Compares Sky's schedule for unmatched Sky channels with the playlist guide (next ~10 hours). */
+    private suspend fun matchBySchedule(
+        unmatched: List<SkyLineup.SkyChannel>,
+        rows: List<SkyCandidateRow>,
+    ): List<SkyMatcher.Match> {
+        val uk = rows.filter {
+            it.tvgId?.lowercase()?.endsWith(".uk") == true || it.groupTitle?.startsWith("UK", ignoreCase = true) == true
+        }
+        if (unmatched.isEmpty() || uk.isEmpty()) return emptyList()
+        val now = System.currentTimeMillis()
+        val from = now - 2 * 3_600_000L
+        val until = now + 10 * 3_600_000L
+        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/London"))
+        val sids = unmatched.map { it.sid }.filter { it.isNotBlank() }
+        if (sids.isEmpty()) return emptyList()
+        val schedules = HashMap<String, MutableList<SkyLineup.SkyEvent>>()
+        for (day in listOf(today, today.plusDays(1))) {
+            sky.schedules(sids, day).forEach { (sid, events) -> schedules.getOrPut(sid) { mutableListOf() } += events }
+        }
+        val idsByKey = uk.groupBy({ it.tvgId ?: it.name }, { it.id })
+        val guide = idsByKey.keys.toList().chunked(500).flatMap { db.programmes().window(it, from, until) }
+            .flatMap { p -> idsByKey[p.channelKey].orEmpty().map { id -> SkyMatcher.GuideEntry(id, p.start, p.title) } }
+        return SkyMatcher.matchBySchedule(unmatched, schedules, guide, from, until)
     }
 
     suspend fun addSource(source: SourceEntity): Long = db.sources().insert(source)
@@ -132,10 +185,13 @@ class ChannelRepository(
 
     private suspend fun storeChannels(src: SourceEntity, entries: Sequence<M3uEntry>): Int {
         // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
-        val existing = db.channels().prefsForSource(src.id).associateBy { it.id }
+        val prefs = db.channels().prefsForSource(src.id)
+        val existing = prefs.associateBy { it.id }
+        // A renamed channel gets a new id (it hashes the name); find its prefs by stream instead.
+        val existingByStream = prefs.associateBy { streamKey(src.id, it.streamUrl) }
         val hiddenGroups = settings.hiddenGroups()
         val parsed = entries
-            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing, hiddenGroups) }
+            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing, hiddenGroups, existingByStream) }
             .distinctBy { it.id }
             .toList()
         require(parsed.isNotEmpty()) { "No live channels found" }
@@ -233,9 +289,10 @@ class ChannelRepository(
             index: Int,
             existing: Map<String, ChannelPrefs>,
             hiddenGroups: Set<String> = emptySet(),
+            existingByStream: Map<String, ChannelPrefs> = emptyMap(),
         ): ChannelEntity {
             val id = channelId(sourceId, this)
-            val prev = existing[id]
+            val prev = existing[id] ?: existingByStream[streamKey(sourceId, url)]
             return ChannelEntity(
                 id = id,
                 sourceId = sourceId,
