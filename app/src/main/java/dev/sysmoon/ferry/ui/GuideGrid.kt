@@ -78,8 +78,8 @@ private const val LOAD_BUCKET_MS = 3 * 3_600_000L   // programmes are loaded in 
 private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
-private val CHANNEL_COL: Dp = 300.dp
-private val ROW_HEIGHT: Dp = 62.dp
+private val CHANNEL_COL: Dp = 280.dp
+private val ROW_HEIGHT: Dp = 46.dp
 
 private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
 
@@ -182,10 +182,12 @@ fun GuideGrid(
     Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
         DetailPanel(focused, now, reminded)
         TimeRuler(windowStart, now)
+        // Size the list to a whole number of rows so the last one is never cut off.
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val rowsThatFit = (maxHeight / ROW_HEIGHT).toInt().coerceAtLeast(1)
         LazyColumn(
-            Modifier.weight(1f),
+            Modifier.fillMaxWidth().height(ROW_HEIGHT * rowsThatFit),
             state = listState,
-            contentPadding = PaddingValues(vertical = 4.dp),
         ) {
             itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
                 GridRow(
@@ -250,6 +252,7 @@ fun GuideGrid(
                 )
             }
         }
+        }
     }
 }
 
@@ -258,15 +261,15 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     val graph = LocalContext.current.graph
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
-    Column(Modifier.fillMaxWidth().height(132.dp).padding(start = 4.dp, bottom = 8.dp)) {
+    Column(Modifier.fillMaxWidth().height(96.dp).padding(start = 4.dp, bottom = 4.dp)) {
         val (channel, p) = focused ?: return@Column
         Text(
             p?.title ?: channel.displayName,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
             val bits = buildList {
                 if (p != null) {
                     val dayText = if (floorDay(p.start) == floorDay(now)) "Today" else day.format(Date(p.start))
@@ -289,7 +292,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
         // Keep clear of the corner mini player while a stream is playing.
         val miniShowing = graph.player.state.collectAsState().value.channel != null
         p?.description?.let {
-            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(end = if (miniShowing) 250.dp else 0.dp))
         } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
     }
@@ -314,7 +317,7 @@ private fun Tag(text: String, color: Color) {
 @Composable
 private fun TimeRuler(windowStart: Long, now: Long) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
-    Row(Modifier.fillMaxWidth().height(28.dp)) {
+    Row(Modifier.fillMaxWidth().height(24.dp)) {
         Box(Modifier.width(CHANNEL_COL), contentAlignment = Alignment.CenterStart) {
             val label = if (floorDay(windowStart) == floorDay(now)) "Today"
                 else SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
@@ -363,20 +366,21 @@ private fun GridRow(
     onSelect: (ProgrammeEntity?) -> Unit,
     onLongPress: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().height(ROW_HEIGHT).padding(vertical = 3.dp)) {
+    Row(Modifier.fillMaxWidth().height(ROW_HEIGHT).padding(vertical = 2.dp)) {
         // Channel column
         Row(Modifier.width(CHANNEL_COL).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${channel.shownNumber}",
                 color = FerryColors.Muted,
-                modifier = Modifier.width(44.dp),
+                modifier = Modifier.width(38.dp),
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
             )
             Box(
-                Modifier.size(width = 52.dp, height = 34.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
+                Modifier.size(width = 46.dp, height = 28.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
                 contentAlignment = Alignment.Center,
             ) {
-                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(3.dp))
+                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(2.dp))
                 else Text(channel.name.take(3).uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
             }
             Text(

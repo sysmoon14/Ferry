@@ -214,7 +214,7 @@ fun GuideScreen(
         runCatching { returnFocus.requestFocus() }
     }
 
-    Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
+    Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 16.dp)) {
         // Group rail
         androidx.compose.animation.AnimatedVisibility(
             visible = railVisible,
@@ -258,7 +258,7 @@ fun GuideScreen(
         Column(Modifier.weight(1f).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus }) {
             // Leave room on the right for the corner mini player when a stream is playing.
             Row(
-                Modifier.fillMaxWidth().padding(bottom = 16.dp, end = if (nowPlaying.channel != null) 250.dp else 0.dp),
+                Modifier.fillMaxWidth().padding(bottom = 6.dp, end = if (nowPlaying.channel != null) 250.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -268,7 +268,7 @@ fun GuideScreen(
                         effective == ALL -> if (sky) "All Sky channels" else "All channels"
                         else -> effective.removePrefix(SKY_PREFIX)
                     },
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                 )
                 if (effective == ALL && !sky && total > GUIDE_LIMIT) {
                     Text(
@@ -336,7 +336,7 @@ private fun Clock() {
             delay(60_000 - value % 60_000) // tick on the minute
         }
     }
-    Text(format.format(Date(now)), style = MaterialTheme.typography.headlineSmall, color = FerryColors.Muted)
+    Text(format.format(Date(now)), style = MaterialTheme.typography.titleLarge, color = FerryColors.Muted)
 }
 
 @Composable
