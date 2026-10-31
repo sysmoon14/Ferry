@@ -214,7 +214,7 @@ fun GuideScreen(
         runCatching { returnFocus.requestFocus() }
     }
 
-    Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 16.dp)) {
+    Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 12.dp)) {
         // Group rail
         androidx.compose.animation.AnimatedVisibility(
             visible = railVisible,
@@ -223,7 +223,7 @@ fun GuideScreen(
         ) {
         Row {
         Column(Modifier.width(240.dp).fillMaxHeight()) {
-            Text("Ferry", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
+            Text("Ferry", style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold)
             Spacer(Modifier.height(16.dp))
             LazyColumn(
                 Modifier.weight(1f),

@@ -79,7 +79,7 @@ private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
 private val CHANNEL_COL: Dp = 280.dp
-private val ROW_HEIGHT: Dp = 46.dp
+private val ROW_HEIGHT: Dp = 34.dp
 
 private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
 
@@ -261,11 +261,11 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     val graph = LocalContext.current.graph
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
-    Column(Modifier.fillMaxWidth().height(96.dp).padding(start = 4.dp, bottom = 4.dp)) {
+    Column(Modifier.fillMaxWidth().height(78.dp).padding(start = 4.dp, bottom = 4.dp)) {
         val (channel, p) = focused ?: return@Column
         Text(
             p?.title ?: channel.displayName,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -292,7 +292,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
         // Keep clear of the corner mini player while a stream is playing.
         val miniShowing = graph.player.state.collectAsState().value.channel != null
         p?.description?.let {
-            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
+            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(end = if (miniShowing) 250.dp else 0.dp))
         } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
     }
@@ -317,11 +317,11 @@ private fun Tag(text: String, color: Color) {
 @Composable
 private fun TimeRuler(windowStart: Long, now: Long) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
-    Row(Modifier.fillMaxWidth().height(24.dp)) {
+    Row(Modifier.fillMaxWidth().height(20.dp)) {
         Box(Modifier.width(CHANNEL_COL), contentAlignment = Alignment.CenterStart) {
             val label = if (floorDay(windowStart) == floorDay(now)) "Today"
                 else SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
-            Text(label, color = FerryColors.Gold, style = MaterialTheme.typography.labelLarge)
+            Text(label, color = FerryColors.Gold, style = MaterialTheme.typography.labelMedium)
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val perMs = maxWidth / WINDOW_MS.toFloat()
@@ -330,7 +330,7 @@ private fun TimeRuler(windowStart: Long, now: Long) {
                 Text(
                     time.format(Date(t)),
                     color = FerryColors.Muted,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.offset(x = perMs * (t - windowStart).toFloat() + 6.dp),
                 )
                 t += SLOT_MS
@@ -377,7 +377,7 @@ private fun GridRow(
                 maxLines = 1,
             )
             Box(
-                Modifier.size(width = 46.dp, height = 28.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
+                Modifier.size(width = 38.dp, height = 22.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
                 contentAlignment = Alignment.Center,
             ) {
                 if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(2.dp))
@@ -387,8 +387,8 @@ private fun GridRow(
                 (if (channel.favourite) "★ " else "") + channel.displayName,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 10.dp, end = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp),
             )
         }
 
@@ -432,7 +432,7 @@ private fun GridRow(
                                     else -> false
                                 }
                             },
-                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(6.dp)),
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp)),
                         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
                         colors = ClickableSurfaceDefaults.colors(
                             containerColor = if (live) Color(0xFF14243A) else FerryColors.Navy,
@@ -441,11 +441,11 @@ private fun GridRow(
                             focusedContentColor = FerryColors.Text,
                         ),
                         border = ClickableSurfaceDefaults.border(
-                            focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(6.dp)),
+                            focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(4.dp)),
                         ),
                     ) {
                         // Very short programmes are too narrow for any text; the detail panel names them.
-                        if (w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 when {
                                     p == null -> "No guide data"
@@ -456,7 +456,7 @@ private fun GridRow(
                                 },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                             )
                         }
                     }
