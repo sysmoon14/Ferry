@@ -16,6 +16,12 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
 | Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down |
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide |
+| Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
+| Search | Programmes (catch-up, on now, coming up) and channels, from the top of the group list |
+| Previous channel | Flip between the last two channels (remote's last-channel key, or the controls row) |
+| Recently watched | A group in the guide with the channels you've watched lately |
+| Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
+| Keep in sync | A box can follow another Ferry and pick up its setup changes automatically |
 | Start-up | Optionally opens straight into the last watched channel |
 | Web config | Phone-friendly page with PIN/QR pairing at `http://<tv-ip>:8765`, including backup & sync between boxes |
 | Home Assistant | MQTT discovery, deep links, REST API, mDNS (`_ferry._tcp`) |
@@ -25,7 +31,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on your TV. Versions live in `gradle/libs.versions.toml`, so bump them there if Studio offers newer ones.
 
 ```
-./gradlew installDebug        # needs a gradle wrapper; Studio generates it on first sync
+./gradlew installRelease      # faster on TV boxes; installDebug for diagnostics
 ./gradlew test                # parser, duplicate-merging and Sky matching tests
 ```
 
@@ -47,8 +53,12 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 - The group list sits on the left until you move into the channels, then hides to give the guide more room.
   **Back** brings it back (and jumps the guide to now); **Back** again returns to whatever is playing.
 - Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
-- **OK** on a live programme plays it; on a past programme with catch-up it plays from the start.
+- **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
+  hasn't started it sets (or clears) a reminder, shown with 🔔.
 - **Long-press OK** on a channel: favourite it, or pick which of its streams to play.
+- **🔍 Search** (top of the group list) finds programmes and channels as you type. OK plays, plays catch-up,
+  or sets a reminder, depending on when the programme is on.
+- **🕘 Recently watched** lists the channels you've watched lately, newest first.
 
 ### Player
 
@@ -57,7 +67,10 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
     **OK** switches to the one shown.
   - **Left/right** steps through earlier and later programmes; **OK** on an earlier one plays it from catch-up.
   - **OK** on the channel you're watching opens the controls: Restart (from the programme start, via
-    catch-up), back/forward 30 s, pause, Live, and Streams.
+    catch-up), back/forward 30 s, pause, Live, Previous (channel), Sleep (cycles 15 / 30 / 60 / 90 / 120 min /
+    off) and Streams.
+  - **OK** on a programme that hasn't started sets a reminder.
+- **Last-channel key** (where the remote has one) flips to the previous channel.
 - **Number keys** tune by channel number (Sky numbers when the Sky layout is on).
 - **CH+/CH−** and the remote's rewind / fast-forward keys work as you'd expect.
 - **Back** returns to the guide with the stream still playing in the **mini player** (top-right). Pick the
@@ -72,6 +85,18 @@ TNT Sports). Anything it can't match by name is compared by schedule (same progr
 times). Channels still unmatched are listed in the web page with a **Pick…** search so you can match them
 by hand; manual picks stick across refreshes.
 
+### Reminders
+
+Set from the guide, the info card or search. When the programme starts (or Ferry is opened while it's on),
+a pop-up offers **Watch now**. Home Assistant gets an `event.<name>_events` event (`reminder`) and a
+`sensor.<name>_next_reminder`, so an automation can, for example, turn the TV on or send a notification.
+
+### Sleep timer
+
+From the controls row (**☾ Sleep**) or Home Assistant's `number.<name>_sleep_timer`. In the last minute
+Ferry shows a warning; any button keeps watching. When it runs out playback stops, Ferry returns to the
+guide, and HA gets a `sleep` event (handy for turning the TV off).
+
 ### Guide gaps
 
 After each refresh Ferry looks for channels with nothing in the guide for the next few hours and fills them,
@@ -85,6 +110,10 @@ logins), options, Sky layout and picks, group choices, favourites and channel or
 page, **Import settings…** makes it match: playlists already there (same server and login) are kept,
 others are added, and ones not in the file are removed. Each box keeps its own name, pairing and Home
 Assistant identity, and downloads its own guide. The file contains passwords, so keep it private.
+
+**Keep in sync** (same card) makes a box follow another Ferry: pick it from **Find Ferry boxes** (or enter
+its address), type the PIN shown on its **Settings & pairing** screen, and it copies the setup straight
+away, then checks every 15 minutes and applies any changes. It's one-way: make changes on the box you follow.
 
 ### Let HA bring Ferry to the front
 
@@ -118,7 +147,11 @@ own **BBC iPlayer** group, separate from your playlists, with schedules from iPl
 | `sensor.<name>_state` | idle / buffering / playing / paused / error |
 | `sensor.<name>_channel_name`, `_programme`, `_next_programme` | With full JSON attributes (logo, tvg_id, times, description, deep link) |
 | `sensor.<name>_progress` | Programme progress % |
-| `button.<name>_channel_up` / `_channel_down` / `_stop` | Remote keys |
+| `button.<name>_channel_up` / `_channel_down` / `_stop` / `_pause` / `_previous_channel` / `_live` | Remote keys |
+| `image.<name>_channel_logo` | Logo of the channel playing |
+| `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
+| `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
+| `event.<name>_events` | `reminder` (a reminded programme is starting) and `sleep` (timer stopped playback) |
 
 Topics (`base = ferry/<device-id>`):
 
@@ -127,7 +160,11 @@ base/availability   online | offline (LWT)
 base/state          JSON status, retained
 base/cmd/play       tvg:BBCOne.uk | id:<channelId> | number:101 | 101 | <channel name>
 base/cmd/channel    favourite name (used by the select)
-base/cmd/key        up | down | stop | pause | last
+base/cmd/key        up | down | stop | pause | previous_channel | live
+base/cmd/sleep      minutes (0 = off)
+base/logo           logo URL of the channel playing
+base/reminders      next reminder + list (JSON)
+base/event          {"event_type": "reminder" | "sleep", ...} (not retained)
 ```
 
 ```yaml
@@ -210,6 +247,9 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | POST | `/guide/fill` | fill guide gaps now |
 | GET | `/export` | settings export (includes playlist passwords) |
 | POST | `/import` | apply an export to this box |
+| GET/PUT/DELETE | `/sync` | follow status / follow `{url, pin}` / stop following |
+| GET | `/sync/peers` | other Ferry boxes found on the network |
+| POST | `/sync/now` | check the followed box now |
 
 ## Layout
 
@@ -233,6 +273,8 @@ app/src/main/assets/web/index.html   config page (no build step)
 ## Notes / known gaps
 
 - Up on the remote = previous channel in the list, Down = next.
+- CI publishes `ferry.apk` (release, recommended) and `ferry-debug.apk` to the rolling `nightly` release.
+- If the provider drops a live stream, Ferry reconnects (or moves to a backup stream) by itself.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.
 - Most providers allow one stream per account at a time; a second box (or another app) on the same
   account gets "provider refused the stream (HTTP 407)".
