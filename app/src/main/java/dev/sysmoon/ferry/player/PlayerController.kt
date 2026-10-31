@@ -289,7 +289,11 @@ class PlayerController(
             XtreamClient.timeshiftUrl(channel.streamUrl, programme.start, programme.stop, null) != null
 
     /** Plays [programme] from the provider's archive (Xtream timeshift). */
-    fun startCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, scope: ZapScope? = null) {
+    /**
+     * Plays [programme] from the provider's archive (Xtream timeshift), starting [offsetMs] into it.
+     * Timeshift URLs start on whole minutes, so the offset is rounded down to a minute.
+     */
+    fun startCatchUp(channel: ChannelEntity, programme: ProgrammeEntity, scope: ZapScope? = null, offsetMs: Long = 0) {
         playJob?.cancel()
         watchdog?.cancel()
         playJob = this.scope.launch {
@@ -298,21 +302,110 @@ class PlayerController(
             streams = listOf(stream)
             streamIndex = 0
             zapScope = scope ?: zapScope
+            val length = programme.stop - programme.start
+            val base = (offsetMs.coerceIn(0, (length - 60_000).coerceAtLeast(0)) / 60_000) * 60_000
+            catchupBase = base
             val tz = db.sources().get(stream.sourceId)?.serverTimezone
-            val url = XtreamClient.timeshiftUrl(stream.streamUrl, programme.start, programme.stop, tz)
+            val url = XtreamClient.timeshiftUrl(stream.streamUrl, programme.start + base, programme.stop, tz)
             if (url == null) {
                 _state.update { NowPlaying(channel, programme, null, PlaybackState.ERROR, "Catch-up not available", true) }
                 return@launch
             }
             _state.update { NowPlaying(channel, programme, null, PlaybackState.BUFFERING, catchup = true) }
             withContext(Dispatchers.Main) {
-                player.setMediaItem(MediaItem.Builder().setUri(url).setMediaId("${channel.id}@${programme.start}").build())
+                player.setMediaItem(MediaItem.Builder().setUri(url).setMediaId("${channel.id}@${programme.start}+$base").build())
                 player.prepare()
                 player.playWhenReady = true
                 sync()
             }
         }
     }
+
+    /** Where the current catch-up recording started, relative to the programme start. */
+    @Volatile private var catchupBase = 0L
+
+    /** Playback position within the programme when watching catch-up (ms from its start), else null. */
+    suspend fun catchupPosition(): Long? {
+        val s = _state.value
+        if (!s.catchup || s.now == null) return null
+        val pos = withContext(Dispatchers.Main) { player.currentPosition }
+        return (catchupBase + pos).coerceIn(0, s.now.stop - s.now.start)
+    }
+
+    /** Can the programme on now be restarted / rewound (channel has an archive)? */
+    fun canRewindLive(): Boolean {
+        val s = _state.value
+        val ch = s.channel ?: return false
+        val now = s.now ?: return false
+        return !s.catchup && canCatchUp(ch, now)
+    }
+
+    /**
+     * Skips [deltaMs] (negative = back). In catch-up this seeks within the recording (or re-requests
+     * it from the new point if the server doesn't allow seeking); on live TV going back switches to
+     * catch-up of the current programme, if the channel has an archive.
+     */
+    fun seekBy(deltaMs: Long) {
+        val s = _state.value
+        val ch = s.channel ?: return
+        val programme = s.now ?: return
+        scope.launch {
+            if (s.catchup) {
+                val length = programme.stop - programme.start
+                val target = ((catchupPosition() ?: 0L) + deltaMs).coerceIn(0, length - 1_000)
+                val seekable = withContext(Dispatchers.Main) { player.isCurrentMediaItemSeekable && player.duration > 0 }
+                if (seekable && target >= catchupBase) {
+                    withContext(Dispatchers.Main) { player.seekTo(target - catchupBase) }
+                } else {
+                    startCatchUp(ch, programme, offsetMs = target)
+                }
+            } else if (deltaMs < 0 && canCatchUp(ch, programme)) {
+                startCatchUp(ch, programme, offsetMs = System.currentTimeMillis() - programme.start + deltaMs)
+            }
+        }
+    }
+
+    /** Restart what's on: catch-up from the programme start. */
+    fun restartProgramme() {
+        val s = _state.value
+        val ch = s.channel ?: return
+        val programme = s.now ?: return
+        if (s.catchup) seekBy(-(catchupBase + 24 * 3_600_000L)) // to the start
+        else if (canCatchUp(ch, programme)) startCatchUp(ch, programme, offsetMs = 0)
+    }
+
+    /** Back to the live channel from catch-up. */
+    fun goLive() {
+        val ch = _state.value.channel ?: return
+        start(ch, zapScope)
+    }
+
+    /** The channel [offset] places away in the current zap list (for browsing without tuning). */
+    suspend fun channelAt(offset: Int): ChannelEntity? {
+        val current = _state.value.channel ?: return null
+        if (offset == 0) return current
+        val dao = db.channels()
+        val ids: List<String> = when (val z = zapScope) {
+            ZapScope.Favourites -> dao.favourites().map { it.id }
+            is ZapScope.Group -> dao.inGroup(z.name).map { it.id }
+            ZapScope.All -> dao.visibleIds()
+            is ZapScope.Sky -> dao.skyIds(z.section)
+        }
+        if (ids.isEmpty()) return null
+        val index = ids.indexOf(current.id).coerceAtLeast(0)
+        return dao.get(ids[Math.floorMod(index + offset, ids.size)])
+    }
+
+    /** A channel's programmes around now, for the info card's previous/next browsing. */
+    suspend fun programmesAround(channel: ChannelEntity): List<ProgrammeEntity> {
+        val now = System.currentTimeMillis()
+        val back = if (channel.archiveDays > 0) 24 * 3_600_000L else 6 * 3_600_000L
+        return runCatching { db.programmes().window(listOf(channel.epgKey), now - back, now + 24 * 3_600_000L) }
+            .getOrDefault(emptyList()).sortedBy { it.start }
+    }
+
+    /** Current zap scope, so the UI can tune a browsed channel within the same list. */
+    val currentScope: ZapScope get() = zapScope
 
     /** Channel up/down through the list playback started from, wrapping at the ends. */
     suspend fun step(delta: Int) {

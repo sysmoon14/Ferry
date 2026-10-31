@@ -25,7 +25,7 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
 
     /** The line-up for a Sky region, cached for a day. Falls back to the cache if Sky can't be reached. */
     fun channels(region: Int): List<SkyChannel> {
-        val cache = File(cacheDir, "sky_lineup_v2_$region.json")
+        val cache = File(cacheDir, "sky_lineup_v3_$region.json")
         val fresh = cache.exists() && System.currentTimeMillis() - cache.lastModified() < 86_400_000L
         if (!fresh) {
             runCatching { fetch(region) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { raw ->
@@ -38,23 +38,34 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
     }
 
     private fun fetch(region: Int): List<SkyChannel> {
-        // 4096 is the full line-up (SD-box numbering, so HD copies sit at 8xx and are de-duplicated).
+        // 4096 is the full satellite line-up (SD-box numbering, so HD copies sit at 8xx and are
+        // de-duplicated). Sky Q's IP line-up ("Atlantis") adds channels delivered over broadband,
+        // such as 4K/UHD and TNT Sports Ultimate; anything it lists at a number the satellite
+        // line-up doesn't use is merged in.
         for (bouquet in listOf(4096, 4097)) {
-            val body = http.newCall(
-                Request.Builder().url("$API/services/$bouquet/$region").header("X-SkyOTT-Territory", "GB").build()
-            ).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: continue
-            val services = ((json.parseToJsonElement(body) as? JsonObject)?.get("services") as? JsonArray).orEmpty()
-            val list = services.mapNotNull { el ->
-                val o = el as? JsonObject ?: return@mapNotNull null
-                val c = o.str("c") ?: return@mapNotNull null
-                if (c.startsWith("0")) return@mapNotNull null // radio uses 0xxx
-                val genre = o.str("sg")?.toIntOrNull() ?: return@mapNotNull null
-                if (genre == 0 || genre == 4) return@mapNotNull null // line-up info, radio
-                SkyChannel(c.toIntOrNull() ?: return@mapNotNull null, o.str("t") ?: return@mapNotNull null, genre, o.str("sid").orEmpty())
-            }
-            if (list.isNotEmpty()) return list.sortedBy { it.number }
+            val satellite = services("$API/services/$bouquet/$region", atlantis = false)
+            if (satellite.isEmpty()) continue
+            val ip = runCatching { services("$ATLANTIS/services/$bouquet/$region", atlantis = true) }.getOrDefault(emptyList())
+            val used = satellite.map { it.number }.toHashSet()
+            return (satellite + ip.filter { used.add(it.number) }).sortedBy { it.number }
         }
         return emptyList()
+    }
+
+    private fun services(url: String, atlantis: Boolean): List<SkyChannel> {
+        val request = Request.Builder().url(url).header("X-SkyOTT-Territory", "GB")
+        if (atlantis) request.header("X-SkyOTT-Proposition", "SKYQ").header("X-SkyOTT-Provider", "SKY")
+        val body = http.newCall(request.build()).execute().use { if (it.isSuccessful) it.body?.string() else null }
+            ?: return emptyList()
+        val services = ((json.parseToJsonElement(body) as? JsonObject)?.get("services") as? JsonArray).orEmpty()
+        return services.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val c = o.str("c") ?: return@mapNotNull null
+            if (c.startsWith("0")) return@mapNotNull null // radio uses 0xxx
+            val genre = o.str("sg")?.toIntOrNull() ?: return@mapNotNull null
+            if (genre == 0 || genre == 4) return@mapNotNull null // line-up info, radio
+            SkyChannel(c.toIntOrNull() ?: return@mapNotNull null, o.str("t") ?: return@mapNotNull null, genre, o.str("sid").orEmpty())
+        }
     }
 
     /** A Sky schedule entry: start (epoch ms) and title. */
@@ -93,6 +104,7 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
 
     companion object {
         private const val API = "https://awk.epgsky.com/hawk/linear"
+        private const val ATLANTIS = "https://atlantis.epgsky.com/as"
         const val DEFAULT_REGION = 45
 
         /** Sky's genre ids ("sg") → section names, in the order Sky's guide shows them. */
@@ -145,6 +157,7 @@ object SkyMatcher {
         "skysportsaction" to listOf("skysportsnfl"),
         "skysportsdarts" to listOf("skysportsaction", "skysportsarena"),
         "skysportsarena" to listOf("skysportsaction"),
+        "tntsportsultimate" to listOf("btsportultimate", "tntsportsultimate4k", "tntultimate"),
     )
 
     private val EXPANSIONS = listOf(

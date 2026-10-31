@@ -56,8 +56,8 @@
   .chip { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
   .chip.on { background: var(--gold); border-color: var(--gold); color: #08111d; font-weight: 600; }
   .chip.part { border-color: var(--gold); }
-  label.grp { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); margin: 0; color: var(--text); font-size: 15px; cursor: pointer; }
-  label.grp input { width: 20px; height: 20px; flex: none; accent-color: var(--gold); }
+  label.grp, div.grp { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); margin: 0; color: var(--text); font-size: 15px; cursor: pointer; }
+  label.grp input, div.grp input { width: 20px; height: 20px; flex: none; accent-color: var(--gold); }
   .sticky { position: sticky; bottom: 0; background: var(--panel); padding: 12px 0 4px; border-top: 1px solid var(--line); }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px; font: inherit; cursor: pointer; }
@@ -167,15 +167,11 @@
         <p class="small" id="skyStatus"></p>
         <div id="skyNotes" class="small" style="margin:6px 0"></div>
         <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist — pick one by hand</summary><div id="skyMissing" class="small" style="margin-top:6px"></div></details>
-        <h3 style="margin:14px 0 4px">Extra groups</h3>
-        <p class="muted small">Provider groups to show after the Sky sections (everything else stays out of the guide).</p>
-        <input id="skyExtraQ" placeholder="Filter groups" type="search">
-        <div id="skyExtraList" style="margin-top:8px;max-height:320px;overflow:auto"></div>
         <div class="actions"><button class="btn" id="skySave">Save Sky layout</button></div>
       </div>
       <div class="card">
-        <h2>Show only these groups</h2>
-        <p class="muted small">Unticked groups disappear from the TV and Home Assistant, including channels your provider adds to them later.</p>
+        <h2>Groups</h2>
+        <p class="muted small" id="grpHelp"></p>
         <div class="chips" id="prefixChips"></div>
         <div class="row">
           <input id="grpQ" placeholder="Filter groups" type="search">
@@ -184,7 +180,12 @@
           <button class="btn ghost" id="grpAll">Tick shown</button>
           <button class="btn ghost" id="grpNone">Untick shown</button>
         </div>
-        <div id="grpList" style="margin-top:8px"></div>
+        <div class="row small muted" id="grpHead" style="margin-top:8px;gap:8px;padding:0 6px">
+          <span style="width:44px;flex:none;text-align:center">Use</span>
+          <span style="width:64px;flex:none;text-align:center" class="skyCol">Own section</span>
+          <span class="grow">Group</span><span>Channels</span>
+        </div>
+        <div id="grpList"></div>
         <div class="sticky">
           <div class="row"><span class="muted small" id="grpSummary"></span>
             <button class="btn" id="grpSave" style="flex:none" disabled>Save</button></div>
@@ -518,15 +519,8 @@
       if (n.how === "picked") row.append(el("button", { className: "btn ghost", style: "flex:none", onclick: () => skyOverride(n.number, null) }, "Clear"));
       return row;
     }));
-    const q = $("skyExtraQ").value.trim().toLowerCase();
-    const visible = (groups.length ? groups : []).filter(g => !g.hidden && (!q || g.name.toLowerCase().includes(q)));
-    $("skyExtraList").replaceChildren(...visible.map(g => {
-      const box = el("input", { type: "checkbox", checked: skyExtras.has(g.name) });
-      box.onchange = () => { box.checked ? skyExtras.add(g.name) : skyExtras.delete(g.name); };
-      return el("label", { className: "grp" }, box, el("span", { className: "grow" }, g.name), el("span", { className: "muted small" }, String(g.count)));
-    }));
+    renderGroups();
   }
-  $("skyExtraQ").oninput = renderSky;
   async function skyOverride(number, channelId) {
     try { sky = await api("/sky/override", { method: "PUT", body: { number, channelId } }); renderSky(); toast(channelId ? "Matched" : "Cleared"); }
     catch (e) { toast(e.message); }
@@ -578,10 +572,22 @@
       chip.onclick = () => { const on = n !== gs.length; gs.forEach(g => on ? picked.add(g.name) : picked.delete(g.name)); dirty(); };
       return chip;
     }));
+    // One list, two switches: "Use" decides whether Ferry uses the group at all (guide, Sky
+    // matching, Home Assistant); with the Sky layout on, "Own section" also lists it after Sky's sections.
+    const skyOn = !!(sky && sky.enabled);
+    document.querySelectorAll(".skyCol").forEach(e => e.style.display = skyOn ? "" : "none");
+    $("grpHelp").textContent = skyOn
+      ? "Use: Ferry can use this group's channels — in the Sky sections when they match a Sky channel, and in Home Assistant. Unticked groups are ignored everywhere, including channels your provider adds later. Own section: also show the whole group as its own section in the guide, after Sky's sections."
+      : "Ticked groups appear in the guide and Home Assistant. Unticked groups are ignored everywhere, including channels your provider adds to them later.";
     $("grpList").replaceChildren(...shown.map(g => {
-      const box = el("input", { type: "checkbox", checked: picked.has(g.name) });
-      box.onchange = () => { box.checked ? picked.add(g.name) : picked.delete(g.name); dirty(false); };
-      return el("label", { className: "grp" }, box, el("span", { className: "grow" }, g.name), el("span", { className: "muted small" }, String(g.count)));
+      const use = el("input", { type: "checkbox", checked: picked.has(g.name), title: "Use this group" });
+      const own = el("input", { type: "checkbox", checked: skyExtras.has(g.name), disabled: !picked.has(g.name), title: "Own section in the guide" });
+      use.onchange = () => { use.checked ? picked.add(g.name) : (picked.delete(g.name), skyExtras.delete(g.name)); own.disabled = !use.checked; own.checked = skyExtras.has(g.name); dirty(false); };
+      own.onchange = () => { own.checked ? skyExtras.add(g.name) : skyExtras.delete(g.name); dirty(false); };
+      return el("div", { className: "grp", style: "gap:8px" },
+        el("span", { style: "width:44px;flex:none;text-align:center" }, use),
+        el("span", { style: `width:64px;flex:none;text-align:center;display:${skyOn ? "" : "none"}` }, own),
+        el("span", { className: "grow" }, g.name), el("span", { className: "muted small" }, String(g.count)));
     }));
     summary();
   }
@@ -596,8 +602,11 @@
   $("grpNone").onclick = () => { groupsShown().forEach(g => picked.delete(g.name)); dirty(); };
   $("grpSave").onclick = async () => {
     $("grpSave").disabled = true;
-    try { await api("/groups/visible", { method: "PUT", body: { visible: [...picked] } }); groupsDirty = false; summary(); toast("Saved — the TV updates straight away"); }
-    catch (e) { toast(e.message); $("grpSave").disabled = false; }
+    try {
+      await api("/groups/visible", { method: "PUT", body: { visible: [...picked] } });
+      if (sky) sky = await api("/sky", { method: "PUT", body: { enabled: sky.enabled, region: sky.region, extraGroups: [...skyExtras].filter(g => picked.has(g)) } });
+      groupsDirty = false; summary(); toast("Saved — the TV updates straight away");
+    } catch (e) { toast(e.message); $("grpSave").disabled = false; }
   };
   loaders.groups = async () => {
     loadOptions().catch(() => {});
