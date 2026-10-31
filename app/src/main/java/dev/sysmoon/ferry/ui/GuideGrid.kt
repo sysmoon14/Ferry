@@ -93,7 +93,12 @@ private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
 fun GuideGrid(
     channels: List<ChannelEntity>,
     zap: ZapScope,
-    returnTo: String?,
+    /** The channel playing: kept in view behind the player and focused when the guide returns. */
+    playingId: String?,
+    active: Boolean,
+    playerShowing: Boolean,
+    /** Bumped when the guide comes back from the player (0 = never / not for this grid). */
+    returnSignal: Int,
     onOpenPlayer: () -> Unit,
     /** Long press: open the channel menu (favourite, stream picker). */
     onMenu: (ChannelEntity) -> Unit,
@@ -141,7 +146,7 @@ fun GuideGrid(
     // Back: jump back to now and go to the group list in one press (no scrolling back through
     // catch-up to reach the groups).
     var gridFocused by remember { mutableStateOf(false) }
-    BackHandler(enabled = gridFocused || windowStart != nowSlot) {
+    BackHandler(enabled = active && (gridFocused || windowStart != nowSlot)) {
         windowStart = nowSlot
         cursorTime = System.currentTimeMillis()
         onBackToGroups()
@@ -152,18 +157,26 @@ fun GuideGrid(
         return (visible.firstOrNull { it.start <= t && it.stop > t } ?: visible.minBy { kotlin.math.abs(it.start - t) }).start
     }
 
-    // Back from the player: scroll to the channel and focus what's on now.
+    // While the player covers the guide, keep the playing channel in view at "now", so the guide
+    // is already in place when the player shrinks away; then focus what's on now.
     val listState = rememberLazyListState()
     val returnFocus = remember { FocusRequester() }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(channels, returnTo, programmes) {
-        if (restored || returnTo == null || channels.isEmpty() || programmes.isEmpty()) return@LaunchedEffect
-        val index = channels.indexOfFirst { it.id == returnTo }
-        restored = true
-        if (index < 0) return@LaunchedEffect
-        listState.scrollToItem((index - 2).coerceAtLeast(0))
+    LaunchedEffect(playingId, channels, playerShowing) {
+        if (!playerShowing) return@LaunchedEffect
+        windowStart = floorSlot(System.currentTimeMillis())
+        cursorTime = System.currentTimeMillis()
+        val index = channels.indexOfFirst { it.id == playingId }
+        if (index >= 0) listState.scrollToItem((index - 2).coerceAtLeast(0))
+    }
+    LaunchedEffect(returnSignal) {
+        if (returnSignal == 0) return@LaunchedEffect
+        val index = channels.indexOfFirst { it.id == playingId }
+        if (index < 0) { onBackToGroups(); return@LaunchedEffect }
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            listState.scrollToItem((index - 2).coerceAtLeast(0))
+        }
         withFrameNanos { }
-        runCatching { returnFocus.requestFocus() }
+        if (runCatching { returnFocus.requestFocus() }.isFailure) onBackToGroups()
     }
 
     Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
@@ -182,7 +195,7 @@ fun GuideGrid(
                     windowStart = windowStart,
                     windowEnd = windowEnd,
                     now = now,
-                    focusRequester = if (channel.id == returnTo) returnFocus else null,
+                    focusRequester = if (channel.id == playingId) returnFocus else null,
                     canGoBack = { target ->
                         val limit = if (channel.archiveDays > 0) nowSlot - channel.archiveDays.coerceAtMost(7) * DAY_MS
                             else nowSlot - NO_ARCHIVE_BACK_MS

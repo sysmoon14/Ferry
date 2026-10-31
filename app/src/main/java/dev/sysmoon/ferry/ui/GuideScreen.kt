@@ -76,8 +76,16 @@ private const val GUIDE_LIMIT = 1_000
 fun GuideScreen(
     selected: String,
     onSelect: (String) -> Unit,
-    /** Channel to scroll to and focus when coming back from the player. */
-    returnTo: String?,
+    /** The channel playing (kept in view behind the player, focused when coming back to the guide). */
+    playingId: String?,
+    /** False while another screen (player, search, settings) is on top. */
+    active: Boolean,
+    /** The full-screen player is covering the guide. */
+    playerShowing: Boolean,
+    /** Bumped each time the guide comes back into view. */
+    returnSignal: Int,
+    /** Coming back from search/settings: focus the group list rather than a channel. */
+    returnToRail: Boolean,
     gridView: Boolean,
     onToggleView: () -> Unit,
     onOpenPlayer: () -> Unit,
@@ -142,20 +150,9 @@ fun GuideScreen(
     var menuFor by remember { mutableStateOf<ChannelEntity?>(null) }
     menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer) }
 
-    // Back from the player: put the list and focus back on the channel that was playing.
     // Each group gets its own scroll position, so opening a group always starts at the top.
     val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
     val returnFocus = remember { FocusRequester() }
-    var restored by remember(effective) { mutableStateOf(false) }
-    LaunchedEffect(shown, returnTo) {
-        if (restored || returnTo == null || shown.isEmpty()) return@LaunchedEffect
-        val index = shown.indexOfFirst { it.id == returnTo }
-        restored = true
-        if (index < 0) return@LaunchedEffect
-        listState.scrollToItem((index - 2).coerceAtLeast(0))
-        withFrameNanos { } // let the row compose before focusing it
-        runCatching { returnFocus.requestFocus() }
-    }
 
     val rail = buildList {
         add(SEARCH to "🔍  Search")
@@ -172,8 +169,11 @@ fun GuideScreen(
     var channelsFocused by remember { mutableStateOf(false) }
     // The group list hides while you're in the channels/guide (more room for programmes);
     // Back brings it back and focuses the current group.
-    var railVisible by remember { mutableStateOf(true) }
+    // Starts hidden when the guide first appears behind the player, so it's already in its
+    // final state when the player shrinks away.
+    var railVisible by remember { mutableStateOf(!playerShowing) }
     LaunchedEffect(channelsFocused) { if (channelsFocused) railVisible = false }
+    LaunchedEffect(playerShowing) { if (playerShowing) railVisible = false }
     val focusRail: () -> Unit = {
         scope.launch {
             if (!railVisible) {
@@ -188,7 +188,27 @@ fun GuideScreen(
             runCatching { railFocus.requestFocus() }
         }
     }
-    BackHandler(enabled = channelsFocused && !gridView) { focusRail() }
+    BackHandler(enabled = active && channelsFocused && !gridView) { focusRail() }
+
+    // List view: while the player covers the guide, keep the playing channel in view; when the
+    // guide comes back, focus it (or the group list, after search/settings).
+    LaunchedEffect(playingId, shown, playerShowing) {
+        if (gridView || !playerShowing) return@LaunchedEffect
+        val index = shown.indexOfFirst { it.id == playingId }
+        if (index >= 0) listState.scrollToItem((index - 2).coerceAtLeast(0))
+    }
+    LaunchedEffect(returnSignal) {
+        if (returnSignal == 0) return@LaunchedEffect
+        if (returnToRail) { focusRail(); return@LaunchedEffect }
+        if (gridView) return@LaunchedEffect // the grid handles its own
+        val index = shown.indexOfFirst { it.id == playingId }
+        if (index < 0) { focusRail(); return@LaunchedEffect }
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            listState.scrollToItem((index - 2).coerceAtLeast(0))
+        }
+        withFrameNanos { } // let the row compose before focusing it
+        runCatching { returnFocus.requestFocus() }
+    }
 
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
         // Group rail
@@ -267,7 +287,10 @@ fun GuideScreen(
                 GuideGrid(
                     channels = shown,
                     zap = zapScope,
-                    returnTo = returnTo,
+                    playingId = playingId,
+                    active = active,
+                    playerShowing = playerShowing,
+                    returnSignal = if (returnToRail) 0 else returnSignal,
                     onOpenPlayer = onOpenPlayer,
                     onMenu = { menuFor = it },
                     onBackToGroups = focusRail,
@@ -285,7 +308,7 @@ fun GuideScreen(
                             channel = channel,
                             index = channel.position + 1,
                             playing = nowPlaying.channel?.id == channel.id,
-                            modifier = if (channel.id == returnTo) Modifier.focusRequester(returnFocus) else Modifier,
+                            modifier = if (channel.id == playingId) Modifier.focusRequester(returnFocus) else Modifier,
                             onLongClick = { menuFor = channel },
                             onClick = {
                                 // Zapping follows the list you started from, not the provider's group.

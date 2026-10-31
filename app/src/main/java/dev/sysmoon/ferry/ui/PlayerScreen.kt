@@ -73,8 +73,8 @@ import java.util.Locale
 
 /** Buttons in the player controls row, left to right. */
 private enum class Control(val label: String) {
-    RESTART("⟲  Restart"), BACK30("«  30s"), PLAY_PAUSE(""), FWD30("30s  »"), LIVE("●  Live"),
-    PREVIOUS("↩  Previous"), SLEEP(""), STREAMS("≡  Streams")
+    RESTART("⟲ Restart"), BACK30("« 30s"), PLAY_PAUSE(""), FWD30("30s »"), LIVE("● Live"),
+    PREVIOUS("↩ Previous"), SLEEP(""), STREAMS("≡ Streams")
 }
 
 private const val SKIP_MS = 30_000L
@@ -209,7 +209,6 @@ fun PlayerScreen(onBack: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
             .focusRequester(focus)
             .focusable()
             .onKeyEvent { e ->
@@ -293,19 +292,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 }
             },
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
-                    isFocusable = false
-                    this.player = graph.player.player
-                }
-            },
-            onRelease = { it.player = null },
-        )
+        // The picture itself is MainActivity's VideoLayer (shared with the mini player), drawn
+        // underneath this screen's card and controls.
 
         if (digits.isNotEmpty()) {
             Text(
@@ -404,7 +392,7 @@ private fun InfoCard(
     Column(
         Modifier
             .padding(horizontal = 40.dp, vertical = 24.dp)
-            .widthIn(max = 760.dp)
+            .widthIn(max = 820.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(FerryColors.Deep.copy(alpha = 0.93f))
@@ -499,21 +487,25 @@ private fun InfoCard(
 
         if (controls != null) {
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // All eight on one line: compact pills that share the width rather than overflowing.
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
                     val label = when (c) {
-                        Control.PLAY_PAUSE -> if (paused) "▶  Play" else "❚❚  Pause"
-                        Control.SLEEP -> if (sleepMinutes == null) "☾  Sleep" else "☾  ${sleepMinutes}m"
+                        Control.PLAY_PAUSE -> if (paused) "▶ Play" else "❚❚ Pause"
+                        Control.SLEEP -> if (sleepMinutes == null) "☾ Sleep" else "☾ ${sleepMinutes}m"
                         else -> c.label
                     }
                     Text(
                         label,
                         color = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.45f) },
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.clip(RoundedCornerShape(18.dp))
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.weight(1f, fill = false).clip(RoundedCornerShape(18.dp))
                             .background(if (focused) FerryColors.Gold else FerryColors.Navy)
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                            .padding(horizontal = 11.dp, vertical = 6.dp),
                     )
                 }
             }

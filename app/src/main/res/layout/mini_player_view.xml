@@ -10,4 +10,5 @@
     app:use_controller="false"
     app:resize_mode="fit"
     app:show_buffering="always"
+    android:background="@android:color/black"
     app:shutter_background_color="@android:color/black" />

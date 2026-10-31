@@ -10,6 +10,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusGroup
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -19,7 +26,7 @@ import androidx.lifecycle.lifecycleScope
 import dev.sysmoon.ferry.ui.FAVOURITES
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
-import dev.sysmoon.ferry.ui.MiniPlayer
+import dev.sysmoon.ferry.ui.VideoLayer
 import dev.sysmoon.ferry.ui.ReminderPopup
 import dev.sysmoon.ferry.ui.SearchScreen
 import dev.sysmoon.ferry.ui.SleepWarning
@@ -34,11 +41,21 @@ import kotlinx.coroutines.launch
 
 enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH }
 
+@OptIn(ExperimentalComposeUiApi::class)
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf(Screen.GUIDE)
     // Kept here so the guide's list survives trips to the player and back.
     private var guideGroup by mutableStateOf(FAVOURITES)
-    private var returnTo by mutableStateOf<String?>(null)
+    // Bumped whenever the guide comes back into view, so it re-takes focus (on the playing
+    // channel after the player, on the group list after search/settings).
+    private var returnSignal by mutableIntStateOf(0)
+    private var returnToRail by mutableStateOf(false)
+
+    private fun backToGuide(rail: Boolean) {
+        returnToRail = rail || graph.player.state.value.channel == null
+        returnSignal++
+        screen = Screen.GUIDE
+    }
     private var gridView by mutableStateOf(true)
     // Launched (or brought back from Home) without a deep link: offer the last channel.
     private var pendingResume = false
@@ -53,52 +70,62 @@ class MainActivity : ComponentActivity() {
                 val playing by graph.player.state.collectAsState()
                 val sleepWarning by graph.sleep.warning.collectAsState()
                 val due by graph.reminders.due.collectAsState()
-                LaunchedEffect(Unit) { graph.sleep.slept.collect { screen = Screen.GUIDE } }
+                LaunchedEffect(Unit) { graph.sleep.slept.collect { backToGuide(rail = true) } }
                 Box(
-                    Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+                    Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
                         // Sleep timer's last minute: any key keeps watching.
                         if (!sleepWarning) return@onPreviewKeyEvent false
                         if (e.type == KeyEventType.KeyUp) graph.sleep.cancel()
                         true
                     }
                 ) {
+                    val guideActive = screen == Screen.GUIDE
+                    // The guide stays composed underneath everything, so coming back to it (Back from
+                    // the player, search or settings) reveals it as it was instead of rebuilding it.
+                    // While another screen is up, focus can't wander into it.
+                    Box(
+                        Modifier.fillMaxSize()
+                            .focusProperties { enter = { if (guideActive) FocusRequester.Default else FocusRequester.Cancel } }
+                            .focusGroup()
+                    ) {
+                        // Lowest priority: only reached when the guide itself has nothing to do
+                        // with Back (focus already in the group list). Returns to the stream.
+                        BackHandler(enabled = guideActive && playing.channel != null) { screen = Screen.PLAYER }
+                        GuideScreen(
+                            selected = guideGroup,
+                            onSelect = { guideGroup = it },
+                            playingId = playing.channel?.id,
+                            active = guideActive,
+                            playerShowing = screen == Screen.PLAYER,
+                            returnSignal = returnSignal,
+                            returnToRail = returnToRail,
+                            gridView = gridView,
+                            onToggleView = { gridView = !gridView },
+                            onOpenPlayer = { screen = Screen.PLAYER },
+                            onOpenSettings = { screen = Screen.SETTINGS },
+                            onOpenSearch = { screen = Screen.SEARCH },
+                        )
+                    }
                     when (screen) {
-                        Screen.GUIDE -> {
-                            // Lowest priority: only reached when the guide itself has nothing to do
-                            // with Back (focus already in the group list). Returns to the stream.
-                            BackHandler(enabled = playing.channel != null) { screen = Screen.PLAYER }
-                            GuideScreen(
-                                selected = guideGroup,
-                                onSelect = { guideGroup = it; returnTo = null },
-                                returnTo = returnTo,
-                                gridView = gridView,
-                                onToggleView = { gridView = !gridView },
-                                onOpenPlayer = { screen = Screen.PLAYER },
-                                onOpenSettings = { screen = Screen.SETTINGS },
-                                onOpenSearch = { screen = Screen.SEARCH },
-                            )
-                        }
                         Screen.SEARCH -> {
-                            BackHandler { screen = Screen.GUIDE }
+                            BackHandler { backToGuide(rail = true) }
                             SearchScreen(onOpenPlayer = { screen = Screen.PLAYER })
                         }
-                        Screen.PLAYER -> {
-                            // Leaving the player keeps the stream going in the corner mini player.
-                            val leave = {
-                                returnTo = graph.player.state.value.channel?.id
-                                screen = Screen.GUIDE
-                            }
-                            BackHandler { leave() }
-                            PlayerScreen(onBack = { leave() })
-                        }
                         Screen.SETTINGS -> {
-                            BackHandler { screen = Screen.GUIDE }
-                            SettingsScreen(onBack = { screen = Screen.GUIDE })
+                            BackHandler { backToGuide(rail = true) }
+                            SettingsScreen(onBack = { backToGuide(rail = true) })
                         }
+                        else -> Unit
                     }
-                    // Not on Settings: it would cover the pairing QR code.
-                    if ((screen == Screen.GUIDE || screen == Screen.SEARCH) && playing.channel != null) {
-                        MiniPlayer(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 20.dp))
+                    // Full screen in the player; shrinks to the corner over the guide and search.
+                    VideoLayer(
+                        full = screen == Screen.PLAYER,
+                        show = screen == Screen.PLAYER || ((screen == Screen.GUIDE || screen == Screen.SEARCH) && playing.channel != null),
+                    )
+                    if (screen == Screen.PLAYER) {
+                        // Leaving the player keeps the stream going in the corner mini player.
+                        BackHandler { backToGuide(rail = false) }
+                        PlayerScreen(onBack = { backToGuide(rail = false) })
                     }
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
@@ -108,7 +135,7 @@ class MainActivity : ComponentActivity() {
                                 graph.reminders.dismiss()
                                 screen = Screen.PLAYER
                                 lifecycleScope.launch {
-                                    if (!graph.player.play(PlayTarget.Id(r.channelId))) screen = Screen.GUIDE
+                                    if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
                                 }
                             },
                             onDismiss = { graph.reminders.dismiss() },
@@ -132,7 +159,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             if (!graph.settings.resumeLastChannel() || graph.settings.lastChannelId() == null) return@launch
             screen = Screen.PLAYER
-            if (!graph.player.play(PlayTarget.Last)) screen = Screen.GUIDE
+            if (!graph.player.play(PlayTarget.Last)) backToGuide(rail = true)
         }
     }
 
@@ -152,10 +179,10 @@ class MainActivity : ComponentActivity() {
             is LaunchAction.Play -> {
                 screen = Screen.PLAYER
                 lifecycleScope.launch {
-                    if (!graph.player.play(action.target)) screen = Screen.GUIDE
+                    if (!graph.player.play(action.target)) backToGuide(rail = true)
                 }
             }
-            LaunchAction.Guide -> screen = Screen.GUIDE
+            LaunchAction.Guide -> backToGuide(rail = true)
             null -> Unit
         }
     }
