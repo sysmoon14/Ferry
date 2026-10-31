@@ -21,12 +21,24 @@ object XmltvParser {
         input: InputStream,
         parser: XmlPullParser,
         accept: (String) -> Boolean = { true },
+        /** Called for each <channel> (they come before the programmes) with its id and display names. */
+        onChannel: ((id: String, names: List<String>) -> Unit)? = null,
         onProgramme: (XmltvProgramme) -> Unit,
     ) {
         parser.setInput(input, null)
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG && parser.name == "programme") {
+            if (event == XmlPullParser.START_TAG && parser.name == "channel" && onChannel != null) {
+                val id = parser.getAttributeValue(null, "id")
+                val names = mutableListOf<String>()
+                val depth = parser.depth
+                while (!(parser.next() == XmlPullParser.END_TAG && parser.depth == depth)) {
+                    if (parser.eventType == XmlPullParser.END_DOCUMENT) break
+                    if (parser.eventType != XmlPullParser.START_TAG) continue
+                    if (parser.name == "display-name") names += parser.nextText().trim() else skip(parser)
+                }
+                if (id != null) onChannel(id, names)
+            } else if (event == XmlPullParser.START_TAG && parser.name == "programme") {
                 val channel = parser.getAttributeValue(null, "channel")
                 val start = XmltvTime.parse(parser.getAttributeValue(null, "start"))
                 val stop = XmltvTime.parse(parser.getAttributeValue(null, "stop"))

@@ -37,7 +37,7 @@ class AppGraph(val context: Context) {
         .build()
     val bbc = BbcIplayer(http)
     val sky = SkyLineup(http, context.filesDir)
-    val repository = ChannelRepository(db, http, settings, bbc, sky)
+    val repository = ChannelRepository(db, http, settings, bbc, sky, context.cacheDir)
     val player = PlayerController(context, db, settings, scope, bbc)
     val commands = RemoteCommands(this)
     val mqtt = MqttBridge(this)

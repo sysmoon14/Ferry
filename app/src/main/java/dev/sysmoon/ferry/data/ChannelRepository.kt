@@ -25,6 +25,7 @@ class ChannelRepository(
     private val settings: Settings,
     private val bbc: BbcIplayer,
     private val sky: SkyLineup,
+    private val cacheDir: java.io.File,
 ) {
     private val refreshLock = Mutex()
     private val xtream = XtreamClient(http)
@@ -125,6 +126,104 @@ class ChannelRepository(
         return SkyMatcher.matchBySchedule(unmatched, schedules, guide, from, until)
     }
 
+    data class GapReport(
+        val missing: Int,
+        val fromSky: Int,
+        val fromBackup: Int,
+        val errors: List<String> = emptyList(),
+        val at: Long = System.currentTimeMillis(),
+    )
+
+    /** Outcome of the last guide gap fill, for the web page. */
+    @Volatile var gapReport: GapReport? = null
+        private set
+
+    /**
+     * Backup guide data for channels the provider's guide doesn't cover (next 6 hours empty):
+     * Sky's own schedule for channels the Sky layout matched, then any backup XMLTV feeds,
+     * matched by guide ID or channel name. Never overrides the provider's listings.
+     */
+    suspend fun fillGuideGaps() = withContext(Dispatchers.IO) {
+        db.programmes().deleteForSource(SKY_GUIDE_SOURCE)
+        db.programmes().deleteForSource(BACKUP_GUIDE_SOURCE)
+        val now = System.currentTimeMillis()
+        val covered = db.programmes().coveredKeys(now, now + 6 * 3_600_000L).toHashSet()
+        val missing = db.channels().guideRows().filter { it.epgKey !in covered }.distinctBy { it.epgKey }
+        val filled = HashSet<String>()
+        val errors = mutableListOf<String>()
+
+        // 1. Sky's schedule, for Sky-matched channels.
+        if (settings.skyLayout()) runCatching {
+            val sidByNumber = sky.channels(settings.skyRegion()).associate { it.number to it.sid }
+            val wanted = missing.mapNotNull { r -> r.skyNumber?.let { sidByNumber[it] }?.takeIf { it.isNotBlank() }?.let { it to r.epgKey } }
+            if (wanted.isNotEmpty()) {
+                val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/London"))
+                val events = HashMap<String, MutableList<SkyLineup.SkyEvent>>()
+                for (day in listOf(today, today.plusDays(1))) {
+                    sky.schedules(wanted.map { it.first }, day).forEach { (sid, e) -> events.getOrPut(sid) { mutableListOf() } += e }
+                }
+                val programmes = wanted.flatMap { (sid, key) ->
+                    val list = events[sid].orEmpty().sortedBy { it.start }.distinctBy { it.start }
+                    list.mapIndexedNotNull { i, e ->
+                        val stop = if (e.durationMs > 0) e.start + e.durationMs else list.getOrNull(i + 1)?.start ?: (e.start + 1_800_000)
+                        if (stop < now - 3_600_000L) null
+                        else ProgrammeEntity(key, e.start, stop, e.title, e.synopsis, SKY_GUIDE_SOURCE)
+                    }
+                }
+                programmes.chunked(BATCH).forEach { db.programmes().insert(it) }
+                filled += programmes.map { it.channelKey }
+            }
+        }.onFailure { errors += "Sky schedule: ${it.message ?: it.javaClass.simpleName}" }
+        val fromSky = filled.size
+
+        // 2. Backup XMLTV feeds, for whatever is still empty.
+        for (url in settings.backupEpgUrls()) {
+            val left = missing.filter { it.epgKey !in filled }
+            if (left.isEmpty()) break
+            val byTvg = left.filter { it.tvgId != null }.groupBy({ it.tvgId!!.lowercase() }, { it.epgKey })
+            val byName = left.groupBy({ SkyMatcher.canon(it.name) }, { it.epgKey })
+            val claimed = HashSet<String>()
+            val idMap = HashMap<String, List<String>>()
+            val batch = ArrayList<ProgrammeEntity>(BATCH)
+            runCatching {
+                cachedFeed(url).use { input ->
+                    XmltvParser.parse(input, Xml.newPullParser(), accept = { it in idMap },
+                        onChannel = { id, names ->
+                            val keys = (byTvg[id.lowercase()] ?: names.firstNotNullOfOrNull { byName[SkyMatcher.canon(it)] })
+                                ?.filter { it !in claimed }
+                            if (!keys.isNullOrEmpty()) { idMap[id] = keys; claimed += keys }
+                        },
+                    ) { p ->
+                        if (p.stop < now - 3_600_000L) return@parse
+                        idMap[p.channel]?.forEach { key ->
+                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, BACKUP_GUIDE_SOURCE)
+                            filled += key
+                        }
+                        if (batch.size >= BATCH) { runBlocking { db.programmes().insert(batch.toList()) }; batch.clear() }
+                    }
+                }
+                if (batch.isNotEmpty()) db.programmes().insert(batch)
+            }.onFailure { errors += "${redact(url)}: ${it.message ?: it.javaClass.simpleName}" }
+        }
+        gapReport = GapReport(missing.size, fromSky, filled.size - fromSky, errors)
+        Log.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds ${filled.size - fromSky}")
+    }
+
+    /** Backup feeds are big and change slowly: download at most every 6 hours. */
+    private fun cachedFeed(url: String): InputStream {
+        val file = java.io.File(cacheDir, "backup_epg_" + Integer.toHexString(url.hashCode()))
+        if (!file.exists() || System.currentTimeMillis() - file.lastModified() > 6 * 3_600_000L) {
+            val response = http.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).build()).execute()
+            response.use {
+                if (!it.isSuccessful) error("HTTP ${it.code}")
+                val tmp = java.io.File(file.path + ".part")
+                tmp.outputStream().use { out -> it.body!!.byteStream().copyTo(out) }
+                tmp.renameTo(file)
+            }
+        }
+        return gunzipIfNeeded(BufferedInputStream(file.inputStream()))
+    }
+
     suspend fun addSource(source: SourceEntity): Long = db.sources().insert(source)
 
     suspend fun deleteSource(id: Long) = db.withTransaction {
@@ -174,6 +273,7 @@ class ChannelRepository(
                 db.sources().update(src.copy(lastError = e.message ?: e.javaClass.simpleName))
             }
             runCatching { applySky() }.onFailure { Log.w(TAG, "Sky layout failed", it) }
+            runCatching { fillGuideGaps() }.onFailure { Log.w(TAG, "Guide gap fill failed", it) }
         }
     }
 
@@ -243,8 +343,11 @@ class ChannelRepository(
             response.close()
             error("HTTP ${response.code} from ${redact(url)}")
         }
-        val stream = BufferedInputStream(response.body!!.byteStream())
-        // Sniff gzip magic bytes: many EPG feeds are .xml.gz without Content-Encoding.
+        return gunzipIfNeeded(BufferedInputStream(response.body!!.byteStream()))
+    }
+
+    /** Sniff gzip magic bytes: many EPG feeds are .xml.gz without Content-Encoding. */
+    private fun gunzipIfNeeded(stream: BufferedInputStream): InputStream {
         stream.mark(2)
         val gz = stream.read() == 0x1f && stream.read() == 0x8b
         stream.reset()
@@ -254,6 +357,9 @@ class ChannelRepository(
     companion object {
         private const val TAG = "ChannelRepository"
         private const val BATCH = 2_000
+        /** Pseudo source ids for backup guide data, so each fill can replace its own rows. */
+        const val SKY_GUIDE_SOURCE = -1L
+        const val BACKUP_GUIDE_SOURCE = -2L
         const val USER_AGENT = "Ferry/0.1 (Android TV)"
 
         fun resolveUrls(src: SourceEntity): Pair<String, String?> = when (src.type) {

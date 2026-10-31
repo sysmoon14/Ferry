@@ -58,7 +58,7 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
     }
 
     /** A Sky schedule entry: start (epoch ms) and title. */
-    data class SkyEvent(val start: Long, val title: String)
+    data class SkyEvent(val start: Long, val title: String, val durationMs: Long = 0, val synopsis: String? = null)
 
     /** Today's schedule for each Sky service id (Sky's own guide), batched as Sky's site does it. */
     fun schedules(sids: List<String>, date: java.time.LocalDate): Map<String, List<SkyEvent>> {
@@ -79,7 +79,8 @@ class SkyLineup(private val http: OkHttpClient, private val cacheDir: File) {
                         val ev = e as? JsonObject ?: continue
                         val st = ev.str("st")?.toLongOrNull() ?: continue
                         val t = ev.str("t") ?: continue
-                        out.getOrPut(sid) { mutableListOf() } += SkyEvent(st * 1000, t)
+                        val d = (ev.str("d")?.toLongOrNull() ?: 0) * 1000
+                        out.getOrPut(sid) { mutableListOf() } += SkyEvent(st * 1000, t, d, ev.str("sy"))
                     }
                 }
             }

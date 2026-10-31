@@ -43,6 +43,8 @@ class Settings(private val context: Context) {
         val skyRegion = intPreferencesKey("sky_region")
         val skyExtraGroups = stringSetPreferencesKey("sky_extra_groups")
         val skyOverrides = stringSetPreferencesKey("sky_overrides")
+        val backupEpgUrls = stringPreferencesKey("backup_epg_urls")
+        val resumeLastChannel = booleanPreferencesKey("resume_last_channel")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -119,6 +121,15 @@ class Settings(private val context: Context) {
         val rest = (prefs[Keys.skyOverrides] ?: emptySet()).filterNot { it.startsWith("$number=") }.toSet()
         prefs[Keys.skyOverrides] = if (streamKey == null) rest else rest + "$number=$streamKey"
     }
+
+    /** Extra XMLTV feeds used only for channels the provider's guide doesn't cover. One URL per line. */
+    suspend fun backupEpgUrls(): List<String> = (store.data.first()[Keys.backupEpgUrls] ?: "")
+        .lines().map { it.trim() }.filter { it.startsWith("http") }
+    suspend fun setBackupEpgUrls(urls: List<String>) = store.edit { it[Keys.backupEpgUrls] = urls.joinToString("\n") }
+
+    /** Open straight into the last watched channel when Ferry is launched. */
+    suspend fun resumeLastChannel(): Boolean = store.data.first()[Keys.resumeLastChannel] ?: true
+    suspend fun setResumeLastChannel(on: Boolean) = store.edit { it[Keys.resumeLastChannel] = on }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]
     suspend fun setLastChannelId(id: String) = store.edit { it[Keys.lastChannel] = id }

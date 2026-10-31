@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -126,9 +127,10 @@ fun GuideScreen(
     menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer) }
 
     // Back from the player: put the list and focus back on the channel that was playing.
-    val listState = rememberLazyListState()
+    // Each group gets its own scroll position, so opening a group always starts at the top.
+    val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
     val returnFocus = remember { FocusRequester() }
-    var restored by remember { mutableStateOf(false) }
+    var restored by remember(effective) { mutableStateOf(false) }
     LaunchedEffect(shown, returnTo) {
         if (restored || returnTo == null || shown.isEmpty()) return@LaunchedEffect
         val index = shown.indexOfFirst { it.id == returnTo }
@@ -203,7 +205,7 @@ fun GuideScreen(
             }
             if (shown.isEmpty()) {
                 EmptyState(Modifier.weight(1f))
-            } else if (gridView) {
+            } else if (gridView) key(effective) {
                 GuideGrid(
                     channels = shown,
                     zap = zapScope,

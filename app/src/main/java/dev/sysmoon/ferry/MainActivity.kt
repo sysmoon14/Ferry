@@ -14,6 +14,7 @@ import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
 import dev.sysmoon.ferry.ui.PlayerScreen
 import dev.sysmoon.ferry.ui.SettingsScreen
+import dev.sysmoon.ferry.player.PlayTarget
 import kotlinx.coroutines.launch
 
 enum class Screen { GUIDE, PLAYER, SETTINGS }
@@ -24,17 +25,20 @@ class MainActivity : ComponentActivity() {
     private var guideGroup by mutableStateOf(FAVOURITES)
     private var returnTo by mutableStateOf<String?>(null)
     private var gridView by mutableStateOf(true)
+    // Launched (or brought back from Home) without a deep link: offer the last channel.
+    private var pendingResume = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FerryService.start(this)
+        pendingResume = savedInstanceState == null
         handle(intent)
         setContent {
             FerryTheme {
                 when (screen) {
                     Screen.GUIDE -> GuideScreen(
                         selected = guideGroup,
-                        onSelect = { guideGroup = it },
+                        onSelect = { guideGroup = it; returnTo = null },
                         returnTo = returnTo,
                         gridView = gridView,
                         onToggleView = { gridView = !gridView },
@@ -66,15 +70,29 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (!pendingResume) return
+        pendingResume = false
+        lifecycleScope.launch {
+            if (!graph.settings.resumeLastChannel() || graph.settings.lastChannelId() == null) return@launch
+            screen = Screen.PLAYER
+            if (!graph.player.play(PlayTarget.Last)) screen = Screen.GUIDE
+        }
+    }
+
     override fun onStop() {
         super.onStop()
+        if (!isChangingConfigurations) pendingResume = true
         // Leaving the app (Home, another app launched) stops playback, like a normal TV app.
         // HA can still start it again via deep link / MQTT.
         if (!isChangingConfigurations) lifecycleScope.launch { graph.player.stop() }
     }
 
     private fun handle(intent: Intent?) {
-        when (val action = DeepLinks.parse(intent)) {
+        val action = DeepLinks.parse(intent)
+        if (action != null) pendingResume = false // a deep link says what to show
+        when (action) {
             is LaunchAction.Play -> {
                 screen = Screen.PLAYER
                 lifecycleScope.launch {

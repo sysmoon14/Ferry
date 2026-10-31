@@ -209,6 +209,7 @@ class ConfigServer(private val g: AppGraph) {
                     val region = input.region.takeIf { it in SkyLineup.REGIONS } ?: SkyLineup.DEFAULT_REGION
                     g.settings.setSky(input.enabled, region, input.extraGroups.toSet())
                     g.repository.applySky()
+                    g.scope.launch { g.repository.fillGuideGaps() }
                     call.respond(skyStatus())
                 }
                 // Hand-pick the playlist channel for a Sky number (channelId null clears the pick).
@@ -225,14 +226,26 @@ class ConfigServer(private val g: AppGraph) {
                 }
 
                 // ---- Options
-                get("/options") { call.respond(OptionsDto(g.settings.mergeDuplicates())) }
+                get("/options") { call.respond(options()) }
                 put("/options") {
-                    val o = call.receive<OptionsDto>()
-                    val changed = o.mergeDuplicates != g.settings.mergeDuplicates()
-                    g.settings.setMergeDuplicates(o.mergeDuplicates)
-                    // Merging happens at import, so re-import to apply it.
-                    if (changed) g.scope.launch { g.repository.refreshDue(force = true) }
-                    call.respond(OkDto())
+                    val o = call.receive<OptionsInput>()
+                    o.resumeLastChannel?.let { g.settings.setResumeLastChannel(it) }
+                    o.mergeDuplicates?.let { merge ->
+                        val changed = merge != g.settings.mergeDuplicates()
+                        g.settings.setMergeDuplicates(merge)
+                        // Merging happens at import, so re-import to apply it.
+                        if (changed) g.scope.launch { g.repository.refreshDue(force = true) }
+                    }
+                    o.backupEpgUrls?.let { urls ->
+                        val clean = urls.map { it.trim() }.filter { it.startsWith("http://") || it.startsWith("https://") }
+                        g.settings.setBackupEpgUrls(clean)
+                        g.scope.launch { g.repository.fillGuideGaps() }
+                    }
+                    call.respond(options())
+                }
+                post("/guide/fill") {
+                    g.repository.fillGuideGaps()
+                    call.respond(options())
                 }
 
                 // ---- Channels
@@ -372,6 +385,13 @@ class ConfigServer(private val g: AppGraph) {
         private const val TAG = "ConfigServer"
         private const val AUTH = "paired"
     }
+
+    private suspend fun options() = OptionsDto(
+        mergeDuplicates = g.settings.mergeDuplicates(),
+        resumeLastChannel = g.settings.resumeLastChannel(),
+        backupEpgUrls = g.settings.backupEpgUrls(),
+        guideGaps = g.repository.gapReport?.let { GuideGapsDto(it.missing, it.fromSky, it.fromBackup, it.errors, it.at) },
+    )
 
     private suspend fun skyStatus(): SkyStatusDto {
         val report = g.repository.skyReport

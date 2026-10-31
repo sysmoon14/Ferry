@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -128,6 +129,18 @@ fun GuideGrid(
 
     var focused by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
 
+    // Time cursor (like TiviMate): left/right sets it, up/down keeps it, so moving between rows
+    // lands on whatever is on at the same time instead of the geometrically nearest cell.
+    var cursorTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var verticalNav by remember { mutableStateOf(false) }
+    val requesters = remember { HashMap<Pair<String, Long>, FocusRequester>() }
+    fun requester(channelId: String, start: Long) = requesters.getOrPut(channelId to start) { FocusRequester() }
+    fun cellAt(ch: ChannelEntity, t: Long): Long {
+        val visible = programmes[ch.epgKey].orEmpty().filter { it.stop > windowStart && it.start < windowEnd }
+        if (visible.isEmpty()) return -1L
+        return (visible.firstOrNull { it.start <= t && it.stop > t } ?: visible.minBy { kotlin.math.abs(it.start - t) }).start
+    }
+
     // Back from the player: scroll to the channel and focus what's on now.
     val listState = rememberLazyListState()
     val returnFocus = remember { FocusRequester() }
@@ -150,7 +163,7 @@ fun GuideGrid(
             state = listState,
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            items(channels, key = { it.id }) { channel ->
+            itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
                 GridRow(
                     channel = channel,
                     programmes = programmes[channel.epgKey].orEmpty(),
@@ -163,11 +176,37 @@ fun GuideGrid(
                             else nowSlot - NO_ARCHIVE_BACK_MS
                         target >= limit
                     },
-                    onShift = { delta ->
+                    onShift = { delta, p ->
                         val target = windowStart + delta
-                        if (target <= nowSlot + FUTURE_LIMIT_MS) windowStart = target
+                        if (target <= nowSlot + FUTURE_LIMIT_MS) {
+                            windowStart = target
+                            cursorTime = maxOf(p?.start ?: target, target)
+                        }
                     },
-                    onFocus = { p -> focused = channel to p },
+                    onFocus = { p ->
+                        focused = channel to p
+                        if (verticalNav) verticalNav = false
+                        else cursorTime = maxOf(p?.start ?: windowStart, windowStart)
+                    },
+                    requesterFor = { start -> requester(channel.id, start) },
+                    onVertical = { delta ->
+                        val target = index + delta
+                        if (target !in channels.indices) false
+                        else {
+                            val ch = channels[target]
+                            val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
+                            scope.launch {
+                                // Off-screen rows aren't composed yet: scroll one row first.
+                                if (listState.layoutInfo.visibleItemsInfo.none { it.index == target }) {
+                                    listState.scrollToItem(if (delta > 0) listState.firstVisibleItemIndex + 1 else target)
+                                    withFrameNanos { }
+                                }
+                                verticalNav = true
+                                if (runCatching { req.requestFocus() }.isFailure) verticalNav = false
+                            }
+                            true
+                        }
+                    },
                     onSelect = { p ->
                         val t = System.currentTimeMillis()
                         when {
@@ -282,8 +321,10 @@ private fun GridRow(
     now: Long,
     focusRequester: FocusRequester?,
     canGoBack: (Long) -> Boolean,
-    onShift: (Long) -> Unit,
+    onShift: (Long, ProgrammeEntity?) -> Unit,
     onFocus: (ProgrammeEntity?) -> Unit,
+    requesterFor: (Long) -> FocusRequester,
+    onVertical: (Int) -> Boolean,
     onSelect: (ProgrammeEntity?) -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -328,7 +369,7 @@ private fun GridRow(
                     val w = (perMs * (right - left).toFloat() - 3.dp).coerceAtLeast(6.dp)
                     val past = p != null && p.stop <= now
                     val live = p == null || (p.start <= now && p.stop > now)
-                    var mod = Modifier.offset(x = x).width(w).fillMaxHeight()
+                    var mod = Modifier.offset(x = x).width(w).fillMaxHeight().focusRequester(requesterFor(p?.start ?: -1L))
                     if (focusRequester != null && i == returnIndex) mod = mod.focusRequester(focusRequester)
                     Surface(
                         onClick = { onSelect(p) },
@@ -340,12 +381,14 @@ private fun GridRow(
                                 when (e.key) {
                                     // At the right edge: move the window on rather than leaving the row.
                                     Key.DirectionRight -> if (i == cells.lastIndex && right >= windowEnd) {
-                                        onShift(SLOT_MS); true
+                                        onShift(SLOT_MS, p); true
                                     } else false
+                                    Key.DirectionUp -> onVertical(-1)
+                                    Key.DirectionDown -> onVertical(1)
                                     // At the left edge: go back in time while there's history to show;
                                     // otherwise let focus move out to the group list.
                                     Key.DirectionLeft -> if (i == 0 && left <= windowStart && canGoBack(windowStart - SLOT_MS)) {
-                                        onShift(-SLOT_MS); true
+                                        onShift(-SLOT_MS, p); true
                                     } else false
                                     else -> false
                                 }

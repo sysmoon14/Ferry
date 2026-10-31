@@ -34,6 +34,8 @@ data class SkyCandidateRow(
     val sourceId: Long,
 )
 
+data class GuideRow(val epgKey: String, val name: String, val tvgId: String?, val skyNumber: Int?)
+
 data class KeyDays(val epgKey: String, val days: Int)
 
 data class GroupSummary(val name: String, val count: Int)
@@ -154,6 +156,10 @@ interface ChannelDao {
     @Query("SELECT * FROM channels WHERE skyNumber = :number AND hidden = 0 AND primaryId IS NULL LIMIT 1")
     suspend fun bySkyNumber(number: Int): ChannelEntity?
 
+    // ---- Guide gaps
+    @Query("SELECT COALESCE(tvgId, name) AS epgKey, name, tvgId, skyNumber FROM channels WHERE primaryId IS NULL AND hidden = 0")
+    suspend fun guideRows(): List<GuideRow>
+
     /** A row's streams, best first: the primary itself plus any duplicates folded into it. */
     @Query("SELECT * FROM channels WHERE id = :primaryId OR primaryId = :primaryId ORDER BY primaryId IS NOT NULL, quality DESC, position")
     suspend fun streamsOf(primaryId: String): List<ChannelEntity>
@@ -198,6 +204,10 @@ interface ProgrammeDao {
     /** Re-emits whenever the programmes table changes (e.g. an EPG refresh lands). */
     @Query("SELECT COUNT(*) FROM programmes")
     fun observeCount(): Flow<Int>
+
+    /** Guide keys that have something on in [from, until), from any source. */
+    @Query("SELECT DISTINCT channelKey FROM programmes WHERE stop > :from AND start < :until")
+    suspend fun coveredKeys(from: Long, until: Long): List<String>
 
     @Query("DELETE FROM programmes WHERE stop < :before")
     suspend fun deleteEndedBefore(before: Long)
