@@ -25,6 +25,7 @@ class SkyMatcherTest {
         assertEquals(SkyMatcher.canon("Comedy Central"), SkyMatcher.canon("ComedyCentral"))
         assertEquals(SkyMatcher.canon("True Crime Xtra SD (576p)"), SkyMatcher.canon("TRUE CRIME X"))
         assertEquals(SkyMatcher.canon("TNT Sports Box Office"), SkyMatcher.canon("TNTSBoxOffHD"))
+        assertEquals(SkyMatcher.canon("TNT Sports Ultimate"), SkyMatcher.canon("TNTUltimateUHD"))
         assertEquals(SkyMatcher.canon("BBC One North East and Cumbria FHD (1080p)"), SkyMatcher.canon("BBC One NE HD"))
         assertEquals("comedycentralplus1", SkyMatcher.tvgStem("comedycentralplus1.uk"))
     }

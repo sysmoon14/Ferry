@@ -163,7 +163,7 @@ object SkyMatcher {
     private val EXPANSIONS = listOf(
         "skysp" to "sky sports ", "mainev" to "main event", "f'ball" to "football", "netwrk" to "network",
         "cartoon net " to "cartoon network ", "bbc parl" to "bbc parliament",
-        "disc." to "discovery ", "crime+inv" to "crime investigation", "tntsports" to "tnt sports ",
+        "disc." to "discovery ", "crime+inv" to "crime investigation", "tntultimate" to "tnt sports ultimate", "tntsports" to "tnt sports ",
         "nickelodeonhd" to "nickelodeon", "bbcscotland" to "bbc scotland", "food netwrk" to "food network",
         "talkingpictures" to "talking pictures", "skypremiere" to "sky premiere", "skyanimation" to "sky animation",
         "g! mystery" to "great mystery", "great! xmas" to "great christmas", "great!christmas" to "great christmas",
@@ -193,7 +193,8 @@ object SkyMatcher {
         Regex("""^bbc (one|two) ([a-z&]+)\s*hd$""").find(s.trim())?.let { m ->
             BBC_REGIONS[m.groupValues[2]]?.let { s = "bbc ${m.groupValues[1]} $it" }
         }
-        s = s.replace(Regex("""([a-eg-tv-z0-9])hd\b"""), "$1 hd") // "SkyPremiereHD" → "skypremiere hd" (not FHD/UHD)
+        s = s.replace(Regex("""([a-z0-9])uhd\b"""), "$1 uhd")      // "TNTUltimateUHD"
+            .replace(Regex("""([a-eg-tv-z0-9])hd\b"""), "$1 hd") // "SkyPremiereHD" → "skypremiere hd" (not FHD/UHD)
             .replace(Regex("""\s*\+\s*1\b"""), " plus1")
             .replace(Regex("""^u\s*&\s*"""), "")                 // "U&Dave" → "dave"
             .replace(Regex("""^5(\s+hd)?\s*$"""), "channel 5")     // "5 HD" → "channel 5" (not "5USA")
