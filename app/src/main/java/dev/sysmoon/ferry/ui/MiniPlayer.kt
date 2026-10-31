@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,6 +40,7 @@ import dev.sysmoon.ferry.graph
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun MiniPlayer(modifier: Modifier = Modifier) {
+    val graph = LocalContext.current.graph
     val np by graph.player.state.collectAsState()
     val channel = np.channel ?: return
     val shape = RoundedCornerShape(12.dp)
