@@ -281,7 +281,8 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
                 if (p != null) add(channel.displayName)
                 if (channel.streamCount > 1) add("${channel.streamCount} streams")
             }
-            Text(bits.joinToString("  ·  "), color = FerryColors.Muted)
+            Text(bits.joinToString("  ·  "), color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             when {
                 p != null && p.start <= now && p.stop > now -> Tag("LIVE", FerryColors.Gold)
                 p != null && p.stop <= now && graph.player.canCatchUp(channel, p, now) -> Tag("CATCH-UP", FerryColors.Sea)
@@ -309,6 +310,8 @@ private fun Tag(text: String, color: Color) {
         text,
         color = FerryColors.Deep,
         style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        softWrap = false,
         modifier = Modifier.padding(start = 12.dp).clip(RoundedCornerShape(4.dp)).background(color)
             .padding(horizontal = 6.dp, vertical = 1.dp),
     )
