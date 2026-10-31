@@ -78,7 +78,7 @@ private const val LOAD_BUCKET_MS = 3 * 3_600_000L   // programmes are loaded in 
 private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
-private val CHANNEL_COL: Dp = 280.dp
+private val CHANNEL_COL: Dp = 210.dp
 private val ROW_HEIGHT: Dp = 34.dp
 
 private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
