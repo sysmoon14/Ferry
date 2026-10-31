@@ -71,8 +71,8 @@ val ChannelEntity.archiveDays: Int get() = maxOf(catchupDays, rowCatchupDays)
 /** Number to show: the Sky number when the Sky layout matched this channel, else the provider's. */
 val ChannelEntity.shownNumber: Int get() = skyNumber ?: number ?: (position + 1)
 
-/** Name for lists: merged rows drop the quality tags that only described one of their streams. */
-val ChannelEntity.displayName: String get() = if (streamCount > 1) StreamQuality.displayName(name) else name
+/** Name for lists: quality tags ("FHD (1080p)") describe a stream, not the channel, so they're dropped. */
+val ChannelEntity.displayName: String get() = StreamQuality.displayName(name)
 
 @Entity(
     tableName = "programmes",

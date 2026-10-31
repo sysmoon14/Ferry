@@ -69,8 +69,9 @@ fun PlayerScreen(onBack: () -> Unit) {
         if (digits.isEmpty()) return@LaunchedEffect
         delay(if (digits.length >= 3) 900 else 1_600)
         val n = digits.toInt()
+        // Tune in the screen's scope: clearing [digits] restarts (cancels) this effect.
+        scope.launch { graph.player.play(dev.sysmoon.ferry.player.PlayTarget.Number(n)) }
         digits = ""
-        graph.player.play(dev.sysmoon.ferry.player.PlayTarget.Number(n))
     }
     // OK is acted on when released, so a long press can open the menu instead.
     var okLongPressed by remember { mutableStateOf(false) }
