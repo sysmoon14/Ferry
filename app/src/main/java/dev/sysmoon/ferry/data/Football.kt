@@ -22,7 +22,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 enum class Competition(val espn: String, val label: String, val short: String, val keywords: List<String>) {
-    PREMIER_LEAGUE("eng.1", "Premier League", "PL", listOf("premier league", "english premier", "epl", "barclays")),
+    PREMIER_LEAGUE("eng.1", "Premier League", "PL", listOf("premier league", "english premier", "epl")),
     CHAMPIONS_LEAGUE("uefa.champions", "Champions League", "UCL", listOf(
         "champions league", "uefa champions", "ucl", "liga de campeones", "ligue des champions",
         "liga dos campeoes", "champions league uefa", "lega dei campioni",

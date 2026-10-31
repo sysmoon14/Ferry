@@ -35,17 +35,24 @@ class MatchFinder(private val db: FerryDatabase) {
             if (prev == null || prev.score < boosted) found[ch.id] = StreamCandidate(ch, boosted, reason)
         }
 
-        // 1. Channel names
+        // 1. Channel names. Event channels usually carry a date ("31/10"); one for another day is
+        // a different match (or an old one the provider never renamed).
+        val koDate = java.time.Instant.ofEpochMilli(f.kickoff).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val koTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(f.kickoff))
         for (ch in rows) {
+            if (TeamNames.otherSport(ch.name)) continue
             val text = TeamNames.normalise(ch.name)
             val h = TeamNames.mentions(text, home)
             val a = TeamNames.mentions(text, away)
+            if (!h && !a) continue
+            val dated = TeamNames.dateIn(ch.name, koDate.year)
+            if (dated != null && dated != koDate) continue
             val group = TeamNames.normalise(ch.groupTitle.orEmpty())
+            val eventish = group.contains("event") || group.contains("ppv") || text.contains(" vs ") || text.contains(" v ")
             when {
                 h && a -> add(ch, 100, "Channel name: ${ch.name}")
-                (h || a) && (group.contains("event") || group.contains("ppv") || text.contains(" vs ") || text.contains(" v ")) ->
-                    add(ch, 62, "Event channel: ${ch.name}")
-                (h || a) && (group.contains("team") || group.contains("club")) -> add(ch, 58, "Club channel: ${ch.name}")
+                eventish && (dated == koDate || ch.name.contains(koTime)) -> add(ch, 66, "Event channel: ${ch.name}")
+                !eventish && (group.contains("team") || group.contains("club")) -> add(ch, 58, "Club channel: ${ch.name}")
             }
         }
 
@@ -61,11 +68,13 @@ class MatchFinder(private val db: FerryDatabase) {
             val h = TeamNames.mentions(text, home)
             val a = TeamNames.mentions(text, away)
             val comp = f.competition.keywords.any { text.contains(" $it ") }
+            // "Premier League Preview Show", "UCL Highlights"… aren't the match.
+            val show = TeamNames.isMagazineShow(title)
             val label = "Guide: ${p.title} (${time.format(Date(p.start))})"
             for (ch in channels) when {
                 h && a -> add(ch, 90, label)
-                (h || a) && comp -> add(ch, 72, label)
-                comp && TeamNames.isSportsChannel(ch) && competitionOnly < 25 -> { competitionOnly++; add(ch, 42, label) }
+                (h || a) && comp && !show -> add(ch, 72, label)
+                comp && !show && !h && !a && TeamNames.isSportsChannel(ch) && competitionOnly < 25 -> { competitionOnly++; add(ch, 42, label) }
             }
         }
 
@@ -73,8 +82,8 @@ class MatchFinder(private val db: FerryDatabase) {
         for (b in f.broadcasts) {
             val key = TeamNames.normalise(b).trim()
             if (key.length < 3) continue
-            rows.filter { TeamNames.normalise(it.name).trim().startsWith(key) && TeamNames.isSportsChannel(it, lenient = true) }
-                .take(4).forEach { add(it, 55, "Listed broadcaster: $b") }
+            // The network itself ("USA Network", "NBC HD", "Peacock 1"), not everything with its name in.
+            rows.filter { TeamNames.isNetwork(it.name, key) }.take(4).forEach { add(it, 55, "Listed broadcaster: $b") }
         }
 
         return found.values.sortedWith(compareByDescending<StreamCandidate> { it.score }.thenByDescending { it.channel.quality })
@@ -163,6 +172,27 @@ object TeamNames {
         "tnt", "sky sports", "canal", "eleven", "supersport", "arena", "premier", "laliga", "movistar", "ziggo", "viaplay",
         "nova sport", "polsat", "cosmote", "ssc", "astro", "optus", "stan", "fox", "tsn", "sportsnet", "usa network",
         "peacock", "paramount", "cbs", "nbc", "telemundo", "univision", "tudn", "rmc", "eurosport", "setanta", "match")
+
+    private val OTHER_SPORTS = Regex("""\b(rugby|super league|rhinos|nrl|nfl|nba|nhl|mlb|cricket|darts|snooker|tennis|golf|boxing|ufc|wwe|f1|motogp|nascar|hockey|basketball|baseball)\b""")
+    fun otherSport(name: String) = OTHER_SPORTS.containsMatchIn(normalise(name))
+
+    private val SHOW_WORDS = Regex("""\b(preview|review|highlights|show|news|classic|classics|rewind|magazine|talk|tonight|extra|goals|gameday|matchday live|reaction|countdown|build up)\b""")
+    fun isMagazineShow(normalisedTitle: String) = SHOW_WORDS.containsMatchIn(normalisedTitle)
+
+    /** A date like "31/10" or "31.10" in a channel name. */
+    fun dateIn(name: String, year: Int): java.time.LocalDate? {
+        val m = Regex("""(?<!\d)(\d{1,2})[/.](\d{1,2})(?![\d:])""").find(name) ?: return null
+        return runCatching { java.time.LocalDate.of(year, m.groupValues[2].toInt(), m.groupValues[1].toInt()) }.getOrNull()
+    }
+
+    private val NETWORK_SUFFIX = setOf("hd", "fhd", "uhd", "4k", "us", "usa", "east", "west", "sports", "network", "1", "2", "3", "4")
+    /** [name] is the broadcaster [key] itself, maybe with a quality/region suffix. */
+    fun isNetwork(name: String, key: String): Boolean {
+        val n = normalise(name.substringAfterLast('|')).trim()
+        if (!n.startsWith(key)) return false
+        val rest = n.removePrefix(key).trim().split(' ').filter { it.isNotEmpty() }
+        return rest.size <= 2 && rest.all { it in NETWORK_SUFFIX }
+    }
 
     fun isSportsChannel(ch: ChannelEntity, lenient: Boolean = false): Boolean {
         val text = normalise(ch.name + " " + ch.groupTitle.orEmpty())

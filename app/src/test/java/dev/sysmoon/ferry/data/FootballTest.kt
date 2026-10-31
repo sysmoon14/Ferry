@@ -64,4 +64,17 @@ class FootballTest {
         val city = TeamNames.aliases(team("Manchester City", "Man City"))
         assertFalse(TeamNames.mentions(TeamNames.normalise("City of London documentary"), city))
     }
+
+    @Test fun filtersLookalikes() {
+        assertTrue(TeamNames.otherSport("Super League Plus | Castlford Tigers v Leeds Rhinos"))
+        assertFalse(TeamNames.otherSport("EPL02: Bournemouth 15:00 Leeds 31/10"))
+        assertEquals(java.time.LocalDate.of(2026, 10, 31), TeamNames.dateIn("EPL02: Bournemouth 15:00 Leeds 31/10", 2026))
+        assertEquals(java.time.LocalDate.of(2026, 4, 25), TeamNames.dateIn("FA Cup | Chelsea vs Leeds 25/04 15:00", 2026))
+        assertEquals(null, TeamNames.dateIn("Leeds United", 2026))
+        assertTrue(TeamNames.isNetwork("USA Network HD", TeamNames.normalise("USA Network").trim()))
+        assertTrue(TeamNames.isNetwork("US | Peacock 1", "peacock"))
+        assertFalse(TeamNames.isNetwork("Peacock Live | The Bob Ross Channel", "peacock"))
+        assertTrue(TeamNames.isMagazineShow(TeamNames.normalise("The Premier League Preview Show")))
+        assertFalse(TeamNames.isMagazineShow(TeamNames.normalise("Live: Premier League")))
+    }
 }
