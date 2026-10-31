@@ -39,6 +39,9 @@ class Settings(private val context: Context) {
         val lastChannel = stringPreferencesKey("last_channel")
         val hiddenGroups = stringSetPreferencesKey("hidden_groups")
         val mergeDuplicates = booleanPreferencesKey("merge_duplicates")
+        val skyLayout = booleanPreferencesKey("sky_layout")
+        val skyRegion = intPreferencesKey("sky_region")
+        val skyExtraGroups = stringSetPreferencesKey("sky_extra_groups")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -94,6 +97,18 @@ class Settings(private val context: Context) {
     /** Fold backup / other-quality copies of a channel into one row (on by default). */
     suspend fun mergeDuplicates(): Boolean = store.data.first()[Keys.mergeDuplicates] ?: true
     suspend fun setMergeDuplicates(merge: Boolean) = store.edit { it[Keys.mergeDuplicates] = merge }
+
+    /** Sky layout: channels numbered and grouped like a Sky box, plus any provider groups picked as extras. */
+    val skyLayout: Flow<Boolean> = store.data.map { it[Keys.skyLayout] ?: false }
+    suspend fun skyLayout(): Boolean = skyLayout.first()
+    suspend fun skyRegion(): Int = store.data.first()[Keys.skyRegion] ?: SkyLineup.DEFAULT_REGION
+    val skyExtraGroups: Flow<Set<String>> = store.data.map { it[Keys.skyExtraGroups] ?: emptySet() }
+    suspend fun skyExtraGroups(): Set<String> = skyExtraGroups.first()
+    suspend fun setSky(enabled: Boolean, region: Int, extraGroups: Set<String>) = store.edit {
+        it[Keys.skyLayout] = enabled
+        it[Keys.skyRegion] = region
+        it[Keys.skyExtraGroups] = extraGroups
+    }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]
     suspend fun setLastChannelId(id: String) = store.edit { it[Keys.lastChannel] = id }

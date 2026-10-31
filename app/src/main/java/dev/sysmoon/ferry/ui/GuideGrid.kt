@@ -60,6 +60,7 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.shownNumber
 import dev.sysmoon.ferry.data.archiveDays
 import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.ZapScope
@@ -290,7 +291,7 @@ private fun GridRow(
         // Channel column
         Row(Modifier.width(CHANNEL_COL).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "${channel.number ?: channel.position + 1}",
+                "${channel.shownNumber}",
                 color = FerryColors.Muted,
                 modifier = Modifier.width(44.dp),
                 maxLines = 1,

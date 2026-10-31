@@ -28,7 +28,7 @@ data class SourceEntity(
 
 @Entity(
     tableName = "channels",
-    indices = [Index("sourceId"), Index("tvgId"), Index("favourite"), Index("groupTitle"), Index("primaryId")],
+    indices = [Index("sourceId"), Index("tvgId"), Index("favourite"), Index("groupTitle"), Index("primaryId"), Index("skyNumber")],
 )
 data class ChannelEntity(
     /** Stable across refreshes: hash of source + tvg-id + name (URLs often carry rotating tokens). */
@@ -53,6 +53,9 @@ data class ChannelEntity(
     @ColumnInfo(defaultValue = "1") val streamCount: Int = 1,
     /** On a primary: the longest catch-up any of its streams has (it may not be the best stream). */
     @ColumnInfo(defaultValue = "0") val rowCatchupDays: Int = 0,
+    /** Sky layout: this channel's Sky EPG number and section ("Entertainment", "Sports"…), if matched. */
+    val skyNumber: Int? = null,
+    val skySection: String? = null,
     // User-owned fields, preserved across refreshes
     val favourite: Boolean = false,
     val hidden: Boolean = false,
@@ -64,6 +67,9 @@ val ChannelEntity.epgKey: String get() = tvgId ?: name
 
 /** Days of catch-up this row offers, from whichever of its streams has an archive. */
 val ChannelEntity.archiveDays: Int get() = maxOf(catchupDays, rowCatchupDays)
+
+/** Number to show: the Sky number when the Sky layout matched this channel, else the provider's. */
+val ChannelEntity.shownNumber: Int get() = skyNumber ?: number ?: (position + 1)
 
 /** Name for lists: merged rows drop the quality tags that only described one of their streams. */
 val ChannelEntity.displayName: String get() = if (streamCount > 1) StreamQuality.displayName(name) else name

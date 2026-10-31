@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.shownNumber
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
@@ -57,6 +58,8 @@ import java.util.Date
 
 const val FAVOURITES = "\u0000fav"
 const val ALL = "\u0000all"
+/** Rail keys for Sky layout sections ("\u0000sky:Sports"). */
+const val SKY_PREFIX = "\u0000sky:"
 private const val GUIDE_LIMIT = 1_000
 
 @Composable
@@ -80,21 +83,42 @@ fun GuideScreen(
     val groups by remember { dao.observeGroups().catch { emit(emptyList()) } }
         .collectAsState(initial = emptyList())
     val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
+    // Sky layout: Sky's sections replace provider groups; picked provider groups follow as extras.
+    val skyLayout by remember { graph.settings.skyLayout }.collectAsState(initial = false)
+    val skySections by remember { dao.observeSkySections().catch { emit(emptyList()) } }.collectAsState(initial = emptyList())
+    val skyExtras by remember { graph.settings.skyExtraGroups }.collectAsState(initial = emptySet())
+    val sky = skyLayout && skySections.isNotEmpty()
+    val railGroups = if (sky) groups.filter { it in skyExtras } else groups
     val nowPlaying by graph.player.state.collectAsState()
 
     val hasFavourites = favourites.isNotEmpty()
-    val effective = if (selected == FAVOURITES && !hasFavourites) ALL else selected
-    val shownFlow = remember(effective) {
-        when (effective) {
-            FAVOURITES -> dao.observeFavourites()
-            ALL -> dao.observeFirst(GUIDE_LIMIT)
+    val validKeys = buildSet {
+        add(ALL); if (hasFavourites) add(FAVOURITES)
+        if (sky) skySections.forEach { add(SKY_PREFIX + it) }
+        addAll(railGroups)
+    }
+    // Fall back to All when the selection disappears (no favourites left, layout switched…).
+    val effective = when {
+        selected == FAVOURITES && !hasFavourites -> ALL
+        groups.isEmpty() -> selected // lists still loading: keep the selection
+        selected in validKeys -> selected
+        else -> ALL
+    }
+    val shownFlow = remember(effective, sky) {
+        when {
+            effective == FAVOURITES -> dao.observeFavourites()
+            effective == ALL && sky -> dao.observeSkyAll()
+            effective == ALL -> dao.observeFirst(GUIDE_LIMIT)
+            effective.startsWith(SKY_PREFIX) -> dao.observeSkySection(effective.removePrefix(SKY_PREFIX))
             else -> dao.observeGroup(effective, GUIDE_LIMIT)
         }.catch { emit(emptyList()) }
     }
     val shown by shownFlow.collectAsState(initial = emptyList())
-    val zapScope = when (effective) {
-        FAVOURITES -> ZapScope.Favourites
-        ALL -> ZapScope.All
+    val zapScope = when {
+        effective == FAVOURITES -> ZapScope.Favourites
+        effective == ALL && sky -> ZapScope.Sky(null)
+        effective == ALL -> ZapScope.All
+        effective.startsWith(SKY_PREFIX) -> ZapScope.Sky(effective.removePrefix(SKY_PREFIX))
         else -> ZapScope.Group(effective)
     }
     // Long-press menu (favourite + stream picker) for this channel, if open.
@@ -128,8 +152,9 @@ fun GuideScreen(
             ) {
                 val rail = buildList {
                     if (hasFavourites) add(FAVOURITES to "★ Favourites")
-                    add(ALL to "All channels")
-                    groups.forEach { add(it to it) }
+                    add(ALL to if (sky) "All Sky channels" else "All channels")
+                    if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
+                    railGroups.forEach { add(it to it) }
                 }
                 items(rail, key = { it.first }) { (key, label) ->
                     ListItem(
@@ -154,10 +179,14 @@ fun GuideScreen(
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    when (effective) { FAVOURITES -> "Favourites"; ALL -> "All channels"; else -> effective },
+                    when {
+                        effective == FAVOURITES -> "Favourites"
+                        effective == ALL -> if (sky) "All Sky channels" else "All channels"
+                        else -> effective.removePrefix(SKY_PREFIX)
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                 )
-                if (effective == ALL && total > GUIDE_LIMIT) {
+                if (effective == ALL && !sky && total > GUIDE_LIMIT) {
                     Text(
                         "  first $GUIDE_LIMIT of $total — pick a group",
                         color = FerryColors.Muted,
@@ -250,7 +279,7 @@ private fun ChannelRow(
         leadingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${channel.number ?: index}",
+                    "${channel.shownNumber}",
                     style = MaterialTheme.typography.titleMedium,
                     color = FerryColors.Muted,
                     modifier = Modifier.width(48.dp),

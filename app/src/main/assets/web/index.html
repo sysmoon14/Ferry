@@ -150,6 +150,19 @@
     <!-- Groups -->
     <section id="groups">
       <div class="card">
+        <h2>Sky layout</h2>
+        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="skyOn" style="width:auto;flex:none"> Number and group channels like Sky</label>
+        <p class="muted small">Ferry fetches Sky's channel list for your region and matches it to your playlist. Matched channels get their Sky number (101 BBC One, 401 Sky Sports Main Event) and appear in Sky's sections in Sky order; typing a number on the remote tunes it.</p>
+        <div class="row"><label class="small muted" style="flex:none">Sky region</label><select id="skyRegion"></select></div>
+        <p class="small" id="skyStatus"></p>
+        <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist</summary><div id="skyMissing" class="small muted" style="margin-top:6px;line-height:1.6"></div></details>
+        <h3 style="margin:14px 0 4px">Extra groups</h3>
+        <p class="muted small">Provider groups to show after the Sky sections (everything else stays out of the guide).</p>
+        <input id="skyExtraQ" placeholder="Filter groups" type="search">
+        <div id="skyExtraList" style="margin-top:8px;max-height:320px;overflow:auto"></div>
+        <div class="actions"><button class="btn" id="skySave">Save Sky layout</button></div>
+      </div>
+      <div class="card">
         <h2>Show only these groups</h2>
         <p class="muted small">Unticked groups disappear from the TV and Home Assistant, including channels your provider adds to them later.</p>
         <div class="chips" id="prefixChips"></div>
@@ -448,6 +461,42 @@
     } catch (e) { toast(e.message); loadOptions(); }
   };
 
+  // ---------- Sky layout
+  let sky = null, skyExtras = new Set();
+  async function loadSky() {
+    sky = await api("/sky");
+    skyExtras = new Set(sky.extraGroups);
+    $("skyOn").checked = sky.enabled;
+    $("skyRegion").replaceChildren(...sky.regions.map(r => el("option", { value: r.id }, `${r.name} (${r.id})`)));
+    $("skyRegion").value = sky.region;
+    renderSky();
+  }
+  function renderSky() {
+    if (!sky) return;
+    $("skyStatus").textContent = !sky.enabled ? "Off — the guide uses your provider's groups."
+      : sky.error ? `Couldn't load Sky's channel list: ${sky.error}`
+      : `Matched ${sky.matched} of ${sky.total} Sky channels.`;
+    $("skyMissingBox").hidden = !sky.enabled || !sky.unmatched.length;
+    $("skyMissing").textContent = sky.unmatched.map(c => `${c.number} ${c.title}`).join(" · ");
+    const q = $("skyExtraQ").value.trim().toLowerCase();
+    const visible = (groups.length ? groups : []).filter(g => !g.hidden && (!q || g.name.toLowerCase().includes(q)));
+    $("skyExtraList").replaceChildren(...visible.map(g => {
+      const box = el("input", { type: "checkbox", checked: skyExtras.has(g.name) });
+      box.onchange = () => { box.checked ? skyExtras.add(g.name) : skyExtras.delete(g.name); };
+      return el("label", { className: "grp" }, box, el("span", { className: "grow" }, g.name), el("span", { className: "muted small" }, String(g.count)));
+    }));
+  }
+  $("skyExtraQ").oninput = renderSky;
+  $("skySave").onclick = async () => {
+    $("skySave").disabled = true;
+    try {
+      sky = await api("/sky", { method: "PUT", body: { enabled: $("skyOn").checked, region: Number($("skyRegion").value), extraGroups: [...skyExtras] } });
+      toast(sky.enabled ? `Sky layout on — ${sky.matched} channels matched` : "Sky layout off");
+      renderSky();
+    } catch (e) { toast(e.message); }
+    $("skySave").disabled = false;
+  };
+
   // ---------- Groups ("show only these")
   let groups = [], picked = new Set(), groupsDirty = false;
   // Providers usually prefix groups by country/region: "UK | Sports", "US | News".
@@ -492,6 +541,7 @@
   loaders.groups = async () => {
     loadOptions().catch(() => {});
     groups = await api("/groups/detail");
+    loadSky().catch(e => { $("skyStatus").textContent = e.message; });
     picked = new Set(groups.filter(g => !g.hidden).map(g => g.name));
     groupsDirty = false; renderGroups();
   };

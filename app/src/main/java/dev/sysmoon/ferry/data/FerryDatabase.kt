@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SourceEntity::class, ChannelEntity::class, ProgrammeEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class FerryDatabase : RoomDatabase() {
@@ -20,7 +20,7 @@ abstract class FerryDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): FerryDatabase =
             Room.databaseBuilder(context, FerryDatabase::class.java, "ferry.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 // Last resort only; real migrations keep favourites and hidden groups.
                 .fallbackToDestructiveMigration()
                 .build()
@@ -47,6 +47,15 @@ abstract class FerryDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE channels ADD COLUMN rowCatchupDays INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** v5: Sky layout (Sky EPG number and section per matched channel). */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE channels ADD COLUMN skyNumber INTEGER")
+                db.execSQL("ALTER TABLE channels ADD COLUMN skySection TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_channels_skyNumber` ON `channels` (`skyNumber`)")
             }
         }
     }

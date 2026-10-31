@@ -4,6 +4,7 @@ import android.util.Log
 import dev.sysmoon.ferry.AppGraph
 import dev.sysmoon.ferry.data.BbcIplayer
 import dev.sysmoon.ferry.data.CatchupProbe
+import dev.sysmoon.ferry.data.SkyLineup
 import dev.sysmoon.ferry.data.epgKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -198,17 +199,17 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(report)
                 }
 
-                // Raw Sky EPG lineup data (development aid while building the Sky layout).
-                get("/debug/sky") {
-                    val path = call.request.queryParameters["path"].orEmpty()
-                    if (!Regex("""regions|services/\d+/\d+""").matches(path)) return@get call.respond(HttpStatusCode.BadRequest, ErrorDto("bad path"))
-                    val body = withContext(Dispatchers.IO) {
-                        g.http.newCall(
-                            okhttp3.Request.Builder().url("https://awk.epgsky.com/hawk/linear/$path")
-                                .header("X-SkyOTT-Territory", "GB").build()
-                        ).execute().use { "HTTP ${it.code}\n" + it.body?.string().orEmpty() }
-                    }
-                    call.respondBytes(body.toByteArray(), ContentType.Text.Plain)
+                // ---- Sky layout
+                get("/sky") {
+                    if (g.settings.skyLayout() && g.repository.skyReport == null) g.repository.applySky()
+                    call.respond(skyStatus())
+                }
+                put("/sky") {
+                    val input = call.receive<SkyInput>()
+                    val region = input.region.takeIf { it in SkyLineup.REGIONS } ?: SkyLineup.DEFAULT_REGION
+                    g.settings.setSky(input.enabled, region, input.extraGroups.toSet())
+                    g.repository.applySky()
+                    call.respond(skyStatus())
                 }
 
                 // ---- Options
@@ -245,6 +246,7 @@ class ConfigServer(private val g: AppGraph) {
                         hidden.chunked(500).forEach { g.db.channels().setGroupsHidden(it, true) }
                         (all intersect visible).chunked(500).forEach { g.db.channels().setGroupsHidden(it, false) }
                     }
+                    g.scope.launch { g.repository.applySky() } // visible channels changed
                     call.respond(OkDto())
                 }
                 get("/channels") {
@@ -357,5 +359,19 @@ class ConfigServer(private val g: AppGraph) {
     companion object {
         private const val TAG = "ConfigServer"
         private const val AUTH = "paired"
+    }
+
+    private suspend fun skyStatus(): SkyStatusDto {
+        val report = g.repository.skyReport
+        return SkyStatusDto(
+            enabled = g.settings.skyLayout(),
+            region = g.settings.skyRegion(),
+            regions = SkyLineup.REGIONS.map { (id, name) -> SkyRegionDto(id, name) },
+            extraGroups = g.settings.skyExtraGroups().toList(),
+            matched = report?.matched ?: 0,
+            total = report?.total ?: 0,
+            unmatched = report?.unmatched.orEmpty().map { SkyChannelDto(it.number, it.title, it.section) },
+            error = report?.error,
+        )
     }
 }

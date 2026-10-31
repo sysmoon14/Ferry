@@ -49,6 +49,8 @@ sealed interface ZapScope {
     data object Favourites : ZapScope
     data object All : ZapScope
     data class Group(val name: String) : ZapScope
+    /** Sky layout: one Sky section in Sky number order, or every Sky channel when [section] is null. */
+    data class Sky(val section: String?) : ZapScope
 }
 
 data class NowPlaying(
@@ -145,7 +147,9 @@ class PlayerController(
     suspend fun resolve(target: PlayTarget): ChannelEntity? = when (target) {
         is PlayTarget.Id -> db.channels().get(target.id)
         is PlayTarget.Tvg -> db.channels().byTvgId(target.tvgId)
-        is PlayTarget.Number -> db.channels().byNumber(target.number)
+        // In the Sky layout, numbers are Sky's (101 = BBC One).
+        is PlayTarget.Number -> (if (settings.skyLayout()) db.channels().bySkyNumber(target.number) else null)
+            ?: db.channels().byNumber(target.number)
             ?: db.channels().atPosition((target.number - 1).coerceAtLeast(0))
         is PlayTarget.Name -> db.channels().byName(target.name)
         PlayTarget.Last -> settings.lastChannelId()?.let { db.channels().get(it) }
@@ -202,6 +206,7 @@ class PlayerController(
         val primary = channel.primaryId?.let { db.channels().get(it) } ?: channel
         zapScope = scope ?: when {
             primary.favourite -> ZapScope.Favourites
+            primary.skyNumber != null -> ZapScope.Sky(null)
             primary.groupTitle != null -> ZapScope.Group(primary.groupTitle)
             else -> ZapScope.All
         }
@@ -317,6 +322,7 @@ class PlayerController(
             ZapScope.Favourites -> dao.favourites().map { it.id }
             is ZapScope.Group -> dao.inGroup(z.name).map { it.id }
             ZapScope.All -> dao.visibleIds()
+            is ZapScope.Sky -> dao.skyIds(z.section)
         }
         if (ids.isEmpty()) return
         val index = ids.indexOf(currentId)

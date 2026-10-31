@@ -63,6 +63,15 @@ fun PlayerScreen(onBack: () -> Unit) {
     var overlayVisible by remember { mutableStateOf(true) }
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     var menuOpen by remember { mutableStateOf(false) }
+    // Typed channel number ("4", "40", "401"); tunes after a short pause, like a set-top box.
+    var digits by remember { mutableStateOf("") }
+    LaunchedEffect(digits) {
+        if (digits.isEmpty()) return@LaunchedEffect
+        delay(if (digits.length >= 3) 900 else 1_600)
+        val n = digits.toInt()
+        digits = ""
+        graph.player.play(dev.sysmoon.ferry.player.PlayTarget.Number(n))
+    }
     // OK is acted on when released, so a long press can open the menu instead.
     var okLongPressed by remember { mutableStateOf(false) }
 
@@ -95,6 +104,16 @@ fun PlayerScreen(onBack: () -> Unit) {
                     }
                     return@onKeyEvent true
                 }
+                val digit = when (e.key) {
+                    Key.Zero, Key.NumPad0 -> 0; Key.One, Key.NumPad1 -> 1; Key.Two, Key.NumPad2 -> 2
+                    Key.Three, Key.NumPad3 -> 3; Key.Four, Key.NumPad4 -> 4; Key.Five, Key.NumPad5 -> 5
+                    Key.Six, Key.NumPad6 -> 6; Key.Seven, Key.NumPad7 -> 7; Key.Eight, Key.NumPad8 -> 8
+                    Key.Nine, Key.NumPad9 -> 9; else -> null
+                }
+                if (digit != null) {
+                    if (digits.length < 4) digits += digit
+                    return@onKeyEvent true
+                }
                 when (e.key) {
                     // Up = next channel (higher in the list order), like a normal TV remote.
                     Key.DirectionUp, Key.ChannelUp -> { graph.player.zap(1); true }
@@ -121,6 +140,16 @@ fun PlayerScreen(onBack: () -> Unit) {
             onRelease = { it.player = null },
         )
 
+        if (digits.isNotEmpty()) {
+            Text(
+                digits,
+                style = MaterialTheme.typography.displayMedium,
+                color = FerryColors.Gold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(48.dp)
+                    .background(FerryColors.Deep.copy(alpha = 0.85f)).padding(horizontal = 24.dp, vertical = 8.dp),
+            )
+        }
+
         if (state.state == PlaybackState.ERROR) {
             Text(
                 if (state.catchup) "Couldn't play this recording (${state.error ?: "unknown error"}). Back to return to the guide."
@@ -144,6 +173,9 @@ fun PlayerScreen(onBack: () -> Unit) {
                     .padding(horizontal = 48.dp, vertical = 32.dp)
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    ch.skyNumber?.let {
+                        Text("$it  ", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Muted)
+                    }
                     Text(ch.displayName, style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
                     Spacer(Modifier.width(16.dp))
                     if (state.catchup) Text("CATCH-UP  ", color = FerryColors.Sea, style = MaterialTheme.typography.labelLarge)

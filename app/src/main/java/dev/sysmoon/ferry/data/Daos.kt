@@ -28,6 +28,10 @@ interface SourceDao {
     suspend fun delete(id: Long)
 }
 
+data class SkyCandidateRow(
+    val id: String, val name: String, val tvgId: String?, val groupTitle: String?, val quality: Int, val position: Int,
+)
+
 data class KeyDays(val epgKey: String, val days: Int)
 
 data class GroupSummary(val name: String, val count: Int)
@@ -120,6 +124,33 @@ interface ChannelDao {
 
     @Query("SELECT * FROM channels WHERE id = :id")
     suspend fun get(id: String): ChannelEntity?
+
+    // ---- Sky layout
+    @Query("SELECT id, name, tvgId, groupTitle, quality, position FROM channels WHERE primaryId IS NULL AND hidden = 0")
+    suspend fun skyCandidates(): List<SkyCandidateRow>
+
+    @Query("UPDATE channels SET skyNumber = NULL, skySection = NULL WHERE skyNumber IS NOT NULL")
+    suspend fun clearSky()
+
+    @Query("UPDATE channels SET skyNumber = :number, skySection = :section WHERE id = :id")
+    suspend fun setSky(id: String, number: Int, section: String)
+
+    /** Sky sections that have channels, in Sky's order (by their lowest number). */
+    @Query("SELECT skySection FROM channels WHERE skyNumber IS NOT NULL AND hidden = 0 AND primaryId IS NULL GROUP BY skySection ORDER BY MIN(skyNumber)")
+    fun observeSkySections(): Flow<List<String>>
+
+    @Query("SELECT * FROM channels WHERE skySection = :section AND hidden = 0 AND primaryId IS NULL ORDER BY skyNumber")
+    fun observeSkySection(section: String): Flow<List<ChannelEntity>>
+
+    @Query("SELECT * FROM channels WHERE skyNumber IS NOT NULL AND hidden = 0 AND primaryId IS NULL ORDER BY skyNumber")
+    fun observeSkyAll(): Flow<List<ChannelEntity>>
+
+    /** Zap order in the Sky layout: one section, or every Sky channel when [section] is null. */
+    @Query("SELECT id FROM channels WHERE skyNumber IS NOT NULL AND hidden = 0 AND primaryId IS NULL AND (:section IS NULL OR skySection = :section) ORDER BY skyNumber")
+    suspend fun skyIds(section: String?): List<String>
+
+    @Query("SELECT * FROM channels WHERE skyNumber = :number AND hidden = 0 AND primaryId IS NULL LIMIT 1")
+    suspend fun bySkyNumber(number: Int): ChannelEntity?
 
     /** A row's streams, best first: the primary itself plus any duplicates folded into it. */
     @Query("SELECT * FROM channels WHERE id = :primaryId OR primaryId = :primaryId ORDER BY primaryId IS NOT NULL, quality DESC, position")

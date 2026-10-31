@@ -24,9 +24,53 @@ class ChannelRepository(
     private val http: OkHttpClient,
     private val settings: Settings,
     private val bbc: BbcIplayer,
+    private val sky: SkyLineup,
 ) {
     private val refreshLock = Mutex()
     private val xtream = XtreamClient(http)
+
+    data class SkyReport(
+        val region: Int,
+        val total: Int,
+        val matched: Int,
+        val unmatched: List<SkyLineup.SkyChannel>,
+        val error: String? = null,
+    )
+
+    /** Outcome of the last Sky layout pass, for the web page. */
+    @Volatile var skyReport: SkyReport? = null
+        private set
+
+    /**
+     * Sky layout: number and group matched channels like a Sky box. Runs after every refresh
+     * (refreshing rebuilds channel rows) and whenever the Sky settings or visible groups change.
+     */
+    suspend fun applySky() = withContext(Dispatchers.IO) {
+        if (!settings.skyLayout()) {
+            db.channels().clearSky()
+            skyReport = null
+            return@withContext
+        }
+        val region = settings.skyRegion()
+        val lineup = try {
+            sky.channels(region)
+        } catch (e: Exception) {
+            Log.w(TAG, "Sky line-up unavailable", e)
+            skyReport = SkyReport(region, 0, 0, emptyList(), e.message ?: e.javaClass.simpleName)
+            return@withContext
+        }
+        val candidates = db.channels().skyCandidates().map {
+            SkyMatcher.Candidate(it.id, it.name, it.tvgId, it.groupTitle, it.quality, it.position)
+        }
+        val result = SkyMatcher.match(lineup, candidates, region)
+        db.withTransaction {
+            db.channels().clearSky()
+            result.matches.forEach { db.channels().setSky(it.channelId, it.sky.number, it.sky.section) }
+        }
+        val total = result.matches.size + result.unmatched.size
+        skyReport = SkyReport(region, total, result.matches.size, result.unmatched)
+        Log.i(TAG, "Sky layout: matched ${result.matches.size} of $total for region $region")
+    }
 
     suspend fun addSource(source: SourceEntity): Long = db.sources().insert(source)
 
@@ -76,6 +120,7 @@ class ChannelRepository(
                 Log.w(TAG, "Refresh failed for ${src.name}", e)
                 db.sources().update(src.copy(lastError = e.message ?: e.javaClass.simpleName))
             }
+            runCatching { applySky() }.onFailure { Log.w(TAG, "Sky layout failed", it) }
         }
     }
 

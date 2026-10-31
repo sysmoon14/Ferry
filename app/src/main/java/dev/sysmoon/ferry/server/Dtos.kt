@@ -65,6 +65,20 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
 
 @Serializable data class OptionsDto(val mergeDuplicates: Boolean)
 
+@Serializable data class SkyRegionDto(val id: Int, val name: String)
+@Serializable data class SkyChannelDto(val number: Int, val title: String, val section: String)
+@Serializable data class SkyStatusDto(
+    val enabled: Boolean,
+    val region: Int,
+    val regions: List<SkyRegionDto>,
+    val extraGroups: List<String>,
+    val matched: Int,
+    val total: Int,
+    val unmatched: List<SkyChannelDto>,
+    val error: String?,
+)
+@Serializable data class SkyInput(val enabled: Boolean, val region: Int, val extraGroups: List<String> = emptyList())
+
 @Serializable data class ChannelPage(val total: Int, val items: List<ChannelDto>)
 @Serializable data class ChannelPatch(val favourite: Boolean? = null, val hidden: Boolean? = null)
 @Serializable data class GroupPatch(val group: String, val hidden: Boolean)

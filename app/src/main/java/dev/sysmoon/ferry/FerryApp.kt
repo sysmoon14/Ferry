@@ -3,6 +3,7 @@ package dev.sysmoon.ferry
 import android.app.Application
 import android.content.Context
 import dev.sysmoon.ferry.data.BbcIplayer
+import dev.sysmoon.ferry.data.SkyLineup
 import dev.sysmoon.ferry.data.ChannelRepository
 import dev.sysmoon.ferry.data.FerryDatabase
 import dev.sysmoon.ferry.data.Settings
@@ -35,7 +36,8 @@ class AppGraph(val context: Context) {
         .followRedirects(true)
         .build()
     val bbc = BbcIplayer(http)
-    val repository = ChannelRepository(db, http, settings, bbc)
+    val sky = SkyLineup(http, context.filesDir)
+    val repository = ChannelRepository(db, http, settings, bbc, sky)
     val player = PlayerController(context, db, settings, scope, bbc)
     val commands = RemoteCommands(this)
     val mqtt = MqttBridge(this)
