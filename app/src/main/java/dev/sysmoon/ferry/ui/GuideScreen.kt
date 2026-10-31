@@ -154,8 +154,16 @@ fun GuideScreen(
     val railState = rememberLazyListState()
     val railFocus = remember { FocusRequester() }
     var channelsFocused by remember { mutableStateOf(false) }
+    // The group list hides while you're in the channels/guide (more room for programmes);
+    // Back brings it back and focuses the current group.
+    var railVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(channelsFocused) { if (channelsFocused) railVisible = false }
     val focusRail: () -> Unit = {
         scope.launch {
+            if (!railVisible) {
+                railVisible = true
+                withFrameNanos { } // let the rail compose before focusing into it
+            }
             val index = rail.indexOfFirst { it.first == effective }.coerceAtLeast(0)
             if (railState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
                 railState.scrollToItem(index)
@@ -168,6 +176,12 @@ fun GuideScreen(
 
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 24.dp)) {
         // Group rail
+        androidx.compose.animation.AnimatedVisibility(
+            visible = railVisible,
+            enter = androidx.compose.animation.expandHorizontally() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkHorizontally() + androidx.compose.animation.fadeOut(),
+        ) {
+        Row {
         Column(Modifier.width(240.dp).fillMaxHeight()) {
             Text("Ferry", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
             Spacer(Modifier.height(16.dp))
@@ -197,10 +211,16 @@ fun GuideScreen(
         }
 
         Spacer(Modifier.width(24.dp))
+        }
+        }
 
         // Channel list
         Column(Modifier.weight(1f).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus }) {
-            Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Leave room on the right for the corner mini player when a stream is playing.
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 16.dp, end = if (nowPlaying.channel != null) 250.dp else 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     when {
                         effective == FAVOURITES -> "Favourites"
