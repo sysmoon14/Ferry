@@ -389,27 +389,27 @@ private fun InfoCard(
 
     Column(
         Modifier
-            .padding(horizontal = 48.dp, vertical = 36.dp)
-            .widthIn(max = 1500.dp)
+            .padding(horizontal = 40.dp, vertical = 24.dp)
+            .widthIn(max = 760.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(FerryColors.Deep.copy(alpha = 0.93f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(22.dp))
-            .padding(horizontal = 32.dp, vertical = 24.dp)
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(16.dp))
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         // Channel row
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("${channel.shownNumber}", style = MaterialTheme.typography.headlineSmall, color = FerryColors.Muted)
-            Spacer(Modifier.width(16.dp))
+            Text("${channel.shownNumber}", style = MaterialTheme.typography.titleMedium, color = FerryColors.Muted)
+            Spacer(Modifier.width(10.dp))
             Box(
-                Modifier.size(width = 76.dp, height = 46.dp).clip(RoundedCornerShape(8.dp)).background(FerryColors.Navy),
+                Modifier.size(width = 52.dp, height = 32.dp).clip(RoundedCornerShape(6.dp)).background(FerryColors.Navy),
                 contentAlignment = Alignment.Center,
             ) {
-                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(5.dp))
-                else Text(channel.displayName.take(3).uppercase(), color = FerryColors.Muted)
+                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(3.dp))
+                else Text(channel.displayName.take(3).uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
             }
-            Spacer(Modifier.width(16.dp))
-            Text(channel.displayName, style = MaterialTheme.typography.headlineSmall, color = FerryColors.Gold,
+            Spacer(Modifier.width(10.dp))
+            Text(channel.displayName, style = MaterialTheme.typography.titleMedium, color = FerryColors.Gold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             Spacer(Modifier.width(14.dp))
             when {
@@ -418,35 +418,35 @@ private fun InfoCard(
                 else -> Pill("WATCHING", FerryColors.Gold)
             }
             if (paused) Pill("PAUSED", FerryColors.Muted)
-            if (buffering) Text("   Tuning…", color = FerryColors.Muted)
+            if (buffering) Text("   Tuning…", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.weight(1f))
-            streamLabel?.let { Text(it, color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium) }
+            streamLabel?.let { Text(it, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall) }
             Spacer(Modifier.width(18.dp))
-            Text(time.format(Date(nowMs)), style = MaterialTheme.typography.titleLarge, color = FerryColors.Muted)
+            Text(time.format(Date(nowMs)), style = MaterialTheme.typography.titleSmall, color = FerryColors.Muted)
         }
-        notice?.let { Text(it, color = FerryColors.Sea, modifier = Modifier.padding(top = 6.dp)) }
-        Spacer(Modifier.height(14.dp))
+        notice?.let { Text(it, color = FerryColors.Sea, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
+        Spacer(Modifier.height(8.dp))
 
         if (p == null) {
-            Text("No guide data for this channel", style = MaterialTheme.typography.titleLarge, color = FerryColors.Muted)
+            Text("No guide data for this channel", style = MaterialTheme.typography.titleSmall, color = FerryColors.Muted)
         } else {
             // Neighbouring programmes: ◀ previous · selected · next ▶
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(prev?.let { "◀  ${time.format(Date(it.start))}  ${it.title}" } ?: "",
                     color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(24.dp))
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(16.dp))
                 Text(next?.let { "${time.format(Date(it.start))}  ${it.title}  ▶" } ?: "",
                     color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
                     textAlign = androidx.compose.ui.text.style.TextAlign.End)
             }
-            Spacer(Modifier.height(10.dp))
-            Text(p.title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Spacer(Modifier.height(6.dp))
+            Text(p.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 val dayText = if (sameDay(p.start, nowMs)) "" else day.format(Date(p.start)) + "  "
                 Text("$dayText${time.format(Date(p.start))} – ${time.format(Date(p.stop))}  ·  ${(p.stop - p.start) / 60_000} min",
-                    color = FerryColors.Muted)
+                    color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
                 when {
                     p.start <= nowMs && p.stop > nowMs -> Pill("LIVE", FerryColors.Gold)
                     p.stop <= nowMs && canCatchUp(p) -> Pill("↺ CATCH-UP", FerryColors.Sea)
@@ -462,44 +462,44 @@ private fun InfoCard(
                 else -> null
             }
             if (position != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
-                    Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(FerryColors.Navy)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(FerryColors.Navy)) {
                         Box(Modifier.fillMaxHeight().fillMaxWidth((position.toFloat() / length).coerceIn(0f, 1f))
                             .background(if (watchingSelected && catchup) FerryColors.Sea else FerryColors.Gold))
                     }
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(Modifier.width(10.dp))
                     Text(
                         if (watchingSelected && catchup) "${time.format(Date(p.start + position))} · ${(length - position) / 60_000} min left"
                         else "${(length - position) / 60_000} min left",
-                        color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                        color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1,
                     )
                 }
             }
             p.description?.let {
-                Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 10.dp).widthIn(max = 1200.dp))
+                Text(it, color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             }
         }
 
         if (controls != null) {
-            Spacer(Modifier.height(18.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
                     val label = if (c == Control.PLAY_PAUSE) (if (paused) "▶  Play" else "❚❚  Pause") else c.label
                     Text(
                         label,
                         color = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.45f) },
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.clip(RoundedCornerShape(24.dp))
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.clip(RoundedCornerShape(18.dp))
                             .background(if (focused) FerryColors.Gold else FerryColors.Navy)
-                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             message ?: when {
                 controls != null -> "◀▶ choose  ·  OK select  ·  ▲ or Back to close"
@@ -510,7 +510,7 @@ private fun InfoCard(
                 else -> "▲▼ channels  ·  ◀▶ programmes  ·  Back to close"
             },
             color = if (message != null) FerryColors.Sea else FerryColors.Muted.copy(alpha = 0.8f),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }
@@ -520,9 +520,9 @@ private fun Pill(text: String, color: Color) {
     Text(
         text,
         color = FerryColors.Deep,
-        style = MaterialTheme.typography.labelMedium,
-        modifier = Modifier.padding(start = 12.dp).clip(RoundedCornerShape(6.dp)).background(color)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        modifier = Modifier.padding(start = 8.dp).clip(RoundedCornerShape(4.dp)).background(color)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
     )
 }
 
