@@ -15,7 +15,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
 | Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down |
-| Mini player | Back from a stream keeps it playing in a corner tile over the guide |
+| Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
 | Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
 | Search | Programmes (catch-up, on now, coming up) and channels, from the top of the group list |
 | Previous channel | Flip between the last two channels (remote's last-channel key, or the controls row) |
@@ -52,7 +52,8 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 ### Guide
 
 - The group list sits on the left until you move into the channels, then hides to give the guide more room.
-  **Back** brings it back (and jumps the guide to now); **Back** again returns to whatever is playing.
+  **Back** brings it back (and jumps the guide to now); **Back** in the group list exits Ferry.
+- The grid is compact (about ten channels on a 1080p TV) and only ever shows whole rows.
 - Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
 - **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
   hasn't started it sets (or clears) a reminder, shown with 🔔.
@@ -75,7 +76,8 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 - **Number keys** tune by channel number (Sky numbers when the Sky layout is on).
 - **CH+/CH−** and the remote's rewind / fast-forward keys work as you'd expect.
 - **Back** returns to the guide with the stream still playing in the **mini player** (top-right). Pick the
-  same channel, or press Back from the group list, to go back to full screen. Leaving Ferry stops playback.
+  same channel to go back to full screen (the info card only pops up when the channel changes). Back from
+  the group list exits Ferry, and leaving Ferry stops playback.
 
 ### Sky layout
 
