@@ -46,7 +46,7 @@ fun MiniPlayer(modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier
-            .size(width = 320.dp, height = 180.dp)
+            .size(width = 240.dp, height = 135.dp)
             .clip(shape)
             .background(Color.Black)
             .border(BorderStroke(2.dp, FerryColors.Gold.copy(alpha = 0.85f)), shape)
@@ -68,10 +68,10 @@ fun MiniPlayer(modifier: Modifier = Modifier) {
         Column(
             Modifier.align(Alignment.BottomStart).fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
-                .padding(start = 10.dp, end = 10.dp, top = 18.dp, bottom = 6.dp)
+                .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 4.dp)
         ) {
             Text("${channel.shownNumber}  ${channel.displayName}", color = FerryColors.Gold,
-                style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             np.now?.let {
                 Text((if (np.catchup) "↺ " else "") + it.title, color = FerryColors.Text,
                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     if (screen != Screen.PLAYER && playing.channel != null) {
-                        MiniPlayer(Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = 24.dp))
+                        MiniPlayer(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 20.dp))
                     }
                 }
             }
