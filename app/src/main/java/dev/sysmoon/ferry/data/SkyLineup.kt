@@ -134,7 +134,7 @@ object SkyMatcher {
         Regex("""^bbc (one|two) ([a-z&]+)\s*hd$""").find(s.trim())?.let { m ->
             BBC_REGIONS[m.groupValues[2]]?.let { s = "bbc ${m.groupValues[1]} $it" }
         }
-        s = s.replace(Regex("""(\w)hd\b"""), "$1 hd")          // "SkyPremiereHD" → "skypremiere hd"
+        s = s.replace(Regex("""([a-eg-tv-z0-9])hd\b"""), "$1 hd") // "SkyPremiereHD" → "skypremiere hd" (not FHD/UHD)
             .replace(Regex("""\s*\+\s*1\b"""), " plus1")
             .replace(Regex("""^u\s*&\s*"""), "")                 // "U&Dave" → "dave"
             .replace(Regex("""^5(\s+hd)?\s*$"""), "channel 5")     // "5 HD" → "channel 5" (not "5USA")
