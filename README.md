@@ -53,7 +53,7 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 
 - The group list sits on the left until you move into the channels, then hides to give the guide more room.
   **Back** brings it back (and jumps the guide to now); **Back** in the group list exits Ferry.
-- The grid is compact (about ten channels on a 1080p TV) and only ever shows whole rows.
+- The grid is compact and fills the screen (about ten and a half channels on a 1080p TV).
 - Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
 - **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
   hasn't started it sets (or clears) a reminder, shown with 🔔.

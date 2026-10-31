@@ -187,11 +187,9 @@ fun GuideGrid(
     Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
         DetailPanel(focused, now, reminded)
         TimeRuler(windowStart, now)
-        // Size the list to a whole number of rows so the last one is never cut off.
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-        val rowsThatFit = (maxHeight / ROW_HEIGHT).toInt().coerceAtLeast(1)
+        // Fill the rest of the screen; the last row may be partly visible.
         LazyColumn(
-            Modifier.fillMaxWidth().height(ROW_HEIGHT * rowsThatFit),
+            Modifier.weight(1f).fillMaxWidth(),
             state = listState,
         ) {
             itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
@@ -256,7 +254,6 @@ fun GuideGrid(
                     onLongPress = { onMenu(channel) },
                 )
             }
-        }
         }
     }
 }
