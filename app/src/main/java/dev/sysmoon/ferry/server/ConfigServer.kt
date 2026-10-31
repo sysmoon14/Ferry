@@ -236,6 +236,10 @@ class ConfigServer(private val g: AppGraph) {
                         // Merging happens at import, so re-import to apply it.
                         if (changed) g.scope.launch { g.repository.refreshDue(force = true) }
                     }
+                    o.sportsGuides?.let { on ->
+                        g.settings.setSportsGuides(on)
+                        g.scope.launch { g.repository.fillGuideGaps() }
+                    }
                     o.backupEpgUrls?.let { urls ->
                         val clean = urls.map { it.trim() }.filter { it.startsWith("http://") || it.startsWith("https://") }
                         g.settings.setBackupEpgUrls(clean)
@@ -409,7 +413,8 @@ class ConfigServer(private val g: AppGraph) {
         mergeDuplicates = g.settings.mergeDuplicates(),
         resumeLastChannel = g.settings.resumeLastChannel(),
         backupEpgUrls = g.settings.backupEpgUrls(),
-        guideGaps = g.repository.gapReport?.let { GuideGapsDto(it.missing, it.fromSky, it.fromBackup, it.errors, it.at) },
+        sportsGuides = g.settings.sportsGuides(),
+        guideGaps = g.repository.gapReport?.let { GuideGapsDto(it.missing, it.fromSky, it.fromBackup, it.errors, it.at, it.fromSportsGuides) },
     )
 
     private suspend fun skyStatus(): SkyStatusDto {

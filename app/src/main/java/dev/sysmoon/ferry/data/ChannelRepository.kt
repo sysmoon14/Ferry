@@ -131,6 +131,8 @@ class ChannelRepository(
         val fromSky: Int,
         val fromBackup: Int,
         val errors: List<String> = emptyList(),
+        /** Sports channels (hidden ones included) filled from other countries' guides. */
+        val fromSportsGuides: Int = 0,
         val at: Long = System.currentTimeMillis(),
     )
 
@@ -146,6 +148,7 @@ class ChannelRepository(
     suspend fun fillGuideGaps() = withContext(Dispatchers.IO) {
         db.programmes().deleteForSource(SKY_GUIDE_SOURCE)
         db.programmes().deleteForSource(BACKUP_GUIDE_SOURCE)
+        db.programmes().deleteForSource(SPORTS_GUIDE_SOURCE)
         val now = System.currentTimeMillis()
         val covered = db.programmes().coveredKeys(now, now + 6 * 3_600_000L).toHashSet()
         val missing = db.channels().guideRows().filter { it.epgKey !in covered }.distinctBy { it.epgKey }
@@ -205,8 +208,60 @@ class ChannelRepository(
                 if (batch.isNotEmpty()) db.programmes().insert(batch)
             }.onFailure { errors += "${redact(url)}: ${it.message ?: it.javaClass.simpleName}" }
         }
-        gapReport = GapReport(missing.size, fromSky, filled.size - fromSky, errors)
-        Log.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds ${filled.size - fromSky}")
+        val fromBackup = filled.size - fromSky
+        val fromSports = if (settings.sportsGuides()) fillSportsGuides(covered, filled, now, errors) else 0
+        gapReport = GapReport(missing.size, fromSky, fromBackup, errors, fromSportsGuides = fromSports)
+        Log.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds $fromBackup, sports guides $fromSports")
+    }
+
+    /**
+     * Sports channels without listings, hidden groups included, from other countries' guides
+     * (beIN's own feed, then up to [MAX_COUNTRY_FEEDS] countries with the most such channels).
+     * Only the next two days are kept, to keep the database small.
+     */
+    private suspend fun fillSportsGuides(covered: Set<String>, alreadyFilled: Set<String>, now: Long, errors: MutableList<String>): Int {
+        data class Row(val key: String, val tvg: String?, val name: String, val country: String?)
+        val rows = db.channels().allPrimaries()
+            .filter { it.epgKey !in covered && it.epgKey !in alreadyFilled && TeamNames.isSportsChannel(it) }
+            .map { Row(it.epgKey, it.tvgId, it.name, SportsGuides.country(it.name, it.groupTitle, it.tvgId)) }
+            .distinctBy { it.key }
+        if (rows.isEmpty()) return 0
+        val feeds = listOf(SportsGuides.BEIN) + rows.mapNotNull { it.country }.groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }.take(MAX_COUNTRY_FEEDS).map { it.key }
+        val filled = HashSet<String>()
+        for (code in feeds) {
+            val left = rows.filter { it.key !in filled && (code == SportsGuides.BEIN || it.country == code) }
+            if (left.isEmpty()) continue
+            val byId = left.filter { it.tvg != null }.groupBy({ SportsGuides.idKey(it.tvg!!) }, { it })
+            val byName = left.groupBy({ SportsGuides.nameKey(it.name) }, { it })
+            val claimed = HashSet<String>()
+            val idMap = HashMap<String, List<String>>()
+            val batch = ArrayList<ProgrammeEntity>(BATCH)
+            runCatching {
+                cachedFeed(SportsGuides.feedUrl(code)).use { input ->
+                    XmltvParser.parse(input, Xml.newPullParser(), accept = { it in idMap },
+                        onChannel = { id, names ->
+                            // Same-named channels exist in many countries (beIN Sports 1 FR/US/MENA…).
+                            val feedCountry = SportsGuides.feedCountry(id) ?: code.takeIf { it != SportsGuides.BEIN }
+                            val matches = (byId[SportsGuides.idKey(id)]
+                                ?: names.firstNotNullOfOrNull { n -> byName[SportsGuides.nameKey(n)] }
+                                    ?.filter { r -> r.country == null || feedCountry == null || r.country == feedCountry })
+                                ?.map { it.key }?.filter { it !in claimed }
+                            if (!matches.isNullOrEmpty()) { idMap[id] = matches; claimed += matches }
+                        },
+                    ) { p ->
+                        if (p.stop < now - 6 * 3_600_000L || p.start > now + 2 * 86_400_000L) return@parse
+                        idMap[p.channel]?.forEach { key ->
+                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, SPORTS_GUIDE_SOURCE)
+                            filled += key
+                        }
+                        if (batch.size >= BATCH) { runBlocking { db.programmes().insert(batch.toList()) }; batch.clear() }
+                    }
+                }
+                if (batch.isNotEmpty()) db.programmes().insert(batch)
+            }.onFailure { errors += "Sports guide $code: ${it.message ?: it.javaClass.simpleName}" }
+        }
+        return filled.size
     }
 
     /** Backup feeds are big and change slowly: download at most every 6 hours. */
@@ -366,6 +421,9 @@ class ChannelRepository(
         /** Pseudo source ids for backup guide data, so each fill can replace its own rows. */
         const val SKY_GUIDE_SOURCE = -1L
         const val BACKUP_GUIDE_SOURCE = -2L
+        /** Other countries' sports guides (epgshare01). */
+        const val SPORTS_GUIDE_SOURCE = -3L
+        private const val MAX_COUNTRY_FEEDS = 8
         const val USER_AGENT = "Ferry/0.1 (Android TV)"
 
         fun resolveUrls(src: SourceEntity): Pair<String, String?> = when (src.type) {

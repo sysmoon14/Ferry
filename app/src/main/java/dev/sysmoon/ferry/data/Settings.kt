@@ -37,6 +37,7 @@ class Settings(private val context: Context) {
         val owner = stringPreferencesKey("owner_android_id")
         val recents = stringPreferencesKey("recent_channels")
         val myTeams = stringSetPreferencesKey("my_teams")
+        val sportsGuides = booleanPreferencesKey("sports_guides")
         val reminders = stringPreferencesKey("reminders")
         val syncUrl = stringPreferencesKey("sync_url")
         val syncToken = stringPreferencesKey("sync_token")
@@ -106,6 +107,10 @@ class Settings(private val context: Context) {
             p[Keys.owner] = me
         }
     }
+
+    /** Fill foreign sports channels' listings from other countries' guides (on by default). */
+    suspend fun sportsGuides(): Boolean = store.data.first()[Keys.sportsGuides] ?: true
+    suspend fun setSportsGuides(on: Boolean) = store.edit { it[Keys.sportsGuides] = on }
 
     /** Football: ESPN ids of the user's clubs. */
     val myTeams: Flow<Set<String>> = store.data.map { it[Keys.myTeams] ?: emptySet() }

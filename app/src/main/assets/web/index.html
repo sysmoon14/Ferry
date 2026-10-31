@@ -149,6 +149,8 @@
         <h2>Backup guide data</h2>
         <p class="muted small">Used only for channels your provider's guide leaves empty. With the Sky layout on, Ferry first fills Sky-matched channels from Sky's own schedule. Add XMLTV feed URLs below (one per line, .xml or .xml.gz) for anything still missing; channels are matched by guide ID or name.</p>
         <textarea id="bkUrls" rows="3" placeholder="https://example.com/guide_uk.xml.gz" style="width:100%"></textarea>
+        <label class="row" style="gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="bkSports" style="width:auto;flex:none"> Sports guides from other countries</label>
+        <p class="muted small">Fills listings for foreign sports channels (beIN, Canal+, DAZN, ESPN…), hidden groups included, from free per-country guides (epgshare01), so ⚽ Football can find matches on them. Downloads a few guide files every 6 hours.</p>
         <p class="small" id="bkStatus"></p>
         <div class="actions">
           <button class="btn" id="bkSave">Save feeds</button>
@@ -464,15 +466,18 @@
   async function loadBackup() {
     const o = await api("/options");
     $("bkUrls").value = o.backupEpgUrls.join("\n");
+    $("bkSports").checked = o.sportsGuides;
     const g = o.guideGaps;
     $("bkStatus").textContent = !g ? "" :
-      `Last fill: ${g.missing.toLocaleString()} channels had no listings · Sky filled ${g.fromSky} · backup feeds filled ${g.fromBackup}` +
+      `Last fill: ${g.missing.toLocaleString()} channels had no listings · Sky filled ${g.fromSky} · backup feeds filled ${g.fromBackup} · sports guides filled ${g.fromSportsGuides || 0} sports channels` +
       (g.errors.length ? ` · ${g.errors.join("; ")}` : "");
   }
   $("bkSave").onclick = async () => {
     try { await api("/options", { method: "PUT", body: { backupEpgUrls: $("bkUrls").value.split("\n") } }); toast("Saved — filling gaps in the background"); setTimeout(loadBackup, 4000); }
     catch (e) { toast(e.message); }
   };
+  $("bkSports").onchange = () => api("/options", { method: "PUT", body: { sportsGuides: $("bkSports").checked } })
+    .then(() => toast("Saved — filling guides in the background")).catch(e => toast(e.message));
   $("bkFill").onclick = async () => {
     $("bkFill").disabled = true; toast("Filling guide gaps…");
     try { await api("/guide/fill", { method: "POST" }); await loadBackup(); toast("Done"); } catch (e) { toast(e.message); }

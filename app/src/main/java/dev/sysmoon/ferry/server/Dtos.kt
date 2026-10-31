@@ -67,14 +67,16 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val mergeDuplicates: Boolean,
     val resumeLastChannel: Boolean = true,
     val backupEpgUrls: List<String> = emptyList(),
+    val sportsGuides: Boolean = true,
     val guideGaps: GuideGapsDto? = null,
 )
-@Serializable data class GuideGapsDto(val missing: Int, val fromSky: Int, val fromBackup: Int, val errors: List<String>, val at: Long)
+@Serializable data class GuideGapsDto(val missing: Int, val fromSky: Int, val fromBackup: Int, val errors: List<String>, val at: Long, val fromSportsGuides: Int = 0)
 /** Partial update: only the fields sent are changed. */
 @Serializable data class OptionsInput(
     val mergeDuplicates: Boolean? = null,
     val resumeLastChannel: Boolean? = null,
     val backupEpgUrls: List<String>? = null,
+    val sportsGuides: Boolean? = null,
 )
 
 @Serializable data class SkyRegionDto(val id: Int, val name: String)
