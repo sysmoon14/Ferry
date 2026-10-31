@@ -20,12 +20,19 @@ import dev.sysmoon.ferry.ui.FAVOURITES
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
 import dev.sysmoon.ferry.ui.MiniPlayer
+import dev.sysmoon.ferry.ui.ReminderPopup
+import dev.sysmoon.ferry.ui.SearchScreen
+import dev.sysmoon.ferry.ui.SleepWarning
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import dev.sysmoon.ferry.ui.PlayerScreen
 import dev.sysmoon.ferry.ui.SettingsScreen
 import dev.sysmoon.ferry.player.PlayTarget
 import kotlinx.coroutines.launch
 
-enum class Screen { GUIDE, PLAYER, SETTINGS }
+enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH }
 
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf(Screen.GUIDE)
@@ -44,7 +51,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             FerryTheme {
                 val playing by graph.player.state.collectAsState()
-                Box(Modifier.fillMaxSize()) {
+                val sleepWarning by graph.sleep.warning.collectAsState()
+                val due by graph.reminders.due.collectAsState()
+                LaunchedEffect(Unit) { graph.sleep.slept.collect { screen = Screen.GUIDE } }
+                Box(
+                    Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+                        // Sleep timer's last minute: any key keeps watching.
+                        if (!sleepWarning) return@onPreviewKeyEvent false
+                        if (e.type == KeyEventType.KeyUp) graph.sleep.cancel()
+                        true
+                    }
+                ) {
                     when (screen) {
                         Screen.GUIDE -> {
                             // Lowest priority: only reached when the guide itself has nothing to do
@@ -58,7 +75,12 @@ class MainActivity : ComponentActivity() {
                                 onToggleView = { gridView = !gridView },
                                 onOpenPlayer = { screen = Screen.PLAYER },
                                 onOpenSettings = { screen = Screen.SETTINGS },
+                                onOpenSearch = { screen = Screen.SEARCH },
                             )
+                        }
+                        Screen.SEARCH -> {
+                            BackHandler { screen = Screen.GUIDE }
+                            SearchScreen(onOpenPlayer = { screen = Screen.PLAYER })
                         }
                         Screen.PLAYER -> {
                             // Leaving the player keeps the stream going in the corner mini player.
@@ -77,6 +99,20 @@ class MainActivity : ComponentActivity() {
                     if (screen != Screen.PLAYER && playing.channel != null) {
                         MiniPlayer(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 20.dp))
                     }
+                    if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
+                    due?.let { r ->
+                        ReminderPopup(
+                            r,
+                            onWatch = {
+                                graph.reminders.dismiss()
+                                screen = Screen.PLAYER
+                                lifecycleScope.launch {
+                                    if (!graph.player.play(PlayTarget.Id(r.channelId))) screen = Screen.GUIDE
+                                }
+                            },
+                            onDismiss = { graph.reminders.dismiss() },
+                        )
+                    }
                 }
             }
         }
@@ -89,6 +125,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        graph.uiVisible.value = true
         if (!pendingResume) return
         pendingResume = false
         lifecycleScope.launch {
@@ -100,6 +137,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        graph.uiVisible.value = false
         if (!isChangingConfigurations) pendingResume = true
         // Leaving the app (Home, another app launched) stops playback, like a normal TV app.
         // HA can still start it again via deep link / MQTT.

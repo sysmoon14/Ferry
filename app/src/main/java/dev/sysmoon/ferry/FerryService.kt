@@ -29,6 +29,7 @@ class FerryService : Service() {
     private lateinit var server: ConfigServer
     private lateinit var nsd: NsdAdvertiser
     private var refreshJob: Job? = null
+    private var syncJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -47,12 +48,20 @@ class FerryService : Service() {
                 delay(30 * 60_000L)
             }
         }
+        syncJob = g.scope.launch {
+            delay(60_000) // let start-up and the first tune finish
+            while (isActive) {
+                runCatching { g.sync.syncNow() }.onFailure { Log.w(TAG, "sync loop", it) }
+                delay(15 * 60_000L)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         refreshJob?.cancel()
+        syncJob?.cancel()
         graph.mqtt.stop()
         nsd.unregister()
         server.stop()

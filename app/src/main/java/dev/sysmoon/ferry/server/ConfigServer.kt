@@ -326,6 +326,18 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(Backup.import(g, e))
                 }
 
+                // ---- Keep in sync with another Ferry
+                get("/sync") { call.respond(g.sync.status()) }
+                get("/sync/peers") { call.respond(g.sync.peers()) }
+                put("/sync") {
+                    val req = call.receive<FollowRequest>()
+                    val result = runCatching { g.sync.follow(req.url, req.pin) }
+                    result.onSuccess { call.respond(it) }
+                        .onFailure { call.respond(HttpStatusCode.BadRequest, ErrorDto(it.message ?: "Couldn't follow that Ferry")) }
+                }
+                post("/sync/now") { call.respond(g.sync.syncNow()) }
+                delete("/sync") { call.respond(g.sync.stop()) }
+
                 // ---- MQTT
                 get("/mqtt") { call.respond(g.settings.mqtt().toDto()) }
                 put("/mqtt") {

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package dev.sysmoon.ferry.ui
 
 import androidx.compose.foundation.background
@@ -55,12 +57,17 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.activity.compose.BackHandler
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
 const val FAVOURITES = "\u0000fav"
 const val ALL = "\u0000all"
+const val RECENT = "\u0000recent"
+/** Not a group: opens the search screen. */
+const val SEARCH = "\u0000search"
 /** Rail keys for Sky layout sections ("\u0000sky:Sports"). */
 const val SKY_PREFIX = "\u0000sky:"
 private const val GUIDE_LIMIT = 1_000
@@ -75,6 +82,7 @@ fun GuideScreen(
     onToggleView: () -> Unit,
     onOpenPlayer: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
@@ -93,16 +101,18 @@ fun GuideScreen(
     val sky = skyLayout && skySections.isNotEmpty()
     val railGroups = if (sky) groups.filter { it in skyExtras } else groups
     val nowPlaying by graph.player.state.collectAsState()
+    val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
 
     val hasFavourites = favourites.isNotEmpty()
     val validKeys = buildSet {
-        add(ALL); if (hasFavourites) add(FAVOURITES)
+        add(ALL); if (hasFavourites) add(FAVOURITES); if (recents.isNotEmpty()) add(RECENT)
         if (sky) skySections.forEach { add(SKY_PREFIX + it) }
         addAll(railGroups)
     }
     // Fall back to All when the selection disappears (no favourites left, layout switched…).
     val effective = when {
         selected == FAVOURITES && !hasFavourites -> ALL
+        selected == RECENT && recents.isEmpty() -> ALL
         groups.isEmpty() -> selected // lists still loading: keep the selection
         selected in validKeys -> selected
         else -> ALL
@@ -110,6 +120,9 @@ fun GuideScreen(
     val shownFlow = remember(effective, sky) {
         when {
             effective == FAVOURITES -> dao.observeFavourites()
+            effective == RECENT -> graph.settings.recents.flatMapLatest { ids ->
+                dao.observeByIds(ids).map { rows -> ids.mapNotNull { id -> rows.firstOrNull { it.id == id && !it.hidden } } }
+            }
             effective == ALL && sky -> dao.observeSkyAll()
             effective == ALL -> dao.observeFirst(GUIDE_LIMIT)
             effective.startsWith(SKY_PREFIX) -> dao.observeSkySection(effective.removePrefix(SKY_PREFIX))
@@ -119,6 +132,7 @@ fun GuideScreen(
     val shown by shownFlow.collectAsState(initial = emptyList())
     val zapScope = when {
         effective == FAVOURITES -> ZapScope.Favourites
+        effective == RECENT -> ZapScope.Recent
         effective == ALL && sky -> ZapScope.Sky(null)
         effective == ALL -> ZapScope.All
         effective.startsWith(SKY_PREFIX) -> ZapScope.Sky(effective.removePrefix(SKY_PREFIX))
@@ -144,7 +158,9 @@ fun GuideScreen(
     }
 
     val rail = buildList {
+        add(SEARCH to "🔍  Search")
         if (hasFavourites) add(FAVOURITES to "★ Favourites")
+        if (recents.isNotEmpty()) add(RECENT to "🕘  Recently watched")
         add(ALL to if (sky) "All Sky channels" else "All channels")
         if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
         railGroups.forEach { add(it to it) }
@@ -196,7 +212,7 @@ fun GuideScreen(
                     ListItem(
                         modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
                         selected = key == effective,
-                        onClick = { onSelect(key) },
+                        onClick = { if (key == SEARCH) onOpenSearch() else onSelect(key) },
                         headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = ferryListItemColors(),
                         border = ferryListItemBorder(),
@@ -224,6 +240,7 @@ fun GuideScreen(
                 Text(
                     when {
                         effective == FAVOURITES -> "Favourites"
+                        effective == RECENT -> "Recently watched"
                         effective == ALL -> if (sky) "All Sky channels" else "All channels"
                         else -> effective.removePrefix(SKY_PREFIX)
                     },

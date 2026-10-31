@@ -59,6 +59,7 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.StreamQuality
 import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.epgKey
 import dev.sysmoon.ferry.data.shownNumber
 import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.PlayTarget
@@ -72,7 +73,8 @@ import java.util.Locale
 
 /** Buttons in the player controls row, left to right. */
 private enum class Control(val label: String) {
-    RESTART("⟲  Restart"), BACK30("«  30s"), PLAY_PAUSE(""), FWD30("30s  »"), LIVE("●  Live"), STREAMS("≡  Streams")
+    RESTART("⟲  Restart"), BACK30("«  30s"), PLAY_PAUSE(""), FWD30("30s  »"), LIVE("●  Live"),
+    PREVIOUS("↩  Previous"), SLEEP(""), STREAMS("≡  Streams")
 }
 
 private const val SKIP_MS = 30_000L
@@ -106,6 +108,9 @@ fun PlayerScreen(onBack: () -> Unit) {
     var control by remember { mutableStateOf(Control.PLAY_PAUSE) }
     var interaction by remember { mutableIntStateOf(0) }       // bumps reset the auto-hide timer
     var message by remember { mutableStateOf<String?>(null) }  // short hint, e.g. "Not on yet"
+    val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
+    val sleepEnds by graph.sleep.endsAt.collectAsState()
+    val reminderList by graph.reminders.reminders.collectAsState()
     val nowMs by produceState(System.currentTimeMillis()) {
         while (true) { delay(1_000); value = System.currentTimeMillis() }
     }
@@ -162,7 +167,8 @@ fun PlayerScreen(onBack: () -> Unit) {
         Control.RESTART, Control.BACK30 -> canRewind
         Control.FWD30, Control.LIVE -> state.catchup
         Control.STREAMS -> state.streamCount > 1
-        Control.PLAY_PAUSE -> true
+        Control.PREVIOUS -> recents.any { it != state.channel?.id }
+        Control.PLAY_PAUSE, Control.SLEEP -> true
     }
 
     fun activate(c: Control) {
@@ -174,6 +180,8 @@ fun PlayerScreen(onBack: () -> Unit) {
             Control.PLAY_PAUSE -> scope.launch { player.togglePause() }
             Control.LIVE -> { player.goLive(); closeCard() }
             Control.STREAMS -> { menuOpen = true; closeCard() }
+            Control.PREVIOUS -> player.previousChannel()
+            Control.SLEEP -> graph.sleep.cycle()
         }
     }
 
@@ -190,9 +198,10 @@ fun PlayerScreen(onBack: () -> Unit) {
             p == null || (p.start <= t && p.stop > t) -> { player.start(ch, player.currentScope); closeCard() }
             p.stop <= t -> if (player.canCatchUp(ch, p, t)) { player.startCatchUp(ch, p, player.currentScope); closeCard() }
                 else { message = "No catch-up for this programme"; interaction++ }
-            else -> {
+            else -> scope.launch {
                 val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(p.start))
-                message = "Not on yet — starts at $time"; interaction++
+                message = if (graph.reminders.toggle(ch, p)) "🔔 Reminder set — Ferry will let you know at $time" else "Reminder removed"
+                interaction++
             }
         }
     }
@@ -263,6 +272,7 @@ fun PlayerScreen(onBack: () -> Unit) {
                         }
                         true
                     }
+                    Key.LastChannel -> { player.previousChannel(); true }
                     Key.ChannelUp -> { player.zap(1); true }
                     Key.ChannelDown -> { player.zap(-1); true }
                     Key.Info -> { if (cardVisible) closeCard() else openCard(); true }
@@ -342,6 +352,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 canCatchUp = { p -> player.canCatchUp(ch, p, nowMs) },
                 controls = if (controlsVisible) Control.entries.map { it to enabled(it) } else null,
                 focusedControl = control,
+                hasReminder = { p -> reminderList.any { it.epgKey == ch.epgKey && it.start == p.start } },
+                sleepMinutes = sleepEnds?.let { ((it - nowMs + 59_999) / 60_000).toInt() },
             )
         }
     }
@@ -380,6 +392,8 @@ private fun InfoCard(
     canCatchUp: (ProgrammeEntity) -> Boolean,
     controls: List<Pair<Control, Boolean>>?,
     focusedControl: Control,
+    hasReminder: (ProgrammeEntity) -> Boolean,
+    sleepMinutes: Int?,
 ) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
@@ -418,6 +432,7 @@ private fun InfoCard(
                 else -> Pill("WATCHING", FerryColors.Gold)
             }
             if (paused) Pill("PAUSED", FerryColors.Muted)
+            sleepMinutes?.let { Pill("☾ ${it}m", FerryColors.Muted) }
             if (buffering) Text("   Tuning…", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.weight(1f))
             streamLabel?.let { Text(it, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall) }
@@ -451,6 +466,7 @@ private fun InfoCard(
                     p.start <= nowMs && p.stop > nowMs -> Pill("LIVE", FerryColors.Gold)
                     p.stop <= nowMs && canCatchUp(p) -> Pill("↺ CATCH-UP", FerryColors.Sea)
                     p.stop <= nowMs -> Pill("ENDED", FerryColors.Muted)
+                    hasReminder(p) -> Pill("🔔 REMINDER", FerryColors.Sea)
                     else -> Pill("LATER", FerryColors.Muted)
                 }
             }
@@ -486,7 +502,11 @@ private fun InfoCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
-                    val label = if (c == Control.PLAY_PAUSE) (if (paused) "▶  Play" else "❚❚  Pause") else c.label
+                    val label = when (c) {
+                        Control.PLAY_PAUSE -> if (paused) "▶  Play" else "❚❚  Pause"
+                        Control.SLEEP -> if (sleepMinutes == null) "☾  Sleep" else "☾  ${sleepMinutes}m"
+                        else -> c.label
+                    }
                     Text(
                         label,
                         color = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.45f) },
@@ -503,6 +523,7 @@ private fun InfoCard(
         Text(
             message ?: when {
                 controls != null -> "◀▶ choose  ·  OK select  ·  ▲ or Back to close"
+                p != null && p.start > nowMs -> (if (hasReminder(p)) "OK  cancel reminder" else "OK  remind me") + "  ·  ▲▼ channels  ·  ◀▶ programmes"
                 !isCurrent && p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start  ·  ▲▼ channels  ·  ◀▶ programmes"
                 !isCurrent -> "OK  watch this channel  ·  ▲▼ channels  ·  ◀▶ programmes  ·  Back to close"
                 watchingSelected -> "OK  controls  ·  ▲▼ channels  ·  ◀▶ programmes"

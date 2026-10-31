@@ -32,14 +32,20 @@ import java.time.Instant
  *  - select.<name>_channel     favourites; choosing one tunes the TV
  *  - sensor.<name>_state       idle / buffering / playing / paused / error
  *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (+ JSON attributes)
- *  - button.<name>_channel_up / _channel_down / _stop
+ *  - button.<name>_channel_up / _channel_down / _stop / _pause / _previous_channel / _live
+ *  - image.<name>_channel_logo, number.<name>_sleep_timer, sensor.<name>_next_reminder
+ *  - event.<name>_events       "reminder" (a reminded programme is starting) and "sleep" (timer stopped playback)
  *
  * Topics (base = <baseTopic>/<deviceId>):
  *  base/availability   online | offline (LWT, retained)
  *  base/state          JSON status (retained)
  *  base/cmd/channel    favourite name (from the select)
  *  base/cmd/play       "tvg:BBCOne.uk" | "id:<channelId>" | "number:101" | "101" | channel name
- *  base/cmd/key        up | down | stop | pause | last
+ *  base/cmd/key        up | down | stop | pause | previous_channel | live
+ *  base/cmd/sleep      minutes (0 = off)
+ *  base/logo           current channel's logo URL (retained)
+ *  base/reminders      JSON: next reminder + list (retained)
+ *  base/event          JSON events (not retained)
  */
 class MqttBridge(private val g: AppGraph) {
     private var job: Job? = null
@@ -84,6 +90,7 @@ class MqttBridge(private val g: AppGraph) {
 
             // Static entities once; the select is re-published whenever favourites change.
             publishStaticDiscovery(client, cfg, id, name, base)
+            publishExtras(client, cfg, id, name, base)
             launch {
                 g.db.channels().observeFavourites()
                     .map { favs -> favs.map { it.name }.distinct() }
@@ -91,7 +98,34 @@ class MqttBridge(private val g: AppGraph) {
                     .collect { names -> publishSelect(client, cfg, id, name, base, names) }
             }
             launch {
-                g.player.state.collect { client.publish("$base/state", stateJson(it).toString()) }
+                // Re-published every minute too, so the sleep timer's minutes count down in HA.
+                val minutes = kotlinx.coroutines.flow.flow { while (true) { emit(Unit); delay(60_000) } }
+                kotlinx.coroutines.flow.combine(g.player.state, g.sleep.endsAt, minutes) { st, _, _ -> st }
+                    .collect { client.publish("$base/state", stateJson(it).toString()) }
+            }
+            launch {
+                g.player.state.map { it.channel?.logo }.distinctUntilChanged().collect { logo ->
+                    if (!logo.isNullOrBlank()) client.publish("$base/logo", logo)
+                }
+            }
+            launch {
+                g.reminders.reminders.collect { client.publish("$base/reminders", remindersJson(it).toString()) }
+            }
+            launch {
+                g.reminders.fired.collect { r ->
+                    client.publish("$base/event", buildJsonObject {
+                        put("event_type", "reminder")
+                        put("title", r.title)
+                        put("channel", r.channelName)
+                        put("channel_id", r.channelId)
+                        put("start", Instant.ofEpochMilli(r.start).toString())
+                    }.toString(), retain = false)
+                }
+            }
+            launch {
+                g.sleep.slept.collect {
+                    client.publish("$base/event", buildJsonObject { put("event_type", "sleep") }.toString(), retain = false)
+                }
             }
             awaitCancellation()
         } finally {
@@ -107,6 +141,7 @@ class MqttBridge(private val g: AppGraph) {
             "channel" -> if (payload != NO_FAVOURITES) g.commands.playPayload(payload)
             "play" -> g.commands.playPayload(payload)
             "key" -> g.commands.key(payload)
+            "sleep" -> payload.toFloatOrNull()?.let { g.sleep.set(it.toInt()) }
             else -> Log.d(TAG, "Unknown command $command")
         }
     }
@@ -155,11 +190,57 @@ class MqttBridge(private val g: AppGraph) {
             Triple("channel_up", "Channel up", "up"),
             Triple("channel_down", "Channel down", "down"),
             Triple("stop", "Stop", "stop"),
+            Triple("pause", "Pause / play", "pause"),
+            Triple("previous_channel", "Previous channel", "previous_channel"),
+            Triple("live", "Back to live", "live"),
         )) {
             c.publish("$p/button/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
                 "command_topic" to "$base/cmd/key",
                 "payload_press" to cmd,
             )))
+        }
+    }
+
+    private suspend fun publishExtras(c: Mqtt3AsyncClient, cfg: MqttConfig, id: String, name: String, base: String) {
+        val p = cfg.discoveryPrefix
+        c.publish("$p/image/ferry_$id/channel_logo/config", json(common(id, name, base, "channel_logo", "Channel logo") + mapOf(
+            "url_topic" to "$base/logo",
+        )))
+        c.publish("$p/number/ferry_$id/sleep_timer/config", json(common(id, name, base, "sleep_timer", "Sleep timer") + mapOf(
+            "command_topic" to "$base/cmd/sleep",
+            "state_topic" to "$base/state",
+            "value_template" to "{{ value_json.sleep_minutes or 0 }}",
+            "min" to 0, "max" to 180, "step" to 15,
+            "unit_of_measurement" to "min",
+            "mode" to "slider",
+            "icon" to "mdi:sleep",
+        )))
+        c.publish("$p/sensor/ferry_$id/next_reminder/config", json(common(id, name, base, "next_reminder", "Next reminder") + mapOf(
+            "state_topic" to "$base/reminders",
+            "value_template" to "{{ value_json.next or 'None' }}",
+            "json_attributes_topic" to "$base/reminders",
+            "icon" to "mdi:bell-ring-outline",
+        )))
+        c.publish("$p/event/ferry_$id/events/config", json(common(id, name, base, "events", "Events") + mapOf(
+            "state_topic" to "$base/event",
+            "event_types" to JsonArray(listOf("reminder", "sleep").map(::JsonPrimitive)),
+            "icon" to "mdi:bell",
+        )))
+    }
+
+    private fun remindersJson(list: List<dev.sysmoon.ferry.data.Reminder>): JsonObject = buildJsonObject {
+        val next = list.minByOrNull { it.start }
+        val time = java.time.format.DateTimeFormatter.ofPattern("EEE HH:mm").withZone(java.time.ZoneId.systemDefault())
+        put("next", next?.let { "${it.title} (${time.format(Instant.ofEpochMilli(it.start))}, ${it.channelName})" })
+        put("next_start", next?.start?.let { Instant.ofEpochMilli(it).toString() })
+        put("count", list.size)
+        putJsonArray("reminders") {
+            list.sortedBy { it.start }.forEach { r ->
+                add(buildJsonObject {
+                    put("title", r.title); put("channel", r.channelName); put("channel_id", r.channelId)
+                    put("start", Instant.ofEpochMilli(r.start).toString())
+                })
+            }
         }
     }
 
@@ -195,6 +276,7 @@ class MqttBridge(private val g: AppGraph) {
         put("progress", s.progress?.let { (it * 100).toInt() })
         put("error", s.error)
         put("catchup", s.catchup)
+        put("sleep_minutes", g.sleep.minutesLeft())
         putJsonObject("deep_link") {
             s.channel?.let { ch -> put("url", ch.tvgId?.let { "ferry://tvg/$it" } ?: "ferry://channel/${ch.id}") }
         }

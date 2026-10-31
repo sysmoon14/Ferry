@@ -127,6 +127,19 @@ interface ChannelDao {
     )
     suspend fun userPrefs(): List<UserPrefRow>
 
+    @Query("SELECT * FROM channels WHERE id IN (:ids)")
+    fun observeByIds(ids: List<String>): Flow<List<ChannelEntity>>
+
+    @Query(
+        """SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL AND name LIKE '%' || :q || '%'
+           ORDER BY skyNumber IS NULL, skyNumber, sourceId, position LIMIT :limit"""
+    )
+    suspend fun searchVisible(q: String, limit: Int): List<ChannelEntity>
+
+    /** Visible rows whose guide key is one of [keys] (tvg-id, or the name when there is none). */
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND primaryId IS NULL AND (tvgId IN (:keys) OR (tvgId IS NULL AND name IN (:keys)))")
+    suspend fun visibleByEpgKeys(keys: List<String>): List<ChannelEntity>
+
     @Query("SELECT DISTINCT COALESCE(tvgId, name) FROM channels WHERE sourceId = :sourceId")
     suspend fun epgKeys(sourceId: Long): List<String>
 
@@ -229,4 +242,7 @@ interface ProgrammeDao {
 
     @Query("SELECT * FROM programmes WHERE channelKey IN (:keys) AND stop > :from AND start < :until ORDER BY channelKey, start")
     suspend fun window(keys: List<String>, from: Long, until: Long): List<ProgrammeEntity>
+
+    @Query("SELECT * FROM programmes WHERE title LIKE '%' || :q || '%' AND stop > :from ORDER BY start LIMIT :limit")
+    suspend fun search(q: String, from: Long, limit: Int): List<ProgrammeEntity>
 }

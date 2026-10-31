@@ -128,6 +128,8 @@ fun GuideGrid(
     }
 
     var focused by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
+    val reminderList by graph.reminders.reminders.collectAsState()
+    val reminded = remember(reminderList) { reminderList.map { it.key }.toSet() }
 
     // Time cursor (like TiviMate): left/right sets it, up/down keeps it, so moving between rows
     // lands on whatever is on at the same time instead of the geometrically nearest cell.
@@ -165,7 +167,7 @@ fun GuideGrid(
     }
 
     Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
-        DetailPanel(focused, now)
+        DetailPanel(focused, now, reminded)
         TimeRuler(windowStart, now)
         LazyColumn(
             Modifier.weight(1f),
@@ -176,6 +178,7 @@ fun GuideGrid(
                 GridRow(
                     channel = channel,
                     programmes = programmes[channel.epgKey].orEmpty(),
+                    reminded = reminded,
                     windowStart = windowStart,
                     windowEnd = windowEnd,
                     now = now,
@@ -225,7 +228,9 @@ fun GuideGrid(
                             p.stop <= t && graph.player.canCatchUp(channel, p, t) -> {
                                 graph.player.startCatchUp(channel, p, zap); onOpenPlayer()
                             }
-                            // Future, or past without an archive: nothing to play.
+                            // Coming up: OK sets (or clears) a reminder.
+                            p.start > t -> scope.launch { graph.reminders.toggle(channel, p) }
+                            // Past without an archive: nothing to play.
                         }
                     },
                     onLongPress = { onMenu(channel) },
@@ -236,7 +241,7 @@ fun GuideGrid(
 }
 
 @Composable
-private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Long) {
+private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Long, reminded: Set<String>) {
     val graph = LocalContext.current.graph
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
@@ -261,6 +266,10 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
             when {
                 p != null && p.start <= now && p.stop > now -> Tag("LIVE", FerryColors.Gold)
                 p != null && p.stop <= now && graph.player.canCatchUp(channel, p, now) -> Tag("CATCH-UP", FerryColors.Sea)
+            }
+            if (p != null && p.start > now) {
+                if ("${channel.epgKey}@${p.start}" in reminded) Tag("🔔 REMINDER SET", FerryColors.Sea)
+                else Text("   OK to set a reminder", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium)
             }
             if (channel.favourite) Tag("★", FerryColors.Gold)
         }
@@ -328,6 +337,7 @@ private fun NowLine(windowStart: Long, now: Long, perMs: Dp) {
 private fun GridRow(
     channel: ChannelEntity,
     programmes: List<ProgrammeEntity>,
+    reminded: Set<String>,
     windowStart: Long,
     windowEnd: Long,
     now: Long,
@@ -422,6 +432,7 @@ private fun GridRow(
                             Text(
                                 when {
                                     p == null -> "No guide data"
+                                    "${channel.epgKey}@${p.start}" in reminded -> "🔔 ${p.title}"
                                     p.stop <= now && channel.archiveDays > 0 &&
                                         p.start > now - channel.archiveDays * 86_400_000L -> "↺ ${p.title}"
                                     else -> p.title

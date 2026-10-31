@@ -51,6 +51,8 @@ sealed interface ZapScope {
     data class Group(val name: String) : ZapScope
     /** Sky layout: one Sky section in Sky number order, or every Sky channel when [section] is null. */
     data class Sky(val section: String?) : ZapScope
+    /** Recently watched, newest first. */
+    data object Recent : ZapScope
 }
 
 data class NowPlaying(
@@ -224,6 +226,7 @@ class PlayerController(
         val (now, next) = programmesFor(primary)
         playCurrentStream(primary, now, next, notice = null)
         settings.setLastChannelId(primary.id)
+        settings.pushRecent(primary.id)
     }
 
     private suspend fun playCurrentStream(
@@ -392,15 +395,31 @@ class PlayerController(
         val current = _state.value.channel ?: return null
         if (offset == 0) return current
         val dao = db.channels()
-        val ids: List<String> = when (val z = zapScope) {
+        val ids = scopeIds(zapScope)
+        if (ids.isEmpty()) return null
+        val index = ids.indexOf(current.id).coerceAtLeast(0)
+        return dao.get(ids[Math.floorMod(index + offset, ids.size)])
+    }
+
+    private suspend fun scopeIds(z: ZapScope): List<String> {
+        val dao = db.channels()
+        return when (z) {
             ZapScope.Favourites -> dao.favourites().map { it.id }
             is ZapScope.Group -> dao.inGroup(z.name).map { it.id }
             ZapScope.All -> dao.visibleIds()
             is ZapScope.Sky -> dao.skyIds(z.section)
+            ZapScope.Recent -> settings.recents()
         }
-        if (ids.isEmpty()) return null
-        val index = ids.indexOf(current.id).coerceAtLeast(0)
-        return dao.get(ids[Math.floorMod(index + offset, ids.size)])
+    }
+
+    /** Flips back to the channel watched before this one. */
+    fun previousChannel() {
+        playJob?.cancel()
+        playJob = scope.launch {
+            val current = _state.value.channel?.id
+            val id = settings.recents().firstOrNull { it != current } ?: return@launch
+            db.channels().get(id)?.let { play(it, zapScope) }
+        }
     }
 
     /** A channel's programmes around now, for the info card's previous/next browsing. */
@@ -418,12 +437,7 @@ class PlayerController(
     suspend fun step(delta: Int) {
         val currentId = _state.value.channel?.id
         val dao = db.channels()
-        val ids: List<String> = when (val z = zapScope) {
-            ZapScope.Favourites -> dao.favourites().map { it.id }
-            is ZapScope.Group -> dao.inGroup(z.name).map { it.id }
-            ZapScope.All -> dao.visibleIds()
-            is ZapScope.Sky -> dao.skyIds(z.section)
-        }
+        val ids = scopeIds(zapScope)
         if (ids.isEmpty()) return
         val index = ids.indexOf(currentId)
         val nextId = ids[if (index < 0) 0 else Math.floorMod(index + delta, ids.size)]

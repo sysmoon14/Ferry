@@ -17,7 +17,9 @@ class RemoteCommands(private val graph: AppGraph) {
             "down", "channel_down", "prev", "previous" -> graph.player.step(-1)
             "stop" -> graph.player.stop()
             "pause", "play_pause", "toggle" -> graph.player.togglePause()
-            "last" -> play(PlayTarget.Last)
+            "last", "previous_channel" ->
+                if (graph.player.state.value.channel != null) graph.player.previousChannel() else play(PlayTarget.Last)
+            "live" -> graph.player.goLive()
             else -> return false
         }
         return true

@@ -279,6 +279,25 @@
         <p class="small muted" id="bResult"></p>
       </div>
       <div class="card">
+        <h2>Keep in sync</h2>
+        <p class="muted small">Make this box follow another Ferry: it copies the other box's setup now, then checks every 15 minutes and picks up any changes.
+          Changes made here are overwritten, so make them on the box you follow.</p>
+        <div id="syncOn" hidden>
+          <p id="syncStatus"></p>
+          <div class="actions"><button class="btn" id="syncNow">Sync now</button><button class="btn danger" id="syncStop">Stop following</button></div>
+        </div>
+        <div id="syncOff">
+          <div class="actions"><button class="btn" id="syncFind">Find Ferry boxes</button></div>
+          <div id="syncPeers"></div>
+          <label>Or enter its address</label>
+          <input id="syncUrl" placeholder="192.168.1.20 or http://192.168.1.20:8765">
+          <label>Its pairing PIN <span class="muted">(Settings &amp; pairing on that box)</span></label>
+          <input id="syncPin" inputmode="numeric" maxlength="6" placeholder="123456">
+          <div class="actions"><button class="btn" id="syncFollow">Follow</button></div>
+        </div>
+        <p class="small bad" id="syncErr"></p>
+      </div>
+      <div class="card">
         <h2>Paired devices</h2>
         <p class="muted small">Unpairing signs out every phone and browser, including this one.</p>
         <div class="actions"><button class="btn danger" id="unpair">Unpair all</button></div>
@@ -666,10 +685,40 @@
   loaders.device = async () => {
     $("dName").value = (await api("/status")).deviceName;
     $("dResume").checked = (await api("/options")).resumeLastChannel;
+    loadSync();
   };
   $("dResume").onchange = () => api("/options", { method: "PUT", body: { resumeLastChannel: $("dResume").checked } })
     .then(() => toast("Saved")).catch(e => toast(e.message));
   $("dSave").onclick = async () => { await api("/device", { method: "PUT", body: { name: $("dName").value } }); toast("Saved — restart Ferry to update HA device name"); };
+  function renderSync(st) {
+    $("syncOn").hidden = !st.following; $("syncOff").hidden = st.following;
+    $("syncErr").textContent = st.lastError || "";
+    if (st.following) {
+      const when = st.lastSync ? new Date(st.lastSync).toLocaleString() : "not yet";
+      $("syncStatus").textContent = `Following ${st.name || st.url} (${st.url}). Last checked: ${when}.`;
+    }
+  }
+  const loadSync = async () => { try { renderSync(await api("/sync")); } catch (e) { toast(e.message); } };
+  $("syncFind").onclick = async () => {
+    $("syncPeers").textContent = "Looking…";
+    try {
+      const peers = await api("/sync/peers");
+      $("syncPeers").replaceChildren(...(peers.length ? peers.map(p => el("div", { className: "row", style: "gap:10px;align-items:center;margin:6px 0" },
+        el("span", {}, `${p.name} `, el("span", { className: "muted small" }, p.url)),
+        el("button", { className: "btn", onclick: () => { $("syncUrl").value = p.url; $("syncPin").focus(); } }, "Use")))
+        : [el("p", { className: "muted small" }, "No other Ferry boxes found. Enter the address instead.")]));
+    } catch (e) { $("syncPeers").textContent = e.message; }
+  };
+  $("syncFollow").onclick = async () => {
+    $("syncErr").textContent = "Connecting…";
+    try {
+      renderSync(await api("/sync", { method: "PUT", body: { url: $("syncUrl").value, pin: $("syncPin").value } }));
+      toast("Following — reloading channels now");
+    } catch (e) { $("syncErr").textContent = e.message; }
+  };
+  $("syncNow").onclick = async () => { try { renderSync(await api("/sync/now", { method: "POST" })); toast("Checked"); } catch (e) { toast(e.message); } };
+  $("syncStop").onclick = async () => { if (confirm("Stop following? This box keeps its current setup.")) renderSync(await api("/sync", { method: "DELETE" })); };
+
   $("bExport").onclick = async () => {
     try {
       const data = await api("/export");

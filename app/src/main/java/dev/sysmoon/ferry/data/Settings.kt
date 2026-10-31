@@ -35,6 +35,14 @@ class Settings(private val context: Context) {
     private object Keys {
         val deviceId = stringPreferencesKey("device_id")
         val owner = stringPreferencesKey("owner_android_id")
+        val recents = stringPreferencesKey("recent_channels")
+        val reminders = stringPreferencesKey("reminders")
+        val syncUrl = stringPreferencesKey("sync_url")
+        val syncToken = stringPreferencesKey("sync_token")
+        val syncName = stringPreferencesKey("sync_name")
+        val syncHash = stringPreferencesKey("sync_hash")
+        val syncAt = stringPreferencesKey("sync_at")
+        val syncError = stringPreferencesKey("sync_error")
         val deviceName = stringPreferencesKey("device_name")
         val pin = stringPreferencesKey("pair_pin")
         val tokens = stringSetPreferencesKey("tokens")
@@ -96,6 +104,37 @@ class Settings(private val context: Context) {
             }
             p[Keys.owner] = me
         }
+    }
+
+    /** Recently watched channel ids, newest first. */
+    val recents: Flow<List<String>> = store.data.map { p -> p[Keys.recents]?.split(',')?.filter { it.isNotEmpty() } ?: emptyList() }
+    suspend fun recents(): List<String> = recents.first()
+    suspend fun pushRecent(id: String) = store.edit { p ->
+        val old = p[Keys.recents]?.split(',')?.filter { it.isNotEmpty() } ?: emptyList()
+        p[Keys.recents] = (listOf(id) + (old - id)).take(RECENTS_MAX).joinToString(",")
+    }
+
+    val reminders: Flow<List<Reminder>> = store.data.map { p ->
+        p[Keys.reminders]?.let { runCatching { json.decodeFromString(reminderList, it) }.getOrNull() } ?: emptyList()
+    }
+    suspend fun updateReminders(transform: (List<Reminder>) -> List<Reminder>) = store.edit { p ->
+        val old = p[Keys.reminders]?.let { runCatching { json.decodeFromString(reminderList, it) }.getOrNull() } ?: emptyList()
+        p[Keys.reminders] = json.encodeToString(reminderList, transform(old))
+    }
+
+    /** Following another Ferry (Backup & sync → Keep in sync). */
+    data class SyncState(val url: String?, val token: String?, val name: String?, val hash: String?, val lastAt: Long, val error: String?)
+    suspend fun sync(): SyncState = store.data.first().let { p ->
+        SyncState(p[Keys.syncUrl], p[Keys.syncToken], p[Keys.syncName], p[Keys.syncHash], p[Keys.syncAt]?.toLongOrNull() ?: 0, p[Keys.syncError])
+    }
+    suspend fun setSyncPeer(url: String?, token: String?, name: String?) = store.edit { p ->
+        if (url == null) { p.remove(Keys.syncUrl); p.remove(Keys.syncToken); p.remove(Keys.syncName); p.remove(Keys.syncHash); p.remove(Keys.syncError) }
+        else { p[Keys.syncUrl] = url; p[Keys.syncToken] = token.orEmpty(); p[Keys.syncName] = name.orEmpty(); p.remove(Keys.syncHash) }
+    }
+    suspend fun setSyncResult(hash: String?, error: String?) = store.edit { p ->
+        p[Keys.syncAt] = System.currentTimeMillis().toString()
+        if (hash != null) p[Keys.syncHash] = hash
+        if (error != null) p[Keys.syncError] = error else p.remove(Keys.syncError)
     }
 
     suspend fun setSkyOverrides(overrides: Map<Int, String>) = store.edit { p ->
@@ -166,6 +205,12 @@ class Settings(private val context: Context) {
         android.provider.Settings.Global.getString(context.contentResolver, "device_name")
             ?.takeIf { it.isNotBlank() }
             ?: "Ferry ${Build.MODEL}".trim()
+
+    private companion object {
+        const val RECENTS_MAX = 20
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val reminderList = kotlinx.serialization.builtins.ListSerializer(Reminder.serializer())
+    }
 
     private suspend fun getOrCreate(key: Preferences.Key<String>, create: () -> String): String {
         store.data.first()[key]?.let { return it }

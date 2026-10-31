@@ -42,6 +42,11 @@ class AppGraph(val context: Context) {
     val repository = ChannelRepository(db, http, settings, bbc, sky, context.cacheDir)
     val player = PlayerController(context, db, settings, scope, bbc)
     val commands = RemoteCommands(this)
+    val reminders = dev.sysmoon.ferry.data.ReminderManager(settings, scope)
+    val sleep = dev.sysmoon.ferry.player.SleepTimer(scope) { player.stop() }
+    val sync = dev.sysmoon.ferry.server.SyncManager(this)
+    /** True while Ferry's screen is showing (reminder pop-ups only appear then). */
+    val uiVisible = kotlinx.coroutines.flow.MutableStateFlow(false)
     val mqtt = MqttBridge(this)
 }
 
