@@ -463,7 +463,7 @@ private fun InfoCard(
             }
             if (position != null) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
-                    Box(Modifier.width(720.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(FerryColors.Navy)) {
+                    Box(Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)).background(FerryColors.Navy)) {
                         Box(Modifier.fillMaxHeight().fillMaxWidth((position.toFloat() / length).coerceIn(0f, 1f))
                             .background(if (watchingSelected && catchup) FerryColors.Sea else FerryColors.Gold))
                     }
@@ -471,7 +471,7 @@ private fun InfoCard(
                     Text(
                         if (watchingSelected && catchup) "${time.format(Date(p.start + position))} · ${(length - position) / 60_000} min left"
                         else "${(length - position) / 60_000} min left",
-                        color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium,
+                        color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1,
                     )
                 }
             }
