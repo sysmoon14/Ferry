@@ -77,4 +77,10 @@ class FootballTest {
         assertTrue(TeamNames.isMagazineShow(TeamNames.normalise("The Premier League Preview Show")))
         assertFalse(TeamNames.isMagazineShow(TeamNames.normalise("Live: Premier League")))
     }
+
+    @Test fun versusDetection() {
+        assertTrue(TeamNames.hasVersus(TeamNames.normalise("Preseason | Man City vs Arsenal 15:00")))
+        assertTrue(TeamNames.hasVersus(TeamNames.normalise("Premier League: Liverpool v Chelsea")))
+        assertFalse(TeamNames.hasVersus(TeamNames.normalise("EPL Events 03: Liverpool")))
+    }
 }

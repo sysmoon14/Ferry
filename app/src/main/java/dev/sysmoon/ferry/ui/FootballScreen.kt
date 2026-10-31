@@ -167,7 +167,8 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     else -> FixtureList(shown, myTeams, time, day, showCompetition = state.tab == FootballTab.MY_TEAMS || state.club != null) { f ->
                         state.fixture = f
                         state.candidates = null
-                        scope.launch { state.candidates = runCatching { graph.matchFinder.find(f) }.getOrDefault(emptyList()) }
+                        val sameSlot = (all ?: emptyList()).count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
+                        scope.launch { state.candidates = runCatching { graph.matchFinder.find(f, sameSlot) }.getOrDefault(emptyList()) }
                     }
                 }
             }

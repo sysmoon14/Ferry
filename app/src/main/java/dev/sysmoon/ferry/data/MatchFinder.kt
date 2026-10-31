@@ -24,7 +24,11 @@ data class StreamCandidate(val channel: ChannelEntity, val score: Int, val reaso
  */
 class MatchFinder(private val db: FerryDatabase) {
 
-    suspend fun find(f: Fixture): List<StreamCandidate> {
+    /**
+     * [sameSlot]: how many matches in this competition kick off at about the same time. A guide
+     * that just says "Premier League" can't be pinned to one of several.
+     */
+    suspend fun find(f: Fixture, sameSlot: Int = 1): List<StreamCandidate> {
         val rows = db.channels().allPrimaries()
         val home = TeamNames.aliases(f.home)
         val away = TeamNames.aliases(f.away)
@@ -48,10 +52,13 @@ class MatchFinder(private val db: FerryDatabase) {
             val dated = TeamNames.dateIn(ch.name, koDate.year)
             if (dated != null && dated != koDate) continue
             val group = TeamNames.normalise(ch.groupTitle.orEmpty())
-            val eventish = group.contains("event") || group.contains("ppv") || text.contains(" vs ") || text.contains(" v ")
+            val versus = TeamNames.hasVersus(text)
+            val eventish = group.contains("event") || group.contains("ppv") || versus
             when {
                 h && a -> add(ch, 100, "Channel name: ${ch.name}")
-                eventish && (dated == koDate || ch.name.contains(koTime)) -> add(ch, 66, "Event channel: ${ch.name}")
+                // One of our teams against someone else ("Man City vs Arsenal") is another match.
+                versus -> Unit
+                eventish && dated == koDate -> add(ch, 66, "Event channel: ${ch.name}")
                 !eventish && (group.contains("team") || group.contains("club")) -> add(ch, 58, "Club channel: ${ch.name}")
             }
         }
@@ -71,10 +78,17 @@ class MatchFinder(private val db: FerryDatabase) {
             // "Premier League Preview Show", "UCL Highlights"… aren't the match.
             val show = TeamNames.isMagazineShow(title)
             val label = "Guide: ${p.title} (${time.format(Date(p.start))})"
+            // A listing for this match starts around kick-off and lasts about a match, not a
+            // four-hour "Premier League" block.
+            val matchShaped = p.start in (f.kickoff - 45 * 60_000L)..(f.kickoff + 15 * 60_000L) &&
+                p.stop - p.start <= 3 * 3_600_000L + 30 * 60_000L
+            // One of our teams against someone else is a different match (or a replay).
+            val otherMatch = (h xor a) && TeamNames.hasVersus(text)
             for (ch in channels) when {
                 h && a -> add(ch, 90, label)
-                (h || a) && comp && !show -> add(ch, 72, label)
-                comp && !show && !h && !a && TeamNames.isSportsChannel(ch) && competitionOnly < 25 -> { competitionOnly++; add(ch, 42, label) }
+                (h || a) && comp && !show && !otherMatch && matchShaped -> add(ch, 72, label)
+                comp && !show && !h && !a && matchShaped && sameSlot <= 1 && TeamNames.isSportsChannel(ch) && competitionOnly < 25 ->
+                    { competitionOnly++; add(ch, 42, label) }
             }
         }
 
@@ -175,6 +189,10 @@ object TeamNames {
 
     private val OTHER_SPORTS = Regex("""\b(rugby|super league|rhinos|nrl|nfl|nba|nhl|mlb|cricket|darts|snooker|tennis|golf|boxing|ufc|wwe|f1|motogp|nascar|hockey|basketball|baseball)\b""")
     fun otherSport(name: String) = OTHER_SPORTS.containsMatchIn(normalise(name))
+
+    /** "X v Y", "X vs Y", "X - Y" in normalised text (the dash becomes a double space-free gap, so check the raw-ish forms). */
+    fun hasVersus(normalisedText: String) =
+        normalisedText.contains(" vs ") || normalisedText.contains(" v ") || normalisedText.contains(" versus ") || normalisedText.contains(" x ")
 
     private val SHOW_WORDS = Regex("""\b(preview|review|highlights|show|news|classic|classics|rewind|magazine|talk|tonight|extra|goals|gameday|matchday live|reaction|countdown|build up)\b""")
     fun isMagazineShow(normalisedTitle: String) = SHOW_WORDS.containsMatchIn(normalisedTitle)
