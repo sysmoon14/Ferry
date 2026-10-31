@@ -319,6 +319,13 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(if (ok) HttpStatusCode.OK else HttpStatusCode.BadRequest, OkDto(ok))
                 }
 
+                // ---- Backup & sync between devices
+                get("/export") { call.respond(Backup.export(g)) }
+                post("/import") {
+                    val e = call.receive<FerryExport>()
+                    call.respond(Backup.import(g, e))
+                }
+
                 // ---- MQTT
                 get("/mqtt") { call.respond(g.settings.mqtt().toDto()) }
                 put("/mqtt") {

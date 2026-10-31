@@ -226,6 +226,11 @@ class ChannelRepository(
 
     suspend fun addSource(source: SourceEntity): Long = db.sources().insert(source)
 
+    private val seededPrefs = java.util.concurrent.ConcurrentHashMap<Long, List<ChannelPrefs>>()
+
+    /** Favourites / hidden / order to apply on [sourceId]'s next refresh (settings import). */
+    fun seedPrefs(sourceId: Long, prefs: List<ChannelPrefs>) { seededPrefs[sourceId] = prefs }
+
     suspend fun deleteSource(id: Long) = db.withTransaction {
         db.channels().deleteForSource(id)
         db.programmes().deleteForSource(id)
@@ -284,8 +289,9 @@ class ChannelRepository(
         }
 
     private suspend fun storeChannels(src: SourceEntity, entries: Sequence<M3uEntry>): Int {
-        // Keep favourites / hidden / ordering when the provider reshuffles the playlist.
-        val prefs = db.channels().prefsForSource(src.id)
+        // Keep favourites / hidden / ordering when the provider reshuffles the playlist. After an
+        // import, the imported choices replace this device's own.
+        val prefs = seededPrefs.remove(src.id) ?: db.channels().prefsForSource(src.id)
         val existing = prefs.associateBy { it.id }
         // A renamed channel gets a new id (it hashes the name); find its prefs by stream instead.
         val existingByStream = prefs.associateBy { streamKey(src.id, it.streamUrl) }
@@ -384,8 +390,10 @@ class ChannelRepository(
         private val VOD_EXT = Regex("\\.(mkv|mp4|avi|m4v)(\\?.*)?$", RegexOption.IGNORE_CASE)
         fun M3uEntry.isVod() = VOD_PATH.containsMatchIn(url) || VOD_EXT.containsMatchIn(url)
 
-        fun channelId(sourceId: Long, entry: M3uEntry): String {
-            val raw = "$sourceId|${entry.tvgId.orEmpty()}|${entry.name}"
+        fun channelId(sourceId: Long, entry: M3uEntry): String = channelId(sourceId, entry.tvgId, entry.name)
+
+        fun channelId(sourceId: Long, tvgId: String?, name: String): String {
+            val raw = "$sourceId|${tvgId.orEmpty()}|$name"
             val digest = MessageDigest.getInstance("SHA-1").digest(raw.toByteArray())
             return digest.take(8).joinToString("") { "%02x".format(it) }
         }

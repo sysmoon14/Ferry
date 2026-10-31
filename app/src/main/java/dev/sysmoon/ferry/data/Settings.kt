@@ -17,6 +17,7 @@ import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore("settings")
 
+@kotlinx.serialization.Serializable
 data class MqttConfig(
     val enabled: Boolean = false,
     val host: String = "",
@@ -33,6 +34,7 @@ class Settings(private val context: Context) {
 
     private object Keys {
         val deviceId = stringPreferencesKey("device_id")
+        val owner = stringPreferencesKey("owner_android_id")
         val deviceName = stringPreferencesKey("device_name")
         val pin = stringPreferencesKey("pair_pin")
         val tokens = stringSetPreferencesKey("tokens")
@@ -77,6 +79,28 @@ class Settings(private val context: Context) {
         discoveryPrefix = this[Keys.mqttPrefix] ?: "homeassistant",
         baseTopic = this[Keys.mqttBase] ?: "ferry",
     )
+
+    /**
+     * Data copied from another box (adb backup, a cloned install) carries that box's identity, so
+     * both would show up in Home Assistant as the same device. When the data was written on a
+     * different device, drop the copied identity and pairing so this one gets its own.
+     */
+    suspend fun claimDevice() {
+        val me = android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+            ?: return
+        store.edit { p ->
+            val owner = p[Keys.owner]
+            if (owner != null && owner != me) {
+                p.remove(Keys.deviceId); p.remove(Keys.deviceName); p.remove(Keys.pin)
+                p.remove(Keys.tokens); p.remove(Keys.lastChannel)
+            }
+            p[Keys.owner] = me
+        }
+    }
+
+    suspend fun setSkyOverrides(overrides: Map<Int, String>) = store.edit { p ->
+        p[Keys.skyOverrides] = overrides.map { (n, k) -> "$n=$k" }.toSet()
+    }
 
     /** Short stable id used in MQTT topics and unique_ids. */
     suspend fun deviceId(): String = getOrCreate(Keys.deviceId) { UUID.randomUUID().toString().take(8) }

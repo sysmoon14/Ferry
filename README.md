@@ -4,19 +4,21 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 
 > Working name. Package is `dev.sysmoon.ferry`; rename with Android Studio's *Refactor → Rename package* plus `applicationId` in `app/build.gradle.kts`.
 
-## What's in v0.1
+## Features
 
-| Area | Status |
+| Area | What you get |
 |---|---|
-| M3U / M3U Plus and Xtream Codes sources | ✅ streaming parser, favourites/hidden/order survive refreshes |
-| XMLTV EPG (`.xml` / `.xml.gz`) | ✅ filtered to your channels, auto-refresh |
-| Guide (group rail + channel list with now/next) | ✅ |
-| Player (Media3, HLS + MPEG-TS), zapping, info banner | ✅ |
-| Web config server with PIN/QR pairing | ✅ `http://<tv-ip>:8765` |
-| Home Assistant MQTT discovery | ✅ |
-| Deep links / explicit intents | ✅ |
-| mDNS advertising (`_ferry._tcp`) | ✅ |
-| EPG grid view, catch-up, recording, libVLC fallback | ⏳ next |
+| Sources | M3U / M3U Plus, Xtream Codes, and BBC iPlayer (UK). Favourites, hidden channels and order survive refreshes, even when the provider renames a channel |
+| Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first and Ferry fails over to the next if it stalls. Long-press OK to pick a stream |
+| Sky layout | Optional: channels numbered and grouped like a Sky box (Entertainment, Movies, Sports…), for your Sky region, using Sky's own channel list |
+| Guide | Group rail + EPG grid (or list). The group list hides while you browse; Back brings it back. Up/down keeps your place in time |
+| Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
+| Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
+| Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down |
+| Mini player | Back from a stream keeps it playing in a corner tile over the guide |
+| Start-up | Optionally opens straight into the last watched channel |
+| Web config | Phone-friendly page with PIN/QR pairing at `http://<tv-ip>:8765`, including backup & sync between boxes |
+| Home Assistant | MQTT discovery, deep links, REST API, mDNS (`_ferry._tcp`) |
 
 ## Build
 
@@ -24,7 +26,7 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 
 ```
 ./gradlew installDebug        # needs a gradle wrapper; Studio generates it on first sync
-./gradlew test                # M3U + XMLTV time parser tests
+./gradlew test                # parser, duplicate-merging and Sky matching tests
 ```
 
 ## First run
@@ -32,8 +34,57 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 1. Launch Ferry, go to **Settings & pairing**.
 2. Scan the QR code with your phone. It opens the config page and pairs automatically (the QR carries the PIN).
 3. **Sources → Add**: paste an M3U URL (+ optional EPG URL) or Xtream server/username/password.
-4. **Channels**: star favourites, hide groups you don't want.
+4. **Groups**: tick the provider groups to **Use**. With the Sky layout on, tick **Own section** for any group
+   you want as its own entry in the guide alongside Sky's sections.
 5. **Home Assistant**: enter your MQTT broker, *Test connection*, *Save*.
+
+Setting up a second box? Use **Device → Backup & sync** instead (below).
+
+## Using it
+
+### Guide
+
+- The group list sits on the left until you move into the channels, then hides to give the guide more room.
+  **Back** brings it back (and jumps the guide to now); **Back** again returns to whatever is playing.
+- Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
+- **OK** on a live programme plays it; on a past programme with catch-up it plays from the start.
+- **Long-press OK** on a channel: favourite it, or pick which of its streams to play.
+
+### Player
+
+- **OK** shows the info card: now, previous and next programme, progress.
+  - **Up/down** browses other channels on the card (no video preview: providers usually allow one stream);
+    **OK** switches to the one shown.
+  - **Left/right** steps through earlier and later programmes; **OK** on an earlier one plays it from catch-up.
+  - **OK** on the channel you're watching opens the controls: Restart (from the programme start, via
+    catch-up), back/forward 30 s, pause, Live, and Streams.
+- **Number keys** tune by channel number (Sky numbers when the Sky layout is on).
+- **CH+/CH−** and the remote's rewind / fast-forward keys work as you'd expect.
+- **Back** returns to the guide with the stream still playing in the **mini player** (top-right). Pick the
+  same channel, or press Back from the group list, to go back to full screen. Leaving Ferry stops playback.
+
+### Sky layout
+
+Turn it on under **Groups → Sky layout** and pick your region (it sets the regional BBC / ITV channels).
+Ferry downloads Sky's channel list (satellite and Sky Q streaming lineups) once a day and matches your
+playlist to it by name and guide ID, including Sky's seasonal renames (Sky Sports NFL ↔ Action, BT Sport →
+TNT Sports). Anything it can't match by name is compared by schedule (same programmes at the same
+times). Channels still unmatched are listed in the web page with a **Pick…** search so you can match them
+by hand; manual picks stick across refreshes.
+
+### Guide gaps
+
+After each refresh Ferry looks for channels with nothing in the guide for the next few hours and fills them,
+first from Sky's own schedules (for Sky-matched channels), then from any **backup guide data** XMLTV URLs
+added under **Sources**.
+
+### Backup & sync between boxes
+
+**Device → Backup & sync → Export settings** downloads a JSON file with this box's playlists (including
+logins), options, Sky layout and picks, group choices, favourites and channel order. On the other box's web
+page, **Import settings…** makes it match: playlists already there (same server and login) are kept,
+others are added, and ones not in the file are removed. Each box keeps its own name, pairing and Home
+Assistant identity, and downloads its own guide. The file contains passwords, so keep it private.
 
 ### Let HA bring Ferry to the front
 
@@ -152,6 +203,13 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | POST | `/mqtt/test` | |
 | PUT | `/device` | `{name}` |
 | POST | `/tokens/revoke` | unpair everything |
+| GET/PUT | `/groups/detail`, `/groups/visible` | group list with hidden state / set the groups to use |
+| GET/PUT | `/sky` | Sky layout status / `{enabled, region, extraGroups}` |
+| PUT | `/sky/override` | `{number, channelId?}` manual Sky match (null clears) |
+| GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?}` |
+| POST | `/guide/fill` | fill guide gaps now |
+| GET | `/export` | settings export (includes playlist passwords) |
+| POST | `/import` | apply an export to this box |
 
 ## Layout
 
@@ -174,8 +232,12 @@ app/src/main/assets/web/index.html   config page (no build step)
 
 ## Notes / known gaps
 
-- Up on the remote = previous channel in the list, Down = next. Left/Back = guide.
+- Up on the remote = previous channel in the list, Down = next.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.
+- Most providers allow one stream per account at a time; a second box (or another app) on the same
+  account gets "provider refused the stream (HTTP 407)".
 - Renaming the device updates HA after the next MQTT reconnect (toggle MQTT or restart the app).
+- App data copied from another box (adb, cloned install) is detected and given its own device identity, so
+  two boxes never appear as one device in HA. Use Backup & sync to copy settings instead.
 - Streams that ExoPlayer can't decode (rare TS muxing, some AC3 on cheap boxes) will need the planned libVLC fallback.
 - Credentials are stored in app-private storage, not encrypted; fine for a home TV, revisit before sharing builds.

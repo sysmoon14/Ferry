@@ -267,6 +267,18 @@
         <p class="muted small">Off: Ferry opens on the guide. Back from the channel always takes you to the guide.</p>
       </div>
       <div class="card">
+        <h2>Backup &amp; sync</h2>
+        <p class="muted small">Copy this Ferry's setup to another box: playlists and logins, options, Sky layout, groups, favourites and channel order.
+          Export here, then open the other Ferry's web page and import the file. The other box keeps its own name, pairing and Home Assistant identity, and downloads its own guide.</p>
+        <p class="muted small">The file contains your playlist passwords, so keep it private.</p>
+        <div class="actions">
+          <button class="btn" id="bExport">Export settings</button>
+          <button class="btn" id="bImport">Import settings…</button>
+          <input type="file" id="bFile" accept="application/json,.json" hidden>
+        </div>
+        <p class="small muted" id="bResult"></p>
+      </div>
+      <div class="card">
         <h2>Paired devices</h2>
         <p class="muted small">Unpairing signs out every phone and browser, including this one.</p>
         <div class="actions"><button class="btn danger" id="unpair">Unpair all</button></div>
@@ -658,6 +670,33 @@
   $("dResume").onchange = () => api("/options", { method: "PUT", body: { resumeLastChannel: $("dResume").checked } })
     .then(() => toast("Saved")).catch(e => toast(e.message));
   $("dSave").onclick = async () => { await api("/device", { method: "PUT", body: { name: $("dName").value } }); toast("Saved — restart Ferry to update HA device name"); };
+  $("bExport").onclick = async () => {
+    try {
+      const data = await api("/export");
+      const name = (data.from || "ferry").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const day = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = el("a", { href: url, download: `ferry-${name}-${day}.json` });
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      $("bResult").textContent = `Exported ${data.sources.length} playlist(s) and ${data.channels.length} channel choices.`;
+    } catch (e) { toast(e.message); }
+  };
+  $("bImport").onclick = () => $("bFile").click();
+  $("bFile").onchange = async () => {
+    const f = $("bFile").files[0]; $("bFile").value = "";
+    if (!f) return;
+    let data;
+    try { data = JSON.parse(await f.text()); } catch { return toast("That isn't a Ferry export file"); }
+    if (!data.ferryExport) return toast("That isn't a Ferry export file");
+    const when = data.exportedAt ? new Date(data.exportedAt).toLocaleString() : "unknown date";
+    if (!confirm(`Replace this Ferry's setup with the one from "${data.from || "another Ferry"}" (${when})?\n\nPlaylists not in the file are removed from this box.`)) return;
+    try {
+      const r = await api("/import", { method: "POST", body: data });
+      $("bResult").textContent = `Imported ${r.sources} playlist(s)` + (r.removedSources ? `, removed ${r.removedSources}` : "") +
+        `. Ferry is reloading the channels and guide now — this takes a minute or two.`;
+      toast("Imported");
+    } catch (e) { toast(e.message); }
+  };
   $("unpair").onclick = async () => { if (confirm("Unpair every device?")) { await api("/tokens/revoke", { method: "POST" }); store.set(null); token = null; showPair(); } };
 
   // ---------- Boot

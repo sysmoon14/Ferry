@@ -40,6 +40,11 @@ data class KeyDays(val epgKey: String, val days: Int)
 
 data class GroupSummary(val name: String, val count: Int)
 
+data class UserPrefRow(
+    val sourceId: Long, val name: String, val tvgId: String?, val groupTitle: String?, val streamUrl: String,
+    val favourite: Boolean, val hidden: Boolean, val sortOrder: Int,
+)
+
 data class ChannelPrefs(val id: String, val favourite: Boolean, val hidden: Boolean, val sortOrder: Int, val streamUrl: String)
 
 /** Ordering used everywhere a "channel list" is shown: favourites first, user order, then provider order. */
@@ -115,6 +120,12 @@ interface ChannelDao {
            WHERE sourceId = :sourceId AND (favourite = 1 OR hidden = 1 OR sortOrder != 2147483647)"""
     )
     suspend fun prefsForSource(sourceId: Long): List<ChannelPrefs>
+
+    @Query(
+        """SELECT sourceId, name, tvgId, groupTitle, streamUrl, favourite, hidden, sortOrder FROM channels
+           WHERE favourite = 1 OR hidden = 1 OR sortOrder != 2147483647"""
+    )
+    suspend fun userPrefs(): List<UserPrefRow>
 
     @Query("SELECT DISTINCT COALESCE(tvgId, name) FROM channels WHERE sourceId = :sourceId")
     suspend fun epgKeys(sourceId: Long): List<String>

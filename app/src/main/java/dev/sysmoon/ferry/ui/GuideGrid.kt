@@ -264,8 +264,11 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
             }
             if (channel.favourite) Tag("★", FerryColors.Gold)
         }
+        // Keep clear of the corner mini player while a stream is playing.
+        val miniShowing = graph.player.state.collectAsState().value.channel != null
         p?.description?.let {
-            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(end = if (miniShowing) 250.dp else 0.dp))
         } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
     }
 }
