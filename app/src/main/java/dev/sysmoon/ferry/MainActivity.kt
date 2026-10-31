@@ -96,7 +96,8 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(onBack = { screen = Screen.GUIDE })
                         }
                     }
-                    if (screen != Screen.PLAYER && playing.channel != null) {
+                    // Not on Settings: it would cover the pairing QR code.
+                    if ((screen == Screen.GUIDE || screen == Screen.SEARCH) && playing.channel != null) {
                         MiniPlayer(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 20.dp))
                     }
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
