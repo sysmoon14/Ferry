@@ -109,6 +109,11 @@ class FootballData(private val http: OkHttpClient, private val cacheDir: File) {
 
     companion object {
         private const val API = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+        /** ESPN's scoreboard abbreviations → the channel names playlists use. */
+        private val BROADCAST_NAMES = mapOf(
+            "Tele" to "Telemundo", "NBCSN" to "NBC Sports", "USA Net" to "USA Network", "CBSSN" to "CBS Sports Network",
+            "Para+" to "Paramount+", "ESPN+" to "ESPN Plus", "UNIMAS" to "UniMas", "TUDN" to "TUDN",
+        )
         private val json = Json { ignoreUnknownKeys = true }
 
         private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
@@ -145,9 +150,9 @@ class FootballData(private val http: OkHttpClient, private val cacheDir: File) {
                         b.obj()?.get("names").arr()?.forEach { n -> (n as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let(::add) }
                     }
                     comp["geoBroadcasts"].arr().orEmpty().forEach { b ->
-                        b.obj()?.get("media").obj()?.str("shortName")?.let(::add)
+                        b.obj()?.get("media").obj()?.let { m -> m.str("shortName")?.let(::add); m.str("name")?.let(::add) }
                     }
-                }.distinct()
+                }.flatMap { listOfNotNull(it, BROADCAST_NAMES[it]) }.distinct()
                 Fixture(
                     id = ev.str("id") ?: return@mapNotNull null,
                     competition = c,

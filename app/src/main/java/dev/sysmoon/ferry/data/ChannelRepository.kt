@@ -216,7 +216,7 @@ class ChannelRepository(
 
     /**
      * Sports channels without listings, hidden groups included, from other countries' guides
-     * (beIN's own feed, then up to [MAX_COUNTRY_FEEDS] countries with the most such channels).
+     * (beIN's own feed, then up to [MAX_COUNTRY_FEEDS] countries: football-rights markets first).
      * Only the next two days are kept, to keep the database small.
      */
     private suspend fun fillSportsGuides(covered: Set<String>, alreadyFilled: Set<String>, now: Long, errors: MutableList<String>): Int {
@@ -226,8 +226,12 @@ class ChannelRepository(
             .map { Row(it.epgKey, it.tvgId, it.name, SportsGuides.country(it.name, it.groupTitle, it.tvgId)) }
             .distinctBy { it.key }
         if (rows.isEmpty()) return 0
-        val feeds = listOf(SportsGuides.BEIN) + rows.mapNotNull { it.country }.groupingBy { it }.eachCount()
-            .entries.sortedByDescending { it.value }.take(MAX_COUNTRY_FEEDS).map { it.key }
+        // Countries that have unguided sports channels, football-rights markets first, then by count.
+        val counts = rows.mapNotNull { it.country }.groupingBy { it }.eachCount()
+        val feeds = listOf(SportsGuides.BEIN) + counts.keys.sortedWith(
+            compareBy<String> { SportsGuides.FOOTBALL_PRIORITY.indexOf(it).let { i -> if (i < 0) 999 else i } }
+                .thenByDescending { counts[it] }
+        ).take(MAX_COUNTRY_FEEDS)
         val filled = HashSet<String>()
         for (code in feeds) {
             val left = rows.filter { it.key !in filled && (code == SportsGuides.BEIN || it.country == code) }
@@ -423,7 +427,7 @@ class ChannelRepository(
         const val BACKUP_GUIDE_SOURCE = -2L
         /** Other countries' sports guides (epgshare01). */
         const val SPORTS_GUIDE_SOURCE = -3L
-        private const val MAX_COUNTRY_FEEDS = 8
+        private const val MAX_COUNTRY_FEEDS = 14
         const val USER_AGENT = "Ferry/0.1 (Android TV)"
 
         fun resolveUrls(src: SourceEntity): Pair<String, String?> = when (src.type) {

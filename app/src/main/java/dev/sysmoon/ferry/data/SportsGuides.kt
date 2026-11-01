@@ -20,14 +20,39 @@ object SportsGuides {
         "HR" to "HR", "RS" to "RS", "BG" to "BG", "SK" to "SK", "SI" to "SI", "IL" to "IL", "CY" to "CY",
     )
     private val PREFIX = Regex("""^\s*([A-Za-z]{2,3})\s*[|:\-]\s""")
+    /** "SuperSport | ZA", "AU | Optus Live" style group suffix. */
+    private val SUFFIX = Regex("""[|:\-]\s*([A-Za-z]{2,3})\s*$""")
+    /** Groups named by country ("Norway Locals", "Bosnia", "Netherlands Locals"). */
+    private val COUNTRY_WORDS = mapOf(
+        "united kingdom" to "UK", "ireland" to "IE", "united states" to "US", "usa" to "US", "canada" to "CA",
+        "australia" to "AU", "new zealand" to "NZ", "france" to "FR", "germany" to "DE", "deutschland" to "DE",
+        "italy" to "IT", "italia" to "IT", "spain" to "ES", "espana" to "ES", "portugal" to "PT",
+        "netherlands" to "NL", "holland" to "NL", "belgium" to "BE", "switzerland" to "CH", "austria" to "AT",
+        "poland" to "PL", "turkey" to "TR", "greece" to "GR", "sweden" to "SE", "norway" to "NO", "denmark" to "DK",
+        "finland" to "FI", "brazil" to "BR", "mexico" to "MX", "argentina" to "AR", "india" to "IN",
+        "south africa" to "ZA", "hungary" to "HU", "romania" to "RO", "czech" to "CZ", "croatia" to "HR",
+        "serbia" to "RS", "bulgaria" to "BG", "slovakia" to "SK", "slovenia" to "SI", "israel" to "IL", "cyprus" to "CY",
+    )
+    /** Arabic-world broadcasters: "AR:" on these means Arabic, not Argentina. */
+    private val ARABIC = Regex("""(?i)\b(bein|ssc|alkass|al kass|ad sports|abu dhabi|dubai sports|osn|shahid|arabic)\b""")
 
     /** epgshare01 code for a channel's country, or null if it can't be told. */
     fun country(name: String, group: String?, tvgId: String?): String? {
+        if (ARABIC.containsMatchIn(name + " " + group.orEmpty())) return null // beIN's own feed covers these
         listOfNotNull(group, name).forEach { s ->
             PREFIX.find(s)?.groupValues?.get(1)?.uppercase()?.let { CODES[it] }?.let { return it }
         }
+        group?.let { g ->
+            SUFFIX.find(g)?.groupValues?.get(1)?.uppercase()?.let { CODES[it] }?.let { return it }
+            val lower = g.lowercase()
+            COUNTRY_WORDS.entries.firstOrNull { (w, _) -> Regex("\\b${Regex.escape(w)}\\b").containsMatchIn(lower) }?.let { return it.value }
+        }
         return tvgId?.substringAfterLast('.', "")?.uppercase()?.let { CODES[it] }
     }
+
+    /** Where Premier League / Champions League rights holders are: fetched first. */
+    val FOOTBALL_PRIORITY = listOf("UK", "IE", "ES", "PT", "FR", "IT", "DE", "NL", "NO", "SE", "DK", "ZA", "AU", "US",
+        "CA", "TR", "GR", "BE", "PL", "AT", "CH", "NZ", "IN")
 
     /** Country of a feed channel from its id ("beIN.Sports.1.fr" → FR). */
     fun feedCountry(id: String): String? = CODES[id.substringAfterLast('.', "").uppercase()]
