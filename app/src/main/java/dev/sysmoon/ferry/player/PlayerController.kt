@@ -603,12 +603,18 @@ class PlayerController(
         dao.get(nextId)?.let { play(it, zapScope) }
     }
 
-    suspend fun stop() {
+    /**
+     * Everything on the main thread in one go, with any tune still in flight cancelled first:
+     * otherwise a stop racing a start could reset the state while the player went on to play
+     * (seen as "playing" with no channel in Home Assistant).
+     */
+    suspend fun stop() = withContext(Dispatchers.Main.immediate) {
+        playJob?.cancel()
         watchdog?.cancel()
         stallJob?.cancel()
         stableJob?.cancel()
         streams = emptyList()
-        withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
+        player.stop(); player.clearMediaItems()
         _state.value = NowPlaying()
     }
 
