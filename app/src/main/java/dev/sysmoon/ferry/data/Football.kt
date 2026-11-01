@@ -21,12 +21,18 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-enum class Competition(val espn: String, val label: String, val short: String, val keywords: List<String>) {
-    PREMIER_LEAGUE("eng.1", "Premier League", "PL", listOf("premier league", "english premier", "epl")),
+enum class Competition(
+    val espn: String, val label: String, val short: String, val keywords: List<String>,
+    /** Words in a channel's own name that make it a channel dedicated to this competition
+     *  ("SuperSport Premier League", "Hub Premier 1", "V Sport Premier League"). */
+    val channelWords: List<String>,
+) {
+    PREMIER_LEAGUE("eng.1", "Premier League", "PL", listOf("premier league", "english premier", "epl"),
+        listOf("premier league", "premier football", "hub premier", "optus sport", "epl")),
     CHAMPIONS_LEAGUE("uefa.champions", "Champions League", "UCL", listOf(
         "champions league", "uefa champions", "ucl", "liga de campeones", "ligue des champions",
         "liga dos campeoes", "champions league uefa", "lega dei campioni",
-    )),
+    ), listOf("champions league", "uefa champions")),
 }
 
 data class Team(val id: String, val name: String, val short: String, val abbr: String, val logo: String?) {

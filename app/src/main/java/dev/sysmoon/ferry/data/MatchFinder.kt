@@ -77,6 +77,8 @@ class MatchFinder(private val db: FerryDatabase) {
             val comp = f.competition.keywords.any { text.contains(" $it ") }
             // "Premier League Preview Show", "UCL Highlights"… aren't the match.
             val show = TeamNames.isMagazineShow(title)
+            // Same competition name, different game: darts' "Premier League", youth and women's leagues.
+            if (TeamNames.otherSport(p.title) || TeamNames.notFirstTeam(text)) continue
             val label = "Guide: ${p.title} (${time.format(Date(p.start))})"
             // A listing for this match starts around kick-off and lasts about a match, not a
             // four-hour "Premier League" block.
@@ -90,6 +92,19 @@ class MatchFinder(private val db: FerryDatabase) {
                 comp && !show && !h && !a && matchShaped && sameSlot <= 1 && TeamNames.isSportsChannel(ch) && competitionOnly < 25 ->
                     { competitionOnly++; add(ch, 42, label) }
             }
+        }
+
+        // 5. Channels dedicated to the competition ("SuperSport Premier League", "Hub Premier 1",
+        // "V Sport Premier League", "Optus Sport"): rights holders that show one match at a time,
+        // so when this is the only game on they're almost certainly showing it, even with no guide.
+        for (ch in rows) {
+            if (ch.id in found) continue
+            val name = TeamNames.normalise(ch.name)
+            if (TeamNames.otherSport(ch.name) || TeamNames.notFirstTeam(name)) continue
+            if (f.competition.channelWords.none { name.contains(" $it ") }) continue
+            if (name.contains(" premier sports ")) continue // a broadcaster, not the league
+            if (sameSlot <= 1) add(ch, 64, "${f.competition.label} channel (only game on)")
+            else add(ch, 38, "${f.competition.label} channel ($sameSlot games at this time)")
         }
 
         // Broadcasters ESPN lists (mostly US: NBC, Peacock, USA Network, CBS, Paramount+…)
@@ -187,8 +202,12 @@ object TeamNames {
         "nova sport", "polsat", "cosmote", "ssc", "astro", "optus", "stan", "fox", "tsn", "sportsnet", "usa network",
         "peacock", "paramount", "cbs", "nbc", "telemundo", "univision", "tudn", "rmc", "eurosport", "setanta", "match")
 
-    private val OTHER_SPORTS = Regex("""\b(rugby|super league|rhinos|nrl|nfl|nba|nhl|mlb|cricket|darts|snooker|tennis|golf|boxing|ufc|wwe|f1|motogp|nascar|hockey|basketball|baseball)\b""")
+    private val OTHER_SPORTS = Regex("""\b(rugby|super league|rhinos|nrl|nfl|nba|nhl|mlb|cricket|darts|pdc|snooker|tennis|golf|boxing|ufc|wwe|f1|motogp|nascar|hockey|basketball|baseball|netball|kabaddi)\b""")
     fun otherSport(name: String) = OTHER_SPORTS.containsMatchIn(normalise(name))
+
+    private val NOT_FIRST_TEAM = Regex("""\b(u17|u18|u19|u21|u23|under 17|under 18|under 19|under 21|under 23|women|womens|wsl|premier league 2|pl2|youth|academy|futsal|legends|esports|efootball|fifa)\b""")
+    /** Youth, women's, legends or e-sports versions of a competition aren't the first-team match. */
+    fun notFirstTeam(normalisedText: String) = NOT_FIRST_TEAM.containsMatchIn(normalisedText)
 
     /** "X v Y", "X vs Y", "X - Y" in normalised text (the dash becomes a double space-free gap, so check the raw-ish forms). */
     fun hasVersus(normalisedText: String) =

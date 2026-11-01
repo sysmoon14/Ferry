@@ -83,4 +83,14 @@ class FootballTest {
         assertTrue(TeamNames.hasVersus(TeamNames.normalise("Premier League: Liverpool v Chelsea")))
         assertFalse(TeamNames.hasVersus(TeamNames.normalise("EPL Events 03: Liverpool")))
     }
+
+    // Seen on 1 Nov 2026: "Premier League" darts and an under-18 game offered for Liverpool v Arsenal.
+    @Test fun sameNameDifferentGame() {
+        assertTrue(TeamNames.otherSport("PDC ANZ Premier League Darts - Week 6 (Finals)"))
+        assertTrue(TeamNames.notFirstTeam(TeamNames.normalise("Under 18 Premier League")))
+        assertTrue(TeamNames.notFirstTeam(TeamNames.normalise("WSL: Arsenal Women v Chelsea Women")))
+        assertTrue(TeamNames.notFirstTeam(TeamNames.normalise("Premier League 2: Liverpool U21")))
+        assertFalse(TeamNames.notFirstTeam(TeamNames.normalise("Live Super Sunday: Liverpool v Arsenal")))
+        assertFalse(TeamNames.otherSport("SuperSport Premier League"))
+    }
 }
