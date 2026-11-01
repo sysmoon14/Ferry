@@ -131,7 +131,7 @@ class MqttBridge(private val g: AppGraph) {
                     .collect { (s, latest) -> client.publish("$base/update", updateJson(s, latest).toString()) }
             }
             launch {
-                while (true) { g.updater.checkIfDue(); delay(60 * 60_000L) }
+                while (true) { g.updater.checkIfDue(); delay(30 * 60_000L) }
             }
             launch {
                 g.sleep.slept.collect {

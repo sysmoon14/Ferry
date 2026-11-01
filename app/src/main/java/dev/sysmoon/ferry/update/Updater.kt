@@ -206,7 +206,7 @@ class Updater(
     companion object {
         private const val TAG = "FerryUpdate"
         const val REPO = "sysmoon14/Ferry"
-        private const val CHECK_EVERY_MS = 6 * 60 * 60_000L
+        private const val CHECK_EVERY_MS = 30 * 60_000L
 
         private val json = Json { ignoreUnknownKeys = true }
 

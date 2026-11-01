@@ -92,7 +92,7 @@ fun UpdatePrompt(state: dev.sysmoon.ferry.update.UpdateState, onUpdate: () -> Un
                     Text("Ferry ${state.release.version}", style = MaterialTheme.typography.headlineSmall)
                     Text("You have ${dev.sysmoon.ferry.BuildConfig.VERSION_NAME}. Your settings and channels are kept.", color = FerryColors.Muted)
                     val notes = state.release.notes.lines().map { it.trim() }
-                        .filter { it.startsWith("*") || it.startsWith("-") }.take(5)
+                        .filter { (it.startsWith("* ") || it.startsWith("- ")) && "Full Changelog" !in it }.take(5)
                         .joinToString("\n") { "•  " + it.trimStart('*', '-', ' ').substringBefore(" by @") }
                     if (notes.isNotBlank()) {
                         Spacer(Modifier.height(10.dp))
