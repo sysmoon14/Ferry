@@ -115,21 +115,49 @@ class PlayerController(
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val live = !_state.value.catchup && _state.value.channel != null
                 // A live channel never really "ends": the provider dropped the connection.
-                if (playbackState == Player.STATE_ENDED && !_state.value.catchup && _state.value.channel != null) {
-                    reconnect()
+                if (playbackState == Player.STATE_ENDED && live) {
+                    reconnect("dropped")
                     return
+                }
+                // Mid-stream stall: it was playing, then buffers and never comes back.
+                stallJob?.cancel()
+                if (playbackState == Player.STATE_BUFFERING && live && streamStarted) {
+                    val id = _state.value.stream?.id
+                    stallJob = scope.launch {
+                        delay(MID_STALL_TIMEOUT_MS)
+                        if (player.playbackState == Player.STATE_BUFFERING && _state.value.stream?.id == id) reconnect("stalled")
+                    }
                 }
                 sync()
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) { streamStarted = true; watchdog?.cancel() }
+                stableJob?.cancel()
+                if (isPlaying) {
+                    streamStarted = true
+                    watchdog?.cancel()
+                    // Playing steadily again: a later failure starts a fresh round of backups.
+                    stableJob = scope.launch {
+                        delay(STABLE_MS)
+                        tried.clear(); tried += streamIndex
+                    }
+                }
                 sync()
             }
             override fun onPlayerError(error: PlaybackException) {
-                // A merged channel has backups: move on to the next stream instead of stopping.
-                if (!_state.value.catchup && streamIndex + 1 < streams.size) {
-                    failover("failed")
+                val live = !_state.value.catchup && _state.value.channel != null
+                // HLS fell behind the live window (common after a hiccup): jump back to live
+                // on the same stream rather than treating it as dead.
+                if (live && error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    player.seekToDefaultPosition()
+                    player.prepare()
+                    return
+                }
+                if (live) {
+                    // Before or during playback: move on to the channel's other streams,
+                    // then keep retrying for a bit before giving up.
+                    reconnect("failed", error)
                 } else {
                     _state.update { it.copy(state = PlaybackState.ERROR, error = describe(error, it.catchup)) }
                 }
@@ -175,6 +203,10 @@ class PlayerController(
     @Volatile private var streamIndex = 0
     @Volatile private var streamStarted = false
     private var watchdog: Job? = null
+    private var stallJob: Job? = null
+    private var stableJob: Job? = null
+    /** Streams tried since the channel last played steadily, so failover cycles through each once. */
+    private val tried = mutableSetOf<Int>()
 
     /**
      * Fire-and-forget start for UI callers. Runs in the app scope so it survives the guide
@@ -231,6 +263,8 @@ class PlayerController(
         val list = if (primary.streamCount > 1) streamsFor(primary) else listOf(primary)
         streams = list
         streamIndex = list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0)
+        tried.clear(); tried += streamIndex
+        drops.clear()
         // Look up now/next first so the banner never flashes "No guide data".
         val (now, next) = programmesFor(primary)
         playCurrentStream(primary, now, next, notice = null)
@@ -248,6 +282,8 @@ class PlayerController(
         fun state(s: PlaybackState, error: String? = null) =
             NowPlaying(channel, now, next, s, error, stream = stream, streamCount = streams.size, notice = notice)
         watchdog?.cancel()
+        stallJob?.cancel()
+        stableJob?.cancel()
         streamStarted = false
         // BBC iPlayer channels store candidate service ids; fetch a current stream URL each play.
         val uri = if (BbcIplayer.isBbc(stream.streamUrl)) {
@@ -277,49 +313,65 @@ class PlayerController(
             sync()
         }
         // Some dead streams never error, they just buffer forever. Give up on them too.
-        if (streamIndex + 1 < streams.size) {
+        if (streams.size > 1) {
             watchdog = scope.launch {
                 delay(STALL_TIMEOUT_MS)
-                if (!streamStarted && _state.value.stream?.id == stream.id) failover("didn't start")
+                if (!streamStarted && _state.value.stream?.id == stream.id) reconnect("didn't start")
             }
         }
     }
 
     private val drops = ArrayDeque<Long>()
 
-    /** Live stream dropped: try the next stream, else reconnect (giving up after 3 drops a minute). */
-    private fun reconnect() {
+    /**
+     * The live stream failed, dropped or stalled (before or during playback). Try the channel's
+     * other streams in turn (each once per failure, wrapping round from the current one); when
+     * they've all been tried, retry after a pause, giving up after 3 retries a minute.
+     */
+    private fun reconnect(reason: String, error: PlaybackException? = null) {
         val current = _state.value
         val channel = current.channel ?: return
-        if (streamIndex + 1 < streams.size) { failover("dropped"); return }
+        if (failover(reason)) return
         val now = System.currentTimeMillis()
         drops.addLast(now)
         while (drops.isNotEmpty() && drops.first() < now - 60_000) drops.removeFirst()
         if (drops.size > 3) {
-            _state.update { it.copy(state = PlaybackState.ERROR, error = "the provider keeps dropping the stream — another device may be using the account") }
+            val msg = when {
+                error != null -> describe(error, false)
+                else -> "the provider keeps dropping the stream — another device may be using the account"
+            }
+            _state.update { it.copy(state = PlaybackState.ERROR, error = msg) }
             return
         }
         playJob?.cancel()
         playJob = scope.launch {
-            _state.update { it.copy(state = PlaybackState.BUFFERING, notice = "Stream dropped — reconnecting…") }
+            val what = if (streams.size > 1) "All ${streams.size} streams $reason" else "Stream $reason"
+            _state.update { it.copy(state = PlaybackState.BUFFERING, notice = "$what — reconnecting…") }
             delay(1_500)
-            playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream dropped")
+            // Start the next round from the best stream.
+            if (streams.size > 1) { streamIndex = 0; tried.clear(); tried += 0 }
+            playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream $reason")
         }
     }
 
-    /** Moves to the next stream of the current channel, keeping the banner on the same channel. */
-    private fun failover(reason: String) {
+    /** Moves to the next untried stream of the current channel, keeping the banner on the same channel. */
+    private fun failover(reason: String): Boolean {
         val current = _state.value
-        val channel = current.channel ?: return
-        if (streamIndex + 1 >= streams.size) return
+        val channel = current.channel ?: return false
+        val size = streams.size
+        if (size < 2) return false
+        val next = (1 until size).map { (streamIndex + it) % size }.firstOrNull { it !in tried } ?: return false
+        val from = streamIndex
         playJob?.cancel()
         playJob = scope.launch {
-            streamIndex += 1
-            val label = StreamQuality.parse(streams[streamIndex].name).label
-            val notice = "Stream ${streamIndex} $reason — trying backup ${streamIndex + 1} of ${streams.size}" +
+            streamIndex = next
+            tried += next
+            val label = StreamQuality.parse(streams[next].name).label
+            val notice = "Stream ${from + 1} $reason — switching to stream ${next + 1} of $size" +
                 (label?.let { " ($it)" } ?: "")
             playCurrentStream(channel, current.now, current.next, notice)
         }
+        return true
     }
 
     /** Catch-up is possible for programmes that have ended (or started) within the archive window. */
@@ -478,6 +530,8 @@ class PlayerController(
 
     suspend fun stop() {
         watchdog?.cancel()
+        stallJob?.cancel()
+        stableJob?.cancel()
         streams = emptyList()
         withContext(Dispatchers.Main) { player.stop(); player.clearMediaItems() }
         _state.value = NowPlaying()
@@ -497,6 +551,10 @@ class PlayerController(
 
     companion object {
         private const val STALL_TIMEOUT_MS = 12_000L
+        /** Buffering this long after the stream was playing counts as a failure. */
+        private const val MID_STALL_TIMEOUT_MS = 10_000L
+        /** Playing this long counts as steady: the next failure gets a fresh round of backups. */
+        private const val STABLE_MS = 30_000L
 
         /** Plain-language reason for a playback failure; falls back to ExoPlayer's code name. */
         fun describe(error: PlaybackException, catchup: Boolean): String {

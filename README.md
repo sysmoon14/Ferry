@@ -9,7 +9,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Area | What you get |
 |---|---|
 | Sources | M3U / M3U Plus, Xtream Codes, and BBC iPlayer (UK). Favourites, hidden channels and order survive refreshes, even when the provider renames a channel |
-| Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first and Ferry fails over to the next if it stalls. Long-press OK to pick a stream |
+| Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first. If a stream fails, drops or stalls (when tuning in or mid-programme), Ferry switches to the channel's other streams in turn, then keeps retrying for a minute. Long-press OK to pick a stream |
 | Sky layout | Optional: channels numbered and grouped like a Sky box (Entertainment, Movies, Sports…), for your Sky region, using Sky's own channel list |
 | Menu | Main menu: Search, Favourites, Sports, TV Guide, Channel List, Settings. TV Guide and Channel List have their own group list |
 | Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
@@ -307,7 +307,10 @@ app/src/main/assets/web/index.html   config page (no build step)
 
 - Up on the remote = previous channel in the list, Down = next.
 - CI publishes `ferry.apk` (release, recommended) and `ferry-debug.apk` to the rolling `nightly` release.
-- If the provider drops a live stream, Ferry reconnects (or moves to a backup stream) by itself.
+- If a live stream fails, drops or freezes for 10 s mid-programme, Ferry moves through the channel's other
+  streams (each once), then retries from the best one; it only gives up after 3 full rounds in a minute.
+  A stream that has played steadily for 30 s resets the round. HLS streams that fall behind the live
+  window jump back to live instead of switching.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.
 - Most providers allow one stream per account at a time; a second box (or another app) on the same
   account gets "provider refused the stream (HTTP 407)".
