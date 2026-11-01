@@ -100,6 +100,7 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ferry-debug.apk
           cp app/build/outputs/apk/release/app-release.apk ferry.apk
+          cp app/build/outputs/mapping/release/mapping.txt ferry-mapping.txt
           git tag -f nightly && git push -f origin nightly
           gh release view nightly >/dev/null 2>&1 || \
             gh release create nightly --prerelease --title "Nightly" --notes "Latest debug build from main."
