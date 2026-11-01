@@ -127,7 +127,9 @@ class PlayerController(
                 stallJob?.cancel()
                 if (playbackState == Player.STATE_BUFFERING && live && streamStarted) {
                     val id = _state.value.stream?.id
-                    stallJob = scope.launch {
+                    // On the main thread: ExoPlayer may only be touched there (reading its state from a
+                    // background thread crashed Ferry when a stream hung).
+                    stallJob = scope.launch(Dispatchers.Main) {
                         delay(MID_STALL_TIMEOUT_MS)
                         if (player.playbackState == Player.STATE_BUFFERING && _state.value.stream?.id == id) reconnect("stalled")
                     }
@@ -146,7 +148,7 @@ class PlayerController(
                     streamStarted = true
                     watchdog?.cancel()
                     // Playing steadily again: a later failure starts a fresh round of backups.
-                    stableJob = scope.launch {
+                    stableJob = scope.launch(Dispatchers.Main) {
                         delay(STABLE_MS)
                         tried.clear(); tried += streamIndex
                     }
@@ -323,7 +325,7 @@ class PlayerController(
         }
         // Some dead streams never error, they just buffer forever. Give up on them too.
         if (streams.size > 1) {
-            watchdog = scope.launch {
+            watchdog = scope.launch(Dispatchers.Main) {
                 delay(STALL_TIMEOUT_MS)
                 if (!streamStarted && _state.value.stream?.id == stream.id) reconnect("didn't start")
             }
