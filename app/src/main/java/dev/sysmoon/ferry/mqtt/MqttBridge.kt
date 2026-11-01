@@ -125,6 +125,15 @@ class MqttBridge(private val g: AppGraph) {
                 }
             }
             launch {
+                // Update entity: what's installed vs the latest GitHub release. Checked every few
+                // hours even if nobody opens Ferry, so HA shows when an update is waiting.
+                kotlinx.coroutines.flow.combine(g.updater.state, g.updater.latest) { s, latest -> s to latest }
+                    .collect { (s, latest) -> client.publish("$base/update", updateJson(s, latest).toString()) }
+            }
+            launch {
+                while (true) { g.updater.checkIfDue(); delay(60 * 60_000L) }
+            }
+            launch {
                 g.sleep.slept.collect {
                     client.publish("$base/event", buildJsonObject { put("event_type", "sleep") }.toString(), retain = false)
                 }
@@ -144,6 +153,8 @@ class MqttBridge(private val g: AppGraph) {
             "play" -> g.commands.playPayload(payload)
             "key" -> g.commands.key(payload)
             "sleep" -> payload.toFloatOrNull()?.let { g.sleep.set(it.toInt()) }
+            // From HA's update entity: download and open the install prompt on the TV.
+            "update" -> if (payload == "check") g.updater.check() else g.updater.install()
             else -> Log.d(TAG, "Unknown command $command")
         }
     }
@@ -225,11 +236,36 @@ class MqttBridge(private val g: AppGraph) {
             "json_attributes_topic" to "$base/reminders",
             "icon" to "mdi:bell-ring-outline",
         )))
+        c.publish("$p/update/ferry_$id/ferry/config", json(common(id, name, base, "ferry_update", "Ferry") + mapOf(
+            "state_topic" to "$base/update",
+            "command_topic" to "$base/cmd/update",
+            "payload_install" to "install",
+            "entity_category" to "config",
+            "icon" to "mdi:update",
+        )))
         c.publish("$p/event/ferry_$id/events/config", json(common(id, name, base, "events", "Events") + mapOf(
             "state_topic" to "$base/event",
             "event_types" to JsonArray(listOf("reminder", "sleep").map(::JsonPrimitive)),
             "icon" to "mdi:bell",
         )))
+    }
+
+    private fun updateJson(s: dev.sysmoon.ferry.update.UpdateState, latest: dev.sysmoon.ferry.update.Release?): JsonObject = buildJsonObject {
+        val installed = g.updater.installedVersion
+        // A nightly (x.y.z+dev.n) counts as x.y.z, so HA only flags real newer releases.
+        val newer = latest?.takeIf { dev.sysmoon.ferry.update.Updater.isNewer(it.version, installed) }
+        put("installed_version", installed)
+        put("latest_version", newer?.version ?: installed)
+        put("title", "Ferry")
+        newer?.let {
+            put("release_url", it.pageUrl)
+            put("release_summary", it.notes.take(250))
+        }
+        when (s) {
+            is dev.sysmoon.ferry.update.UpdateState.Downloading -> { put("in_progress", true); put("update_percentage", s.percent) }
+            is dev.sysmoon.ferry.update.UpdateState.Installing -> put("in_progress", true)
+            else -> put("in_progress", false)
+        }
     }
 
     private fun remindersJson(list: List<dev.sysmoon.ferry.data.Reminder>): JsonObject = buildJsonObject {

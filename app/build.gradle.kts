@@ -14,8 +14,11 @@ android {
         applicationId = "dev.sysmoon.ferry"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI sets these: a tag vX.Y.Z builds X.Y.Z; main builds "<last tag>+dev.<run>" (same
+        // version for the updater, so nightlies are only offered newer tagged releases).
+        // versionCode is the CI run number, so every build installs over the previous one.
+        versionCode = System.getenv("FERRY_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("FERRY_VERSION") ?: "0.1.0+local"
     }
 
     // A fixed, committed key so every CI build can update the last one in place

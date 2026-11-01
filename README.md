@@ -37,6 +37,23 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 ./gradlew test                # parser, duplicate-merging and Sky matching tests
 ```
 
+## Releases & updates
+
+- **Release:** tag a version and push it — `git tag v0.2.0 && git push origin v0.2.0`. CI builds it and
+  publishes a GitHub release with `ferry.apk` (and `ferry-debug.apk`), with notes generated from the commits.
+- **Updating the boxes:** each Ferry checks the latest release when it opens (at most every 6 hours, and in
+  the background for Home Assistant). If it's newer, Ferry offers **Update now / Later** — never over
+  full-screen viewing — then downloads it and opens Android's install prompt (press **Install**). Settings,
+  sources and favourites are kept, and Ferry restarts on the new version.
+  - The first time, Android may ask you to allow Ferry to *install unknown apps*.
+  - **Settings** shows the installed version with **Check for updates** / **Update to x.y.z**.
+  - In Home Assistant each box has an **update** entity (`update.<name>_ferry`): it shows when a release is
+    waiting, and **Install** starts the update on that TV (confirm on the TV).
+- **Every push to main** still publishes the rolling `nightly` pre-release. A nightly reports itself as
+  `<latest tag>+dev.<run>` and is only offered newer tagged releases.
+- **Branding:** `branding/` has the icon and banner sources plus `ferry-projectivy-1280x720.png` for
+  Projectivy Launcher.
+
 ## First run
 
 1. Launch Ferry, go to **Settings** in the main menu.
@@ -185,6 +202,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting) and `sleep` (timer stopped playback) |
+| `update.<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
 
 Topics (`base = ferry/<device-id>`):
 

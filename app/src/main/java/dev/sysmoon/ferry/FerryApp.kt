@@ -47,6 +47,7 @@ class AppGraph(val context: Context) {
     val matchFinder = dev.sysmoon.ferry.data.MatchFinder(db)
     /** True while Ferry's screen is showing (reminder pop-ups only appear then). */
     val uiVisible = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val updater = dev.sysmoon.ferry.update.Updater(context, http, scope)
     val mqtt = MqttBridge(this)
 }
 

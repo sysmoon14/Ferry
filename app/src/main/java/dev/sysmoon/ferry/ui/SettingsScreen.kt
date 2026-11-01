@@ -73,6 +73,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             sources.filter { it.lastError != null }.forEach {
                 Text("⚠ ${it.name}: ${it.lastError}", color = FerryColors.Gold)
             }
+            val update by graph.updater.state.collectAsState()
+            Text("Ferry ${graph.updater.installedVersion}  ·  " + updateStatus(update), color = FerryColors.Muted)
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onBack, colors = ferryButtonColors(), modifier = Modifier.focusRequester(backFocus)) { Text("Back to guide") }
@@ -83,6 +85,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 OutlinedButton(colors = ferryOutlinedButtonColors(), onClick = { scope.launch { graph.settings.revokeAllTokens() } }) {
                     Text("Unpair all")
                 }
+                val available = update as? dev.sysmoon.ferry.update.UpdateState.Available
+                OutlinedButton(
+                    colors = ferryOutlinedButtonColors(),
+                    onClick = { if (available != null) graph.updater.install(available.release) else graph.updater.check() },
+                ) { Text(if (available != null) "Update to ${available.release.version}" else "Check for updates") }
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -101,4 +108,15 @@ private fun qrBitmap(text: String, size: Int = 512): Bitmap {
     val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 1))
     val pixels = IntArray(size * size) { i -> if (matrix[i % size, i / size]) AColor.BLACK else AColor.WHITE }
     return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
+}
+
+
+private fun updateStatus(s: dev.sysmoon.ferry.update.UpdateState): String = when (s) {
+    dev.sysmoon.ferry.update.UpdateState.Idle -> "updates from GitHub releases"
+    dev.sysmoon.ferry.update.UpdateState.Checking -> "checking for updates…"
+    dev.sysmoon.ferry.update.UpdateState.UpToDate -> "up to date"
+    is dev.sysmoon.ferry.update.UpdateState.Available -> "version ${s.release.version} is available"
+    is dev.sysmoon.ferry.update.UpdateState.Downloading -> "downloading ${s.release.version}… ${s.percent}%"
+    is dev.sysmoon.ferry.update.UpdateState.Installing -> "installing ${s.release.version}…"
+    is dev.sysmoon.ferry.update.UpdateState.Failed -> "update: ${s.message}"
 }

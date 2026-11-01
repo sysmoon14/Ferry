@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
     // cover everything in black until the player is up, and put the video full screen at once
     // instead of growing it out of the mini player, so the guide and menus never flash up.
     private var covered by mutableStateOf(false)
+    /** "Later"/"Hide" on the update prompt: don't show it again until the next launch. */
+    private var updateHidden by mutableStateOf(false)
     private var snapVideo by mutableStateOf(false)
 
     private fun openPlayerInstantly() {
@@ -101,6 +103,7 @@ class MainActivity : ComponentActivity() {
                 val playing by graph.player.state.collectAsState()
                 val sleepWarning by graph.sleep.warning.collectAsState()
                 val due by graph.reminders.due.collectAsState()
+                val update by graph.updater.state.collectAsState()
                 LaunchedEffect(Unit) { graph.sleep.slept.collect { backToGuide(rail = true) } }
                 Box(
                     Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
@@ -169,6 +172,21 @@ class MainActivity : ComponentActivity() {
                         BackHandler { leavePlayer() }
                         PlayerScreen(onBack = { leavePlayer() })
                     }
+                    // Offered at launch when a newer release is out, but never over full-screen viewing.
+                    val showUpdate = update is dev.sysmoon.ferry.update.UpdateState.Available ||
+                        update is dev.sysmoon.ferry.update.UpdateState.Downloading ||
+                        update is dev.sysmoon.ferry.update.UpdateState.Installing ||
+                        (update as? dev.sysmoon.ferry.update.UpdateState.Failed)?.release != null
+                    if (showUpdate && !updateHidden && screen != Screen.PLAYER && !covered && due == null) {
+                        dev.sysmoon.ferry.ui.UpdatePrompt(
+                            update,
+                            onUpdate = { graph.updater.install() },
+                            onLater = {
+                                updateHidden = true
+                                if (update is dev.sysmoon.ferry.update.UpdateState.Available) graph.updater.dismiss()
+                            },
+                        )
+                    }
                     if (covered) Box(Modifier.fillMaxSize().background(Color.Black))
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
@@ -197,6 +215,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         graph.uiVisible.value = true
+        updateHidden = false
+        graph.updater.checkIfDue()
         if (!pendingResume) { covered = false; return }
         pendingResume = false
         covered = true

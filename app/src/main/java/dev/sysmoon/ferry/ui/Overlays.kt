@@ -70,3 +70,70 @@ fun SleepWarning(modifier: Modifier = Modifier) {
             .padding(horizontal = 24.dp, vertical = 14.dp),
     )
 }
+
+
+/** Offered when a newer GitHub release is out (never over full-screen playback). */
+@Composable
+fun UpdatePrompt(state: dev.sysmoon.ferry.update.UpdateState, onUpdate: () -> Unit, onLater: () -> Unit) {
+    val primary = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { primary.requestFocus() }
+    }
+    Dialog(onDismissRequest = onLater) {
+        Column(
+            Modifier.width(600.dp).clip(RoundedCornerShape(14.dp)).background(FerryColors.Deep)
+                .padding(horizontal = 28.dp, vertical = 22.dp)
+        ) {
+            Text("⬆  UPDATE AVAILABLE", color = FerryColors.Gold, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(6.dp))
+            when (state) {
+                is dev.sysmoon.ferry.update.UpdateState.Available -> {
+                    Text("Ferry ${state.release.version}", style = MaterialTheme.typography.headlineSmall)
+                    Text("You have ${dev.sysmoon.ferry.BuildConfig.VERSION_NAME}. Your settings and channels are kept.", color = FerryColors.Muted)
+                    val notes = state.release.notes.lines().map { it.trim() }
+                        .filter { it.startsWith("*") || it.startsWith("-") }.take(5)
+                        .joinToString("\n") { "•  " + it.trimStart('*', '-', ' ').substringBefore(" by @") }
+                    if (notes.isNotBlank()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(notes, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = onUpdate, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Update now") }
+                        Button(onClick = onLater, colors = ferryButtonColors()) { Text("Later") }
+                    }
+                }
+                is dev.sysmoon.ferry.update.UpdateState.Downloading -> {
+                    Text("Downloading Ferry ${state.release.version}… ${state.percent}%", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(10.dp))
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.width(400.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(FerryColors.Navy)
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            Modifier.width((400 * state.percent / 100).dp).height(4.dp).background(FerryColors.Gold)
+                        )
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = onLater, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Hide") }
+                }
+                is dev.sysmoon.ferry.update.UpdateState.Installing -> {
+                    Text("Installing Ferry ${state.release.version}…", style = MaterialTheme.typography.titleMedium)
+                    Text("Confirm with Install if Android asks. Ferry restarts on the new version.", color = FerryColors.Muted)
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = onLater, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Hide") }
+                }
+                is dev.sysmoon.ferry.update.UpdateState.Failed -> {
+                    Text("The update didn't install", style = MaterialTheme.typography.titleMedium)
+                    Text(state.message, color = FerryColors.Muted)
+                    Spacer(Modifier.height(18.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = onUpdate, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Try again") }
+                        Button(onClick = onLater, colors = ferryButtonColors()) { Text("Later") }
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+}
