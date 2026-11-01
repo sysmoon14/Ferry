@@ -11,15 +11,16 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Sources | M3U / M3U Plus, Xtream Codes, and BBC iPlayer (UK). Favourites, hidden channels and order survive refreshes, even when the provider renames a channel |
 | Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first and Ferry fails over to the next if it stalls. Long-press OK to pick a stream |
 | Sky layout | Optional: channels numbered and grouped like a Sky box (Entertainment, Movies, Sports…), for your Sky region, using Sky's own channel list |
-| Guide | Group rail + EPG grid (or list). The group list hides while you browse; Back brings it back. Up/down keeps your place in time |
+| Menu | Main menu: Search, Favourites, Sports, TV Guide, Channel List, Settings. TV Guide and Channel List have their own group list |
+| Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
 | Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
 | Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down |
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
 | Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
-| Search | Programmes (catch-up, on now, coming up) and channels, from the top of the group list |
+| Search | Programmes (catch-up, on now, coming up) and channels, from the main menu |
 | Previous channel | Flip between the last two channels (remote's last-channel key, or the controls row) |
-| Recently watched | A group in the guide with the channels you've watched lately |
+| Recently watched | A group in TV Guide / Channel List with the channels you've watched lately |
 | Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
 | Keep in sync | A box can follow another Ferry and pick up its setup changes automatically |
 | Football | Premier League and Champions League fixtures; finds every stream in your playlist that might show a match |
@@ -38,7 +39,7 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 
 ## First run
 
-1. Launch Ferry, go to **Settings & pairing**.
+1. Launch Ferry, go to **Settings** in the main menu.
 2. Scan the QR code with your phone. It opens the config page and pairs automatically (the QR carries the PIN).
 3. **Sources → Add**: paste an M3U URL (+ optional EPG URL) or Xtream server/username/password.
 4. **Groups**: tick the provider groups to **Use**. With the Sky layout on, tick **Own section** for any group
@@ -49,18 +50,28 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 
 ## Using it
 
+### Menus
+
+Ferry opens on the **main menu**: 🔍 Search, ★ Favourites, ⚽ Sports, 📺 TV Guide, ☰ Channel List, ⚙ Settings.
+
+- **Favourites** goes straight to a guide of your favourite channels.
+- **TV Guide** (programme grid) and **Channel List** (one row per channel, with what's on now and next) open
+  their **group list** first (Recently watched, All channels / Sky sections, your playlist's groups); pick
+  a group to browse it.
+- **Sports** is the football finder (below).
+- The menus slide away while you browse so the guide gets the whole screen. **Back** walks back up:
+  channels → group list → main menu. **Back** in the main menu exits Ferry and stops anything playing.
+
 ### Guide
 
-- The group list sits on the left until you move into the channels, then hides to give the guide more room.
-  **Back** brings it back (and jumps the guide to now); **Back** in the group list exits Ferry.
 - The grid is compact and fills the screen (about ten and a half channels on a 1080p TV).
 - Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
 - **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
   hasn't started it sets (or clears) a reminder, shown with 🔔.
 - **Long-press OK** on a channel: favourite it, or pick which of its streams to play.
-- **🔍 Search** (top of the group list) finds programmes and channels as you type. OK plays, plays catch-up,
+- **🔍 Search** (main menu) finds programmes and channels as you type. OK plays, plays catch-up,
   or sets a reminder, depending on when the programme is on.
-- **🕘 Recently watched** lists the channels you've watched lately, newest first.
+- **🕘 Recently watched** (top of the group list) lists the channels you've watched lately, newest first.
 
 ### Player
 
@@ -77,7 +88,7 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 - **CH+/CH−** and the remote's rewind / fast-forward keys work as you'd expect.
 - **Back** returns to the guide with the stream still playing in the **mini player** (top-right). Pick the
   same channel to go back to full screen (the info card only pops up when the channel changes). Back from
-  the group list exits Ferry, and leaving Ferry stops playback.
+  the main menu exits Ferry, and leaving Ferry (Back or Home) stops playback.
 
 ### Sky layout
 
@@ -90,7 +101,7 @@ by hand; manual picks stick across refreshes.
 
 ### Football
 
-**⚽ Football** (top of the group list) shows Premier League and Champions League fixtures from ESPN's
+**⚽ Sports** (main menu) shows Premier League and Champions League fixtures from ESPN's
 public data, live scores first, with **Clubs** to pick your teams (they get a **★ My teams** tab).
 Choosing a match lists every stream that might show it, best first, with the reason:
 
@@ -132,7 +143,7 @@ others are added, and ones not in the file are removed. Each box keeps its own n
 Assistant identity, and downloads its own guide. The file contains passwords, so keep it private.
 
 **Keep in sync** (same card) makes a box follow another Ferry: pick it from **Find Ferry boxes** (or enter
-its address), type the PIN shown on its **Settings & pairing** screen, and it copies the setup straight
+its address), type the PIN shown on its **Settings** screen, and it copies the setup straight
 away, then checks every 15 minutes and applies any changes. It's one-way: make changes on the box you follow.
 
 ### Let HA bring Ferry to the front
