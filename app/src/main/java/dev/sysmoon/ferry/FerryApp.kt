@@ -19,15 +19,21 @@ class FerryApp : Application() {
     lateinit var graph: AppGraph
         private set
 
+    /** The graph, or null if a crash happens before it's built. */
+    val graphOrNull: AppGraph? get() = if (::graph.isInitialized) graph else null
+
     override fun onCreate() {
         super.onCreate()
+        CrashGuard.install(this)
         graph = AppGraph(this)
+        CrashGuard.resumeAfterCrash(graph)
     }
 }
 
 /** Hand-rolled DI: small enough that Hilt would be overhead. Created on the main thread. */
 class AppGraph(val context: Context) {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Background work. An exception that escapes a job is recorded by [CrashGuard], not fatal. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CrashGuard.handler)
     val db = FerryDatabase.create(context)
     val settings = Settings(context)
     val http: OkHttpClient = OkHttpClient.Builder()

@@ -479,6 +479,16 @@ class ConfigServer(private val g: AppGraph) {
 
                 // ---- Keep in sync with another Ferry
                 get("/sync") { call.respond(g.sync.status()) }
+                get("/debug/crash") {
+                    val r = dev.sysmoon.ferry.CrashGuard.last.value
+                    call.respondText(
+                        if (r == null) "No crashes recorded." else buildString {
+                            appendLine("${java.time.Instant.ofEpochMilli(r.at)} ${if (r.fatal) "crash" else "caught error"} in ${r.version} (thread ${r.thread}); ${r.count} so far; reopened: ${r.resumed}")
+                            appendLine(r.stack)
+                        },
+                        ContentType.Text.Plain,
+                    )
+                }
                 get("/sync/peers") { call.respond(g.sync.peers()) }
                 put("/sync") {
                     val req = call.receive<FollowRequest>()

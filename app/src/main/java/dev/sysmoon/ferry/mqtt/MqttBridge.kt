@@ -48,6 +48,7 @@ import java.time.Instant
  *  base/logo           current channel's logo URL (retained)
  *  base/reminders      JSON: next reminder + list (retained)
  *  base/event          JSON events (not retained)
+ *  base/crash          JSON: last crash / caught error (retained)
  */
 class MqttBridge(private val g: AppGraph) {
     private var job: Job? = null
@@ -132,6 +133,10 @@ class MqttBridge(private val g: AppGraph) {
             }
             launch {
                 while (true) { g.updater.checkIfDue(); delay(30 * 60_000L) }
+            }
+            launch {
+                // Last crash / caught error, so HA can show (and alert on) it.
+                dev.sysmoon.ferry.CrashGuard.last.collect { r -> client.publish("$base/crash", crashJson(r).toString()) }
             }
             launch {
                 g.sleep.slept.collect {
@@ -243,6 +248,15 @@ class MqttBridge(private val g: AppGraph) {
             "entity_category" to "config",
             "icon" to "mdi:update",
         )))
+        c.publish("$p/sensor/ferry_$id/last_crash/config", json(common(id, name, base, "last_crash", "Last crash") + mapOf(
+            "state_topic" to "$base/crash",
+            "value_template" to "{{ value_json.at if value_json.at else None }}",
+            "device_class" to "timestamp",
+            "json_attributes_topic" to "$base/crash",
+            "json_attributes_template" to "{{ value_json.attributes | tojson }}",
+            "entity_category" to "diagnostic",
+            "icon" to "mdi:alert-octagon-outline",
+        )))
         c.publish("$p/event/ferry_$id/events/config", json(common(id, name, base, "events", "Events") + mapOf(
             "state_topic" to "$base/event",
             "event_types" to JsonArray(listOf("reminder", "sleep").map(::JsonPrimitive)),
@@ -266,6 +280,21 @@ class MqttBridge(private val g: AppGraph) {
             is dev.sysmoon.ferry.update.UpdateState.Installing -> put("in_progress", true)
             else -> put("in_progress", false)
         }
+    }
+
+    private fun crashJson(r: dev.sysmoon.ferry.CrashReport?): JsonObject = buildJsonObject {
+        put("at", r?.let { Instant.ofEpochMilli(it.at).toString() })
+        put("attributes", buildJsonObject {
+            if (r == null) return@buildJsonObject
+            put("error", r.error)
+            put("closed_ferry", r.fatal)
+            put("reopened_channel", r.resumed)
+            put("thread", r.thread)
+            put("version", r.version)
+            put("count", r.count)
+            // The top of the stack: enough to find the line without flooding HA.
+            put("where", r.stack.lineSequence().map { it.trim() }.filter { it.startsWith("at dev.sysmoon") }.take(3).joinToString(" | "))
+        })
     }
 
     private fun remindersJson(list: List<dev.sysmoon.ferry.data.Reminder>): JsonObject = buildJsonObject {

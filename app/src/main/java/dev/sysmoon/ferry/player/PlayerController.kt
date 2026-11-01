@@ -90,9 +90,16 @@ class PlayerController(
     context: Context,
     private val db: FerryDatabase,
     private val settings: Settings,
-    private val scope: CoroutineScope,
+    appScope: CoroutineScope,
     private val bbc: BbcIplayer,
 ) {
+    /**
+     * Everything the controller launches runs on the main thread: ExoPlayer may only be touched
+     * there, and a timer that read it from a background thread crashed Ferry. Database and
+     * settings calls are suspend functions that move off the main thread themselves.
+     */
+    private val scope = CoroutineScope(appScope.coroutineContext + Dispatchers.Main.immediate)
+
     private val _state = MutableStateFlow(NowPlaying())
     val state: StateFlow<NowPlaying> = _state.asStateFlow()
 
@@ -179,6 +186,70 @@ class PlayerController(
                 delay(30_000)
                 refreshProgrammes()
             }
+        }
+        // Backstop for anything the event-driven recovery misses.
+        scope.launch {
+            while (isActive) {
+                delay(BACKSTOP_TICK_MS)
+                backstop(System.currentTimeMillis())
+            }
+        }
+    }
+
+    // ---------- Backstop
+    private var stuckSince = 0L
+    private var lastFrames = -1L
+    private var lastPosition = -1L
+    private val backstopRetunes = ArrayDeque<Long>()
+
+    /**
+     * Every few seconds: is a live channel meant to be on but nothing is moving? Picture frozen
+     * (no new frames), position not advancing, buffering, or stuck on an error. After a minute of
+     * that, retune from scratch whatever state the player is in: first the same stream, then the
+     * channel's next stream. At most 4 times in 10 minutes, so a dead channel isn't hammered.
+     */
+    private fun backstop(now: Long) {
+        val s = _state.value
+        val wanted = s.channel != null && !s.catchup && streams.isNotEmpty() &&
+            (player.playWhenReady || s.state == PlaybackState.ERROR)
+        if (!wanted) { stuckSince = 0; return }
+        val counters = player.videoDecoderCounters
+        val frames = counters?.let {
+            it.ensureUpdated()
+            (it.renderedOutputBufferCount + it.skippedOutputBufferCount + it.droppedBufferCount).toLong()
+        }
+        val position = player.currentPosition
+        // Audio-only streams have no video counters: the position alone says it's moving.
+        val moving = player.isPlaying && position != lastPosition && (frames == null || frames != lastFrames)
+        lastFrames = frames ?: -1
+        lastPosition = position
+        if (moving) { stuckSince = 0; return }
+        if (stuckSince == 0L) { stuckSince = now; return }
+        if (now - stuckSince < BACKSTOP_STUCK_MS) return
+        stuckSince = 0
+        while (backstopRetunes.isNotEmpty() && backstopRetunes.first() < now - 10 * 60_000L) backstopRetunes.removeFirst()
+        if (backstopRetunes.size >= 4) return
+        backstopRetunes.addLast(now)
+        val why = when {
+            s.state == PlaybackState.ERROR -> "was stuck on an error"
+            player.playbackState == Player.STATE_BUFFERING -> "kept buffering"
+            else -> "froze"
+        }
+        android.util.Log.w("FerryPlayer", "Backstop: stream $why for a minute, retuning (state=${s.state}, exo=${player.playbackState})")
+        val channel = s.channel ?: return
+        player.stop()
+        // The first time the same stream, after that the next one (if the channel has backups).
+        val moveOn = backstopRetunes.size > 1 && streams.size > 1
+        if (moveOn) {
+            streamIndex = (streamIndex + 1) % streams.size
+            tried.clear(); tried += streamIndex
+        }
+        drops.clear()
+        playJob?.cancel()
+        playJob = scope.launch {
+            val notice = if (moveOn) "Stream $why — switching to stream ${streamIndex + 1} of ${streams.size}"
+                else "Stream $why — retuning"
+            playCurrentStream(channel, s.now, s.next, notice)
         }
     }
 
@@ -584,6 +655,9 @@ class PlayerController(
         private const val MID_STALL_TIMEOUT_MS = 10_000L
         /** Playing this long counts as steady: the next failure gets a fresh round of backups. */
         private const val STABLE_MS = 30_000L
+        private const val BACKSTOP_TICK_MS = 5_000L
+        /** Nothing moving this long (in any state) and the backstop retunes. */
+        private const val BACKSTOP_STUCK_MS = 60_000L
 
         /** Plain-language reason for a playback failure; falls back to ExoPlayer's code name. */
         fun describe(error: PlaybackException, catchup: Boolean): String {

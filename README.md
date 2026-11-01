@@ -227,6 +227,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting) and `sleep` (timer stopped playback) |
 | `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
+| `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel |
 
 Topics (`base = ferry/<device-id>`):
 
@@ -325,6 +326,7 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | GET/PUT/DELETE | `/sync` | follow status / follow `{url, pin}` / stop following |
 | GET | `/sync/peers` | other Ferry boxes found on the network |
 | POST | `/sync/now` | check the followed box now |
+| GET | `/debug/crash` | the last crash / caught error with its stack trace (plain text) |
 
 ## Layout
 
@@ -354,6 +356,13 @@ app/src/main/assets/web/index.html   config page (no build step)
   it moves through the channel's other streams (each once), then retries from the best one; it only gives up after 3 full rounds in a minute.
   A stream that has played steadily for 30 s resets the round. HLS streams that fall behind the live
   window jump back to live instead of switching.
+- **Backstop:** if a live channel is meant to be on but nothing has moved for a minute — frozen picture,
+  endless buffering, or stuck on an error — Ferry retunes from scratch: the same stream first, then the
+  channel's next stream (at most 4 times in 10 minutes).
+- **Crash protection:** an error in background work (guide refresh, timers, MQTT) is recorded and Ferry
+  carries on. If Ferry does crash while a live channel is on, Android restarts it and Ferry reopens on
+  that channel within a few seconds (at most twice in 10 minutes, so a crash loop can't keep it cycling).
+  Either way it shows up in HA as **Last crash**. Ferry's player only ever runs on the main thread.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.
 - Most providers allow one stream per account at a time; a second box (or another app) on the same
   account gets "provider refused the stream (HTTP 407)".
