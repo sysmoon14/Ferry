@@ -362,6 +362,36 @@ class ConfigServer(private val g: AppGraph) {
                     }
                     call.respond(HttpStatusCode.Accepted, ErrorDto("working — ask again in a few seconds"))
                 }
+                // What ESPN knows about broadcasters, by region: ?event=<id>&league=eng.1&region=gb&lang=en
+                // Returns every "broadcasts"/"geoBroadcasts" block found in the summary.
+                get("/debug/espn") {
+                    val event = call.request.queryParameters["event"].orEmpty().filter { it.isDigit() }
+                    val league = call.request.queryParameters["league"]?.takeIf { it.matches(Regex("[a-z0-9.]+")) } ?: "eng.1"
+                    val region = call.request.queryParameters["region"]?.takeIf { it.matches(Regex("[a-z]{2}")) }
+                    val lang = call.request.queryParameters["lang"]?.takeIf { it.matches(Regex("[a-z]{2}")) }
+                    val url = buildString {
+                        append("https://site.api.espn.com/apis/site/v2/sports/soccer/$league/summary?event=$event")
+                        region?.let { append("&region=$it") }
+                        lang?.let { append("&lang=$it") }
+                    }
+                    val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        g.http.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { it.body?.string().orEmpty() }
+                    }
+                    val found = mutableListOf<kotlinx.serialization.json.JsonElement>()
+                    fun walk(e: kotlinx.serialization.json.JsonElement, path: String) {
+                        when (e) {
+                            is kotlinx.serialization.json.JsonObject -> e.forEach { (k, v) ->
+                                if (k == "broadcasts" || k == "geoBroadcasts" || k == "broadcast") {
+                                    found += kotlinx.serialization.json.buildJsonObject { put("at", kotlinx.serialization.json.JsonPrimitive("$path.$k")); put("value", v) }
+                                } else walk(v, "$path.$k")
+                            }
+                            is kotlinx.serialization.json.JsonArray -> e.forEachIndexed { i, v -> walk(v, "$path[$i]") }
+                            else -> Unit
+                        }
+                    }
+                    runCatching { walk(kotlinx.serialization.json.Json.parseToJsonElement(text), "") }
+                    call.respond(kotlinx.serialization.json.JsonArray(found))
+                }
                 get("/football/candidates/now") {
                     val id = call.request.queryParameters["event"].orEmpty()
                     val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
