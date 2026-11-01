@@ -375,9 +375,10 @@ app/src/main/assets/web/index.html   config page (no build step)
   window jump back to live instead of switching.
 - **Buffering:** Ferry starts a stream after 1.5 s of video, then builds up to 50 s (or 48 MB) of
   buffer; after a rebuffer it waits for 5 s of video before resuming, so one Wi-Fi wobble doesn't
-  turn into a run of stalls. Playback is *tunnelled* where the TV's decoder supports it (video goes
-  straight to the display with A/V sync in hardware — what 4K HDR needs), and if the preferred
-  decoder won't start Ferry falls back to the next one.
+  turn into a run of stalls. Playback is *tunnelled* where the TV supports it (video goes straight to
+  the display with A/V sync in hardware — what 4K HDR needs; the Shield does, the Philips' audio
+  path doesn't: Ferry notices the first failure, turns tunnelling off for good on that box and
+  carries on), and if the preferred decoder won't start Ferry falls back to the next one.
 - The failover rules live in `player/Recovery.kt` (no player in it, so they're unit-tested):
   restart the same stream (max 3 a minute) → next untried stream → a round from the best one
   (max 3 rounds a minute) → give up.

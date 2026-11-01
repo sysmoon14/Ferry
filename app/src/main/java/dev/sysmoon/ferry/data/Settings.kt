@@ -57,6 +57,7 @@ class Settings(private val context: Context) {
         val skyOverrides = stringSetPreferencesKey("sky_overrides")
         val backupEpgUrls = stringPreferencesKey("backup_epg_urls")
         val resumeLastChannel = booleanPreferencesKey("resume_last_channel")
+        val tunnelling = booleanPreferencesKey("tunnelling")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -204,6 +205,9 @@ class Settings(private val context: Context) {
     suspend fun setBackupEpgUrls(urls: List<String>) = store.edit { it[Keys.backupEpgUrls] = urls.joinToString("\n") }
 
     /** Open straight into the last watched channel when Ferry is launched. */
+    /** Tunnelled playback (decoder straight to display). Switched off for good on a box whose audio path can't do it. */
+    suspend fun tunnelling(): Boolean = store.data.first()[Keys.tunnelling] ?: true
+    suspend fun setTunnelling(on: Boolean) = store.edit { it[Keys.tunnelling] = on }
     suspend fun resumeLastChannel(): Boolean = store.data.first()[Keys.resumeLastChannel] ?: true
     suspend fun setResumeLastChannel(on: Boolean) = store.edit { it[Keys.resumeLastChannel] = on }
 

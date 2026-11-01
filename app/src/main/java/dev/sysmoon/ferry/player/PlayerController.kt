@@ -105,6 +105,10 @@ class PlayerController(
     val state: StateFlow<NowPlaying> = _state.asStateFlow()
 
     val player: ExoPlayer
+    private val trackSelector: androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+    /** Tunnelled playback is on (see [Settings.tunnelling]). */
+    @Volatile var tunnelling: Boolean = false
+        private set
 
     init {
         val http = DefaultHttpDataSource.Factory()
@@ -129,8 +133,11 @@ class PlayerController(
         // A/V sync done in hardware — on TV chipsets (MediaTek, Tegra) it's the difference between
         // smooth 4K HDR and dropped frames. Only used where the decoder supports it.
         val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
-        val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
-            setParameters(buildUponParameters().setTunnelingEnabled(true))
+        trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context)
+        // Off until the saved setting is read: a box that couldn't do it last time never tries again.
+        scope.launch {
+            tunnelling = settings.tunnelling()
+            trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(tunnelling))
         }
         player = ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http, extractors))
@@ -178,6 +185,18 @@ class PlayerController(
                 sync()
             }
             override fun onPlayerError(error: PlaybackException) {
+                // Some TVs (the Philips' MediaTek audio HAL, for one) can't open a tunnelled audio
+                // track. Turn tunnelling off for good on this box and carry on with the same stream.
+                if (tunnelling && (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+                        error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED)) {
+                    android.util.Log.w("FerryPlayer", "Tunnelled playback failed (${error.errorCodeName}): switching it off on this TV")
+                    tunnelling = false
+                    trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(false))
+                    scope.launch { settings.setTunnelling(false) }
+                    player.prepare()
+                    player.playWhenReady = true
+                    return
+                }
                 val live = !_state.value.catchup && _state.value.channel != null
                 // HLS fell behind the live window (common after a hiccup): jump back to live
                 // on the same stream rather than treating it as dead.
@@ -609,7 +628,6 @@ class PlayerController(
      * (seen as "playing" with no channel in Home Assistant).
      */
     suspend fun stop() = withContext(Dispatchers.Main.immediate) {
-        android.util.Log.i("FerryPlayer", "stop() while ${_state.value.state} on ${_state.value.channel?.name}", Throwable("stop() called from"))
         playJob?.cancel()
         watchdog?.cancel()
         stallJob?.cancel()
