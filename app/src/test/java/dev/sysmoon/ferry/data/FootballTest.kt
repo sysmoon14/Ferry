@@ -29,7 +29,7 @@ class FootballTest {
         assertEquals("Chelsea", f.away.name)
         assertEquals(MatchState.UPCOMING, f.state)
         assertEquals(java.time.Instant.parse("2026-10-31T15:00:00Z").toEpochMilli(), f.kickoff)
-        assertEquals(listOf("USA Net", "Peacock"), f.broadcasts)
+        assertEquals(listOf("USA Net", "USA Network", "Peacock"), f.broadcasts)
         assertEquals(null, f.homeScore)
         val live = list[1]
         assertEquals(MatchState.LIVE, live.state)
