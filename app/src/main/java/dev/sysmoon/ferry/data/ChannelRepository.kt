@@ -7,7 +7,6 @@ import dev.sysmoon.ferry.parse.M3uEntry
 import dev.sysmoon.ferry.parse.M3uParser
 import dev.sysmoon.ferry.parse.XmltvParser
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -146,10 +145,10 @@ class ChannelRepository(
      * matched by guide ID or channel name. Never overrides the provider's listings.
      */
     suspend fun fillGuideGaps() = withContext(Dispatchers.IO) {
-        db.programmes().deleteForSource(SKY_GUIDE_SOURCE)
-        db.programmes().deleteForSource(BACKUP_GUIDE_SOURCE)
-        db.programmes().deleteForSource(SPORTS_GUIDE_SOURCE)
+        // New rows replace old ones in place (same channel + start); whatever this pass doesn't
+        // rewrite is dropped at the end, so the guide never goes blank while it runs.
         val now = System.currentTimeMillis()
+        val generation = now
         val covered = db.programmes().coveredKeys(now, now + 6 * 3_600_000L).toHashSet()
         val missing = db.channels().guideRows().filter { it.epgKey !in covered }.distinctBy { it.epgKey }
         val filled = HashSet<String>()
@@ -170,7 +169,7 @@ class ChannelRepository(
                     list.mapIndexedNotNull { i, e ->
                         val stop = if (e.durationMs > 0) e.start + e.durationMs else list.getOrNull(i + 1)?.start ?: (e.start + 1_800_000)
                         if (stop < now - 3_600_000L) null
-                        else ProgrammeEntity(key, e.start, stop, e.title, e.synopsis, SKY_GUIDE_SOURCE)
+                        else ProgrammeEntity(key, e.start, stop, e.title, e.synopsis, SKY_GUIDE_SOURCE, generation)
                     }
                 }
                 programmes.chunked(BATCH).forEach { db.programmes().insert(it) }
@@ -199,17 +198,18 @@ class ChannelRepository(
                     ) { p ->
                         if (p.stop < now - 3_600_000L) return@parse
                         idMap[p.channel]?.forEach { key ->
-                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, BACKUP_GUIDE_SOURCE)
+                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, BACKUP_GUIDE_SOURCE, generation)
                             filled += key
                         }
-                        if (batch.size >= BATCH) { runBlocking { db.programmes().insert(batch.toList()) }; batch.clear() }
+                        if (batch.size >= BATCH) { db.programmes().insert(batch.toList()); batch.clear() }
                     }
                 }
                 if (batch.isNotEmpty()) db.programmes().insert(batch)
             }.onFailure { errors += "${redact(url)}: ${it.message ?: it.javaClass.simpleName}" }
         }
         val fromBackup = filled.size - fromSky
-        val fromSports = if (settings.sportsGuides()) fillSportsGuides(covered, filled, now, errors) else 0
+        val fromSports = if (settings.sportsGuides()) fillSportsGuides(covered, filled, now, generation, errors) else 0
+        for (source in listOf(SKY_GUIDE_SOURCE, BACKUP_GUIDE_SOURCE, SPORTS_GUIDE_SOURCE)) db.programmes().deleteStale(source, generation)
         gapReport = GapReport(missing.size, fromSky, fromBackup, errors, fromSportsGuides = fromSports)
         Log.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds $fromBackup, sports guides $fromSports")
     }
@@ -219,7 +219,7 @@ class ChannelRepository(
      * (beIN's own feed, then up to [MAX_COUNTRY_FEEDS] countries: football-rights markets first).
      * Only the next two days are kept, to keep the database small.
      */
-    private suspend fun fillSportsGuides(covered: Set<String>, alreadyFilled: Set<String>, now: Long, errors: MutableList<String>): Int {
+    private suspend fun fillSportsGuides(covered: Set<String>, alreadyFilled: Set<String>, now: Long, generation: Long, errors: MutableList<String>): Int {
         data class Row(val key: String, val tvg: String?, val name: String, val country: String?)
         val rows = db.channels().allPrimaries()
             .filter { it.epgKey !in covered && it.epgKey !in alreadyFilled && TeamNames.isSportsChannel(it) }
@@ -260,10 +260,10 @@ class ChannelRepository(
                     ) { p ->
                         if (p.stop < now - 6 * 3_600_000L || p.start > now + 2 * 86_400_000L) return@parse
                         idMap[p.channel]?.forEach { key ->
-                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, SPORTS_GUIDE_SOURCE)
+                            batch += ProgrammeEntity(key, p.start, p.stop, p.title, p.description, SPORTS_GUIDE_SOURCE, generation)
                             filled += key
                         }
-                        if (batch.size >= BATCH) { runBlocking { db.programmes().insert(batch.toList()) }; batch.clear() }
+                        if (batch.size >= BATCH) { db.programmes().insert(batch.toList()); batch.clear() }
                     }
                 }
                 if (batch.isNotEmpty()) db.programmes().insert(batch)
@@ -374,9 +374,10 @@ class ChannelRepository(
     }
 
     private suspend fun refreshBbcSchedules(src: SourceEntity) {
-        val programmes = bbc.schedules(bbcRegion(src), src.id)
-        db.programmes().deleteForSource(src.id)
+        val generation = System.currentTimeMillis()
+        val programmes = bbc.schedules(bbcRegion(src), src.id).map { it.copy(generation = generation) }
         programmes.chunked(BATCH).forEach { db.programmes().insert(it) }
+        db.programmes().deleteStale(src.id, generation)
         Log.i(TAG, "${src.name}: ${programmes.size} BBC schedule entries")
     }
 
@@ -391,19 +392,20 @@ class ChannelRepository(
         val archive = db.channels().catchupKeys(src.id)
             .associate { it.epgKey to now - it.days.coerceAtMost(7) * 86_400_000L }
         val batch = ArrayList<ProgrammeEntity>(BATCH)
-        db.programmes().deleteForSource(src.id)
+        val generation = now
         open(url).use { input ->
             XmltvParser.parse(input, Xml.newPullParser(), accept = { it in keys }) { p ->
                 if (p.stop < (archive[p.channel] ?: cutoff)) return@parse
-                batch += ProgrammeEntity(p.channel, p.start, p.stop, p.title, p.description, src.id)
+                batch += ProgrammeEntity(p.channel, p.start, p.stop, p.title, p.description, src.id, generation)
                 if (batch.size >= BATCH) {
-                    // Parser callback isn't suspending; we're already on Dispatchers.IO.
-                    runBlocking { db.programmes().insert(batch.toList()) }
+                    db.programmes().insert(batch.toList())
                     batch.clear()
                 }
             }
         }
         if (batch.isNotEmpty()) db.programmes().insert(batch)
+        // Listings the feed no longer carries (and anything older than the archive window).
+        db.programmes().deleteStale(src.id, generation)
     }
 
     private fun open(url: String): InputStream {

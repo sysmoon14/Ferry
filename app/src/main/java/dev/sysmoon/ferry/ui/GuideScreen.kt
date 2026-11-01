@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, androidx.tv.material3.ExperimentalTvMaterial3Api::class)
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class, androidx.tv.material3.ExperimentalTvMaterial3Api::class)
 
 package dev.sysmoon.ferry.ui
 
@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -319,7 +320,7 @@ fun GuideScreen(
                             modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 14.dp),
                         )
                         LazyColumn(
-                            Modifier.weight(1f),
+                            Modifier.weight(1f).focusRestorer(),
                             state = railState,
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                             contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
@@ -406,7 +407,7 @@ fun GuideScreen(
                     )
                 } else {
                     LazyColumn(
-                        Modifier.weight(1f),
+                        Modifier.weight(1f).focusRestorer(),
                         state = listState,
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),

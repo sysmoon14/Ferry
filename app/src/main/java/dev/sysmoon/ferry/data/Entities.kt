@@ -94,4 +94,6 @@ data class ProgrammeEntity(
     val title: String,
     val description: String?,
     val sourceId: Long,
+    /** Which refresh wrote this row; a refresh deletes its source's rows from older generations when done. */
+    @androidx.room.ColumnInfo(defaultValue = "0") val generation: Long = 0,
 )

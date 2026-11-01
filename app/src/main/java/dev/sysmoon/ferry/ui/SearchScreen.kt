@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package dev.sysmoon.ferry.ui
 
 import androidx.compose.foundation.background
@@ -34,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -142,7 +145,7 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
         )
         Spacer(Modifier.height(10.dp))
         LazyColumn(
-            Modifier.weight(1f),
+            Modifier.weight(1f).focusRestorer(),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
         ) {

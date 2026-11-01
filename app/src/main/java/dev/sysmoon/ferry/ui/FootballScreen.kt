@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package dev.sysmoon.ferry.ui
 
 import androidx.activity.compose.BackHandler
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -220,7 +223,7 @@ private fun FixtureList(
     val now = System.currentTimeMillis()
     val ordered = fixtures.filter { it.state != MatchState.FINISHED || now - it.kickoff < 20 * 3_600_000L }
         .sortedWith(compareBy({ if (it.state == MatchState.LIVE) 0 else 1 }, { it.kickoff }))
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+    LazyColumn(Modifier.focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
         var lastDay = ""
         ordered.forEach { f ->
             val d = if (f.state == MatchState.LIVE) "Live now" else day.format(Date(f.kickoff))
@@ -296,7 +299,7 @@ private fun ClubList(teams: List<Team>, myTeams: Set<String>, onPick: (Team) -> 
     if (teams.isEmpty()) { Text("Loading clubs…", color = FerryColors.Muted); return }
     val mine = teams.filter { it.id in myTeams }
     val ordered = mine + teams.filterNot { it.id in myTeams }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+    LazyColumn(Modifier.focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
         items(ordered, key = { it.id }) { t ->
             ListItem(
                 selected = false,

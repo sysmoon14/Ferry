@@ -35,7 +35,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: roughly halves the APK and speeds up cold starts on TV boxes. Keep rules for the
+            // reflection-heavy libraries live in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("debug") // sideload builds; swap for a real key later
         }
     }

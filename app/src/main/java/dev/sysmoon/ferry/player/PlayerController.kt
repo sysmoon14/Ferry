@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -114,13 +115,27 @@ class PlayerController(
         val extractors = DefaultExtractorsFactory()
             .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
             .setConstantBitrateSeekingEnabled(true)
-        // Live IPTV: start fast, buffer modestly. Tune here for zap speed vs. stability.
+        // Live IPTV: start fast (1.5 s), then build a deep buffer so a wobbly Wi-Fi moment doesn't
+        // show as "buffering" — and after one does, wait for 5 s of video before resuming so it
+        // doesn't happen again straight away. Capped in bytes too, so 4K streams don't eat memory
+        // (48 MB ≈ 15 s at 25 Mbit/s, which is plenty; SD streams get the full 50 s).
         val load = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(8_000, 30_000, 1_000, 2_000)
+            .setBufferDurationsMs(15_000, 50_000, 1_500, 5_000)
+            .setTargetBufferBytes(48 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
             .build()
-        player = ExoPlayer.Builder(context)
+        // Decoder fallback: if the TV's preferred HEVC/AVC decoder fails to start, try the next
+        // one rather than erroring. Tunnelling: video goes straight from decoder to display with
+        // A/V sync done in hardware — on TV chipsets (MediaTek, Tegra) it's the difference between
+        // smooth 4K HDR and dropped frames. Only used where the decoder supports it.
+        val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
+            setParameters(buildUponParameters().setTunnelingEnabled(true))
+        }
+        player = ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http, extractors))
             .setLoadControl(load)
+            .setTrackSelector(trackSelector)
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -157,7 +172,7 @@ class PlayerController(
                     // Playing steadily again: a later failure starts a fresh round of backups.
                     stableJob = scope.launch(Dispatchers.Main) {
                         delay(STABLE_MS)
-                        tried.clear(); tried += streamIndex
+                        recovery.stable()
                     }
                 }
                 sync()
@@ -200,7 +215,6 @@ class PlayerController(
     private var stuckSince = 0L
     private var lastFrames = -1L
     private var lastPosition = -1L
-    private val backstopRetunes = ArrayDeque<Long>()
 
     /**
      * Every few seconds: is a live channel meant to be on but nothing is moving? Picture frozen
@@ -227,27 +241,18 @@ class PlayerController(
         if (stuckSince == 0L) { stuckSince = now; return }
         if (now - stuckSince < BACKSTOP_STUCK_MS) return
         stuckSince = 0
-        while (backstopRetunes.isNotEmpty() && backstopRetunes.first() < now - 10 * 60_000L) backstopRetunes.removeFirst()
-        if (backstopRetunes.size >= 4) return
-        backstopRetunes.addLast(now)
+        val action = recovery.onBackstop() ?: return
         val why = when {
             s.state == PlaybackState.ERROR -> "was stuck on an error"
             player.playbackState == Player.STATE_BUFFERING -> "kept buffering"
             else -> "froze"
         }
-        android.util.Log.w("FerryPlayer", "Backstop: stream $why for a minute, retuning (state=${s.state}, exo=${player.playbackState})")
+        android.util.Log.w("FerryPlayer", "Backstop: stream $why for a minute, $action (state=${s.state}, exo=${player.playbackState})")
         val channel = s.channel ?: return
         player.stop()
-        // The first time the same stream, after that the next one (if the channel has backups).
-        val moveOn = backstopRetunes.size > 1 && streams.size > 1
-        if (moveOn) {
-            streamIndex = (streamIndex + 1) % streams.size
-            tried.clear(); tried += streamIndex
-        }
-        drops.clear()
         playJob?.cancel()
         playJob = scope.launch {
-            val notice = if (moveOn) "Stream $why — switching to stream ${streamIndex + 1} of ${streams.size}"
+            val notice = if (action is Recovery.Action.Switch) "Stream $why — switching to stream ${action.index + 1} of ${streams.size}"
                 else "Stream $why — retuning"
             playCurrentStream(channel, s.now, s.next, notice)
         }
@@ -281,13 +286,13 @@ class PlayerController(
 
     // Streams of the channel being played, best first, and which one is on.
     @Volatile private var streams: List<ChannelEntity> = emptyList()
-    @Volatile private var streamIndex = 0
+    /** Which stream of [streams] is on, and what to do when it fails. */
+    private val recovery = Recovery()
+    private val streamIndex: Int get() = recovery.index
     @Volatile private var streamStarted = false
     private var watchdog: Job? = null
     private var stallJob: Job? = null
     private var stableJob: Job? = null
-    /** Streams tried since the channel last played steadily, so failover cycles through each once. */
-    private val tried = mutableSetOf<Int>()
 
     /**
      * Fire-and-forget start for UI callers. Runs in the app scope so it survives the guide
@@ -343,10 +348,7 @@ class PlayerController(
         }
         val list = if (primary.streamCount > 1) streamsFor(primary) else listOf(primary)
         streams = list
-        streamIndex = list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0)
-        tried.clear(); tried += streamIndex
-        drops.clear()
-        sameRestarts.clear()
+        recovery.tuned(list.size, list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0))
         // Look up now/next first so the banner never flashes "No guide data".
         val (now, next) = programmesFor(primary)
         playCurrentStream(primary, now, next, notice = null)
@@ -403,75 +405,48 @@ class PlayerController(
         }
     }
 
-    private val drops = ArrayDeque<Long>()
-
     /**
-     * The live stream failed, dropped or stalled (before or during playback). Try the channel's
-     * other streams in turn (each once per failure, wrapping round from the current one); when
-     * they've all been tried, retry after a pause, giving up after 3 retries a minute.
+     * The live stream failed, dropped or stalled (before or during playback). [Recovery] decides:
+     * restart the same stream, switch to the channel's next untried stream, retry a round from the
+     * best one after a pause, or give up.
      */
     private fun reconnect(reason: String, error: PlaybackException? = null) {
         val current = _state.value
         val channel = current.channel ?: return
-        // First, if this stream had been playing, just restart it (what flicking away and back
-        // does): same quality, same timing, no jump in a live match. Only if that doesn't stick
-        // (fails before playing again, or 3 restarts in a minute) move on to other streams.
-        if (streamStarted && restartSame(channel, current, reason)) return
-        if (failover(reason)) return
-        val now = System.currentTimeMillis()
-        drops.addLast(now)
-        while (drops.isNotEmpty() && drops.first() < now - 60_000) drops.removeFirst()
-        if (drops.size > 3) {
-            val msg = when {
-                error != null -> describe(error, false)
-                else -> "the provider keeps dropping the stream — another device may be using the account"
-            }
-            _state.update { it.copy(state = PlaybackState.ERROR, error = msg) }
-            return
-        }
-        playJob?.cancel()
-        playJob = scope.launch {
-            val what = if (streams.size > 1) "All ${streams.size} streams $reason" else "Stream $reason"
-            _state.update { it.copy(state = PlaybackState.BUFFERING, notice = "$what — reconnecting…") }
-            delay(1_500)
-            // Start the next round from the best stream.
-            if (streams.size > 1) { streamIndex = 0; tried.clear(); tried += 0 }
-            playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream $reason")
-        }
-    }
-
-    private val sameRestarts = ArrayDeque<Long>()
-
-    private fun restartSame(channel: ChannelEntity, current: NowPlaying, reason: String): Boolean {
-        val now = System.currentTimeMillis()
-        while (sameRestarts.isNotEmpty() && sameRestarts.first() < now - 60_000) sameRestarts.removeFirst()
-        if (sameRestarts.size >= 3) return false
-        sameRestarts.addLast(now)
-        playJob?.cancel()
-        playJob = scope.launch {
-            playCurrentStream(channel, current.now, current.next, notice = "Stream $reason — restarting it")
-        }
-        return true
-    }
-
-    /** Moves to the next untried stream of the current channel, keeping the banner on the same channel. */
-    private fun failover(reason: String): Boolean {
-        val current = _state.value
-        val channel = current.channel ?: return false
-        val size = streams.size
-        if (size < 2) return false
-        val next = (1 until size).map { (streamIndex + it) % size }.firstOrNull { it !in tried } ?: return false
         val from = streamIndex
-        playJob?.cancel()
-        playJob = scope.launch {
-            streamIndex = next
-            tried += next
-            val label = StreamQuality.parse(streams[next].name).label
-            val notice = "Stream ${from + 1} $reason — switching to stream ${next + 1} of $size" +
-                (label?.let { " ($it)" } ?: "")
-            playCurrentStream(channel, current.now, current.next, notice)
+        when (val action = recovery.onFailure(hadStarted = streamStarted)) {
+            Recovery.Action.RestartSame -> {
+                playJob?.cancel()
+                playJob = scope.launch {
+                    playCurrentStream(channel, current.now, current.next, notice = "Stream $reason — restarting it")
+                }
+            }
+            is Recovery.Action.Switch -> {
+                playJob?.cancel()
+                playJob = scope.launch {
+                    val label = StreamQuality.parse(streams[action.index].name).label
+                    val notice = "Stream ${from + 1} $reason — switching to stream ${action.index + 1} of ${streams.size}" +
+                        (label?.let { " ($it)" } ?: "")
+                    playCurrentStream(channel, current.now, current.next, notice)
+                }
+            }
+            Recovery.Action.RetryRound -> {
+                playJob?.cancel()
+                playJob = scope.launch {
+                    val what = if (streams.size > 1) "All ${streams.size} streams $reason" else "Stream $reason"
+                    _state.update { it.copy(state = PlaybackState.BUFFERING, notice = "$what — reconnecting…") }
+                    delay(1_500)
+                    playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream $reason")
+                }
+            }
+            Recovery.Action.GiveUp -> {
+                val msg = when {
+                    error != null -> describe(error, false)
+                    else -> "the provider keeps dropping the stream — another device may be using the account"
+                }
+                _state.update { it.copy(state = PlaybackState.ERROR, error = msg) }
+            }
         }
-        return true
     }
 
     /** Catch-up is possible for programmes that have ended (or started) within the archive window. */
@@ -493,7 +468,7 @@ class PlayerController(
             // A merged row's archive may live on one of its other streams.
             val stream = if (channel.streamCount > 1) streamsFor(channel).firstOrNull { it.catchupDays > 0 } ?: channel else channel
             streams = listOf(stream)
-            streamIndex = 0
+            recovery.tuned(1, 0)
             zapScope = scope ?: zapScope
             val length = programme.stop - programme.start
             val base = (offsetMs.coerceIn(0, (length - 60_000).coerceAtLeast(0)) / 60_000) * 60_000
@@ -652,7 +627,7 @@ class PlayerController(
     companion object {
         private const val STALL_TIMEOUT_MS = 12_000L
         /** Buffering this long after the stream was playing counts as a failure. */
-        private const val MID_STALL_TIMEOUT_MS = 10_000L
+        private const val MID_STALL_TIMEOUT_MS = 15_000L
         /** Playing this long counts as steady: the next failure gets a fresh round of backups. */
         private const val STABLE_MS = 30_000L
         private const val BACKSTOP_TICK_MS = 5_000L

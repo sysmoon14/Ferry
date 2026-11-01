@@ -17,13 +17,14 @@ data class XmltvProgramme(
  * so whole-country guides can be filtered down to the channels you actually have.
  */
 object XmltvParser {
-    fun parse(
+    suspend fun parse(
         input: InputStream,
         parser: XmlPullParser,
         accept: (String) -> Boolean = { true },
         /** Called for each <channel> (they come before the programmes) with its id and display names. */
         onChannel: ((id: String, names: List<String>) -> Unit)? = null,
-        onProgramme: (XmltvProgramme) -> Unit,
+        /** Suspending, so callers can write batches to the database without blocking a thread. */
+        onProgramme: suspend (XmltvProgramme) -> Unit,
     ) {
         parser.setInput(input, null)
         var event = parser.eventType
@@ -43,7 +44,7 @@ object XmltvParser {
                 val start = XmltvTime.parse(parser.getAttributeValue(null, "start"))
                 val stop = XmltvTime.parse(parser.getAttributeValue(null, "stop"))
                 if (channel != null && start != null && stop != null && accept(channel)) {
-                    readProgramme(parser, channel, start, stop)?.let(onProgramme)
+                    readProgramme(parser, channel, start, stop)?.let { onProgramme(it) }
                 } else {
                     skip(parser)
                 }

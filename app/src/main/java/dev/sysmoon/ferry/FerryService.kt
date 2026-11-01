@@ -48,7 +48,17 @@ class FerryService : Service() {
         }
         refreshJob = g.scope.launch {
             delay(20_000) // a due refresh (thousands of channels) shouldn't compete with start-up
+            var heldSince = 0L
             while (isActive) {
+                // Reloading 10k channels and several guides is minutes of CPU and I/O: not while
+                // someone is watching. Wait for playback to stop, for at most two hours.
+                val playing = g.player.state.value.state == dev.sysmoon.ferry.player.PlaybackState.PLAYING
+                if (playing && (heldSince == 0L || System.currentTimeMillis() - heldSince < 2 * 3_600_000L)) {
+                    if (heldSince == 0L) heldSince = System.currentTimeMillis()
+                    delay(5 * 60_000L)
+                    continue
+                }
+                heldSince = 0L
                 runCatching { g.repository.refreshDue() }.onFailure { Log.w(TAG, "refresh loop", it) }
                 delay(30 * 60_000L)
             }

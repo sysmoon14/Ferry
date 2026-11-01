@@ -170,6 +170,13 @@ From the controls row (**☾ Sleep**) or Home Assistant's `number.<name>_sleep_t
 Ferry shows a warning; any button keeps watching. When it runs out playback stops, Ferry returns to the
 guide, and HA gets a `sleep` event (handy for turning the TV off).
 
+### Refreshes
+
+Playlists and guides reload every 12 hours per source (or from **Refresh now**), but never while
+something is playing: the refresh waits for playback to stop (at most two hours). New listings
+replace old ones in place and whatever a source no longer lists is dropped afterwards, so the guide
+never goes blank mid-refresh.
+
 ### Guide gaps
 
 After each refresh Ferry looks for channels with nothing in the guide for the next few hours and fills them,
@@ -359,12 +366,21 @@ app/src/main/assets/web/index.html   config page (no build step)
 ## Notes / known gaps
 
 - Up on the remote = previous channel in the list, Down = next.
-- CI publishes `ferry.apk` (release, recommended) and `ferry-debug.apk` to the rolling `nightly` release.
+- CI publishes `ferry.apk` (release: R8-minified, about half the size of debug, recommended) and
+  `ferry-debug.apk` to the rolling `nightly` release.
 - If a live stream that was playing fails, drops or freezes for 10 s, Ferry first restarts the same stream
   (same quality, same timing — like flicking away and back; up to 3 times a minute). If that doesn't stick
   it moves through the channel's other streams (each once), then retries from the best one; it only gives up after 3 full rounds in a minute.
   A stream that has played steadily for 30 s resets the round. HLS streams that fall behind the live
   window jump back to live instead of switching.
+- **Buffering:** Ferry starts a stream after 1.5 s of video, then builds up to 50 s (or 48 MB) of
+  buffer; after a rebuffer it waits for 5 s of video before resuming, so one Wi-Fi wobble doesn't
+  turn into a run of stalls. Playback is *tunnelled* where the TV's decoder supports it (video goes
+  straight to the display with A/V sync in hardware — what 4K HDR needs), and if the preferred
+  decoder won't start Ferry falls back to the next one.
+- The failover rules live in `player/Recovery.kt` (no player in it, so they're unit-tested):
+  restart the same stream (max 3 a minute) → next untried stream → a round from the best one
+  (max 3 rounds a minute) → give up.
 - **Backstop:** if a live channel is meant to be on but nothing has moved for a minute — frozen picture,
   endless buffering, or stuck on an error — Ferry retunes from scratch: the same stream first, then the
   channel's next stream (at most 4 times in 10 minutes).

@@ -15,9 +15,21 @@ import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class FerryApp : Application() {
+class FerryApp : Application(), coil.ImageLoaderFactory {
     lateinit var graph: AppGraph
         private set
+
+    /**
+     * Channel logos: ten thousand small images. A modest memory cache (8% of the app's heap
+     * rather than Coil's default 25%) and a 48 MB disk cache keep logos quick without the
+     * decode cache growing into tens of megabytes on a 2 GB TV.
+     */
+    override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this)
+        .memoryCache { coil.memory.MemoryCache.Builder(this).maxSizePercent(0.08).build() }
+        .diskCache { coil.disk.DiskCache.Builder().directory(cacheDir.resolve("logos")).maxSizeBytes(48L * 1024 * 1024).build() }
+        .respectCacheHeaders(false)
+        .crossfade(false)
+        .build()
 
     /** The graph, or null if a crash happens before it's built. */
     val graphOrNull: AppGraph? get() = if (::graph.isInitialized) graph else null

@@ -229,12 +229,17 @@ interface ProgrammeDao {
     @Query("DELETE FROM programmes WHERE sourceId = :sourceId")
     suspend fun deleteForSource(sourceId: Long)
 
+    /** After a refresh: drop the rows a source wrote before [generation] (the ones it no longer lists). */
+    @Query("DELETE FROM programmes WHERE sourceId = :sourceId AND generation < :generation")
+    suspend fun deleteStale(sourceId: Long, generation: Long)
+
     /** Re-emits whenever the programmes table changes (e.g. an EPG refresh lands). */
     @Query("SELECT COUNT(*) FROM programmes")
     fun observeCount(): Flow<Int>
 
     /** Guide keys that have something on in [from, until), from any source. */
-    @Query("SELECT DISTINCT channelKey FROM programmes WHERE stop > :from AND start < :until")
+    /** Channels with listings from a real source (gap-fill rows, sourceId < 0, don't count). */
+    @Query("SELECT DISTINCT channelKey FROM programmes WHERE sourceId >= 0 AND stop > :from AND start < :until")
     suspend fun coveredKeys(from: Long, until: Long): List<String>
 
     @Query("DELETE FROM programmes WHERE stop < :before")
