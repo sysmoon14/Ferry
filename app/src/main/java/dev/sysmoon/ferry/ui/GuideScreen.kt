@@ -199,8 +199,8 @@ fun GuideScreen(
 
     data class RailEntry(val key: String, val label: String, val icon: ImageVector? = null)
     val rail = buildList {
-        if (recents.isNotEmpty()) add(RailEntry(RECENT, "Recently watched", FerryIcons.History))
-        add(RailEntry(ALL, if (sky) "All Sky channels" else "All channels", FerryIcons.Tv))
+        if (recents.isNotEmpty()) add(RailEntry(RECENT, "Recently watched"))
+        add(RailEntry(ALL, if (sky) "All Sky channels" else "All channels"))
         if (sky) skySections.forEach { add(RailEntry(SKY_PREFIX + it, it)) }
         railGroups.forEach { add(RailEntry(it, it)) }
     }
@@ -369,7 +369,6 @@ fun GuideScreen(
                         style = MaterialTheme.typography.headlineSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (effective == ALL && !sky && total > GUIDE_LIMIT) {
                         Spacer(Modifier.width(14.dp))

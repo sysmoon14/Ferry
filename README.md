@@ -15,7 +15,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
 | Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
-| Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down. HDR streams play as HDR (the TV switches mode; the card shows **HDR**), and falling back to an SDR backup switches back cleanly. Resuming the last channel at launch goes straight into the stream |
+| Player | Info card that rises from the bottom of the picture, icon controls (restart, ±30s, pause, live, previous, sleep, streams), number entry, channel up/down. HDR streams play as HDR (the TV switches mode; the card shows **HDR**), and falling back to an SDR backup switches back cleanly. Resuming the last channel at launch goes straight into the stream |
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
 | Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
 | Search | Programmes (catch-up, on now, coming up) and channels, from the main menu |
@@ -72,15 +72,24 @@ Setting up a second box? Use **Device → Backup & sync** instead (below).
 
 ### Menus
 
-Ferry opens on the **main menu**: 🔍 Search, ★ Favourites, ⚽ Sports, 📺 TV Guide, ☰ Channel List, ⚙ Settings.
+Ferry opens on the **main menu**, a rail down the left: Search, Favourites, Sports, TV Guide, Channels,
+Settings. It shows icons while you browse and opens out with labels (dimming what's behind) when it has focus.
 
 - **Favourites** goes straight to a guide of your favourite channels.
-- **TV Guide** (programme grid) and **Channel List** (one row per channel, with what's on now and next) open
+- **TV Guide** (programme grid) and **Channels** (one row per channel, with what's on now and next) open
   their **group list** first (Recently watched, All channels / Sky sections, your playlist's groups); pick
   a group to browse it.
 - **Sports** is the football finder (below).
-- The menus slide away while you browse so the guide gets the whole screen. **Back** walks back up:
+- The group list slides away while you browse so the guide gets the whole screen. **Back** walks back up:
   channels → group list → main menu. **Back** in the main menu exits Ferry and stops anything playing.
+
+### Look
+
+One quiet navy palette with a single gold accent: gold means *focused*, *selected* or *the thing to press*.
+Red is only ever **live**, blue is catch-up and notices. Type is Inter (bundled), with tabular figures so
+clocks and channel numbers line up. Focus is a gold ring on a lifted row — no bouncing. The player's info card
+rises from the bottom of the picture with round icon controls; Settings is a short list with a pairing card.
+Everything is in `ui/Theme.kt` (colours, type, shapes, focus, tags, dialogs, icons).
 
 ### Guide
 
