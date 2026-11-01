@@ -129,12 +129,22 @@ Choosing a match lists every stream that might show it, best first, with the rea
    "EPL02: Bournemouth 15:00 Leeds 31/10"); dated channels for another day are ignored.
 2. **Guide data** around kick-off naming both teams, in any language/spelling, on any channel
    (hidden groups included, so foreign sports channels count).
-3. One team plus the competition in the guide, the club's own channel, or a broadcaster ESPN lists.
-4. Just the competition at kick-off on a sports channel (weakest).
+3. One team plus the competition in the guide, the club's own channel, or a broadcaster ESPN lists
+   (including its numbered event channels, e.g. "Peacock | Event 1").
+4. **Channels dedicated to the competition** ("SuperSport Premier League", "Optus Sport 1", "Hub Premier 1",
+   "True Premier Football 1") when it's the only game on at that time — even with no guide. Only the first
+   two of a numbered family count; replay/24-7 loops don't.
+5. Just the competition at kick-off on a sports channel (weakest).
 
-Other sports, magazine shows ("Preview", "Highlights") and look-alike names are filtered out; UK streams
+Other sports (incl. darts' "Premier League"), youth/women's games, magazine shows ("Preview", "Highlights")
+and look-alike names are filtered out; UK streams
 rank first. Playing one makes that list the channel up/down list, so if a stream dies, ▲ tries the next;
 Back returns to the list.
+
+For diagnosing results: `GET /api/football/fixtures` lists upcoming fixtures with their ids, and
+`GET /api/football/candidates?event=<id>` returns the finder's results with reasons (it works in the
+background: a 202 means ask again in a few seconds). `GET /api/guide/search?q=liverpool&from=&to=` shows
+which guides mention something in a time window.
 
 ### Reminders
 
