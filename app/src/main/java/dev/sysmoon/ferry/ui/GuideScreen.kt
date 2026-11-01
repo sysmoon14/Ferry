@@ -54,6 +54,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.activity.compose.BackHandler
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.flow.catch
@@ -66,18 +72,43 @@ import java.util.Date
 const val FAVOURITES = "\u0000fav"
 const val ALL = "\u0000all"
 const val RECENT = "\u0000recent"
-/** Not a group: opens the search screen. */
-const val SEARCH = "\u0000search"
-/** Not a group: opens the football screen. */
-const val FOOTBALL = "\u0000football"
 /** Rail keys for Sky layout sections ("\u0000sky:Sports"). */
 const val SKY_PREFIX = "\u0000sky:"
 private const val GUIDE_LIMIT = 1_000
 
+/** Top-level menu sections that live on the guide screen (Sports, Search and Settings open their own screens). */
+enum class Section(val label: String) {
+    FAVOURITES("★  Favourites"),
+    GUIDE("📺  TV Guide"),
+    LIST("☰  Channel List"),
+}
+
+/** Where focus is on the guide screen: the main menu, the group list, or the channels. */
+private enum class Level { MENU, RAIL, CONTENT }
+
+private enum class MenuItem(val label: String) {
+    SEARCH("🔍  Search"),
+    FAVOURITES("★  Favourites"),
+    SPORTS("⚽  Sports"),
+    GUIDE("📺  TV Guide"),
+    LIST("☰  Channel List"),
+    SETTINGS("⚙  Settings"),
+}
+
+private fun MenuItem.section() = when (this) {
+    MenuItem.FAVOURITES -> Section.FAVOURITES
+    MenuItem.GUIDE -> Section.GUIDE
+    MenuItem.LIST -> Section.LIST
+    else -> null
+}
+
 @Composable
 fun GuideScreen(
+    /** The group picked in TV Guide / Channel List (Favourites has its own list). */
     selected: String,
     onSelect: (String) -> Unit,
+    section: Section,
+    onSection: (Section) -> Unit,
     /** The channel playing (kept in view behind the player, focused when coming back to the guide). */
     playingId: String?,
     /** False while another screen (player, search, settings) is on top. */
@@ -86,10 +117,8 @@ fun GuideScreen(
     playerShowing: Boolean,
     /** Bumped each time the guide comes back into view. */
     returnSignal: Int,
-    /** Coming back from search/settings: focus the group list rather than a channel. */
+    /** Coming back from search/settings/sports: focus the main menu rather than a channel. */
     returnToRail: Boolean,
-    gridView: Boolean,
-    onToggleView: () -> Unit,
     onOpenPlayer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
@@ -100,8 +129,6 @@ fun GuideScreen(
     val dao = graph.db.channels()
     // Only the selected group is ever loaded (capped), so 20k+ channel lineups stay light.
     // .catch: a failed read (e.g. mid-refresh) shows an empty list instead of crashing.
-    val favourites by remember { dao.observeFavourites().catch { emit(emptyList()) } }
-        .collectAsState(initial = emptyList())
     val groups by remember { dao.observeGroups().catch { emit(emptyList()) } }
         .collectAsState(initial = emptyList())
     val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
@@ -114,17 +141,18 @@ fun GuideScreen(
     val nowPlaying by graph.player.state.collectAsState()
     val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
 
-    val hasFavourites = favourites.isNotEmpty()
+    val gridView = section != Section.LIST
+    val hasRail = section != Section.FAVOURITES
     val validKeys = buildSet {
-        add(ALL); if (hasFavourites) add(FAVOURITES); if (recents.isNotEmpty()) add(RECENT)
+        add(ALL); if (recents.isNotEmpty()) add(RECENT)
         if (sky) skySections.forEach { add(SKY_PREFIX + it) }
         addAll(railGroups)
     }
-    // Fall back to All when the selection disappears (no favourites left, layout switched…).
+    // Fall back to All when the selection disappears (layout switched, recents cleared…).
     val effective = when {
-        selected == FAVOURITES && !hasFavourites -> ALL
+        section == Section.FAVOURITES -> FAVOURITES
         selected == RECENT && recents.isEmpty() -> ALL
-        groups.isEmpty() -> selected // lists still loading: keep the selection
+        groups.isEmpty() && selected != FAVOURITES -> selected // lists still loading: keep the selection
         selected in validKeys -> selected
         else -> ALL
     }
@@ -158,32 +186,41 @@ fun GuideScreen(
     val returnFocus = remember { FocusRequester() }
 
     val rail = buildList {
-        add(SEARCH to "🔍  Search")
-        add(FOOTBALL to "⚽  Football")
-        if (hasFavourites) add(FAVOURITES to "★ Favourites")
         if (recents.isNotEmpty()) add(RECENT to "🕘  Recently watched")
         add(ALL to if (sky) "All Sky channels" else "All channels")
         if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
         railGroups.forEach { add(it to it) }
     }
-    // Back from the channels (list or guide) jumps to the selected group in the rail, so you
-    // never have to scroll back through days of catch-up to change group.
+    val menuItems = MenuItem.entries
+    val currentMenuItem = when (section) {
+        Section.FAVOURITES -> MenuItem.FAVOURITES
+        Section.GUIDE -> MenuItem.GUIDE
+        Section.LIST -> MenuItem.LIST
+    }
+
+    // Three levels, one visible column on the left at a time: the main menu, then (TV Guide and
+    // Channel List) the group list, then the channels with nothing on the left. Back walks back
+    // up; Back in the main menu leaves the app.
     val railState = rememberLazyListState()
     val railFocus = remember { FocusRequester() }
+    val menuFocus = remember { FocusRequester() }
+    val contentFocus = remember { FocusRequester() }
+    var level by remember { mutableStateOf(if (playerShowing) Level.CONTENT else Level.MENU) }
     var channelsFocused by remember { mutableStateOf(false) }
-    // The group list hides while you're in the channels/guide (more room for programmes);
-    // Back brings it back and focuses the current group.
-    // Starts hidden when the guide first appears behind the player, so it's already in its
-    // final state when the player shrinks away.
-    var railVisible by remember { mutableStateOf(!playerShowing) }
-    LaunchedEffect(channelsFocused) { if (channelsFocused) railVisible = false }
-    LaunchedEffect(playerShowing) { if (playerShowing) railVisible = false }
+    var railFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(channelsFocused) { if (channelsFocused) level = Level.CONTENT }
+    // Already in its final state when the player shrinks away.
+    LaunchedEffect(playerShowing) { if (playerShowing) level = Level.CONTENT }
+
+    val focusMenu: () -> Unit = {
+        scope.launch {
+            if (level != Level.MENU) { level = Level.MENU; withFrameNanos { } }
+            runCatching { menuFocus.requestFocus() }
+        }
+    }
     val focusRail: () -> Unit = {
         scope.launch {
-            if (!railVisible) {
-                railVisible = true
-                withFrameNanos { } // let the rail compose before focusing into it
-            }
+            if (level != Level.RAIL) { level = Level.RAIL; withFrameNanos { } }
             val index = rail.indexOfFirst { it.first == effective }.coerceAtLeast(0)
             if (railState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
                 railState.scrollToItem(index)
@@ -192,10 +229,33 @@ fun GuideScreen(
             runCatching { railFocus.requestFocus() }
         }
     }
-    BackHandler(enabled = active && channelsFocused && !gridView) { focusRail() }
+    val focusContent: () -> Unit = {
+        scope.launch {
+            level = Level.CONTENT
+            withFrameNanos { }
+            runCatching { contentFocus.requestFocus() }
+        }
+    }
+    /** Back (or Left at the edge) from the channels. */
+    val backFromContent: () -> Unit = { if (hasRail) focusRail() else focusMenu() }
+    fun enter(item: MenuItem) {
+        when (item) {
+            MenuItem.SEARCH -> onOpenSearch()
+            MenuItem.SPORTS -> onOpenFootball()
+            MenuItem.SETTINGS -> onOpenSettings()
+            else -> {
+                val s = item.section()!!
+                onSection(s)
+                if (s == Section.FAVOURITES) focusContent() else focusRail()
+            }
+        }
+    }
+    BackHandler(enabled = active && channelsFocused && !gridView) { backFromContent() }
+    BackHandler(enabled = active && railFocused) { focusMenu() }
 
+    LaunchedEffect(Unit) { if (!playerShowing) { withFrameNanos { }; runCatching { menuFocus.requestFocus() } } }
     // List view: while the player covers the guide, keep the playing channel in view; when the
-    // guide comes back, focus it (or the group list, after search/settings).
+    // guide comes back, focus it (or the main menu, after search/settings/sports).
     LaunchedEffect(playingId, shown, playerShowing) {
         if (gridView || !playerShowing) return@LaunchedEffect
         val index = shown.indexOfFirst { it.id == playingId }
@@ -203,10 +263,10 @@ fun GuideScreen(
     }
     LaunchedEffect(returnSignal) {
         if (returnSignal == 0) return@LaunchedEffect
-        if (returnToRail) { focusRail(); return@LaunchedEffect }
+        if (returnToRail) { focusMenu(); return@LaunchedEffect }
         if (gridView) return@LaunchedEffect // the grid handles its own
         val index = shown.indexOfFirst { it.id == playingId }
-        if (index < 0) { focusRail(); return@LaunchedEffect }
+        if (index < 0) { backFromContent(); return@LaunchedEffect }
         if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
             listState.scrollToItem((index - 2).coerceAtLeast(0))
         }
@@ -215,47 +275,83 @@ fun GuideScreen(
     }
 
     Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 12.dp)) {
-        // Group rail
+        // Main menu
         androidx.compose.animation.AnimatedVisibility(
-            visible = railVisible,
+            visible = level == Level.MENU,
             enter = androidx.compose.animation.expandHorizontally() + androidx.compose.animation.fadeIn(),
             exit = androidx.compose.animation.shrinkHorizontally() + androidx.compose.animation.fadeOut(),
         ) {
-        Row {
-        Column(Modifier.width(240.dp).fillMaxHeight()) {
-            Text("Ferry", style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold)
-            Spacer(Modifier.height(16.dp))
-            LazyColumn(
-                Modifier.weight(1f),
-                state = railState,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                // Room for the focused item's scale-up and gold outline at the list edges.
-                contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp),
-            ) {
-                items(rail, key = { it.first }) { (key, label) ->
-                    ListItem(
-                        modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
-                        selected = key == effective,
-                        onClick = { when (key) { SEARCH -> onOpenSearch(); FOOTBALL -> onOpenFootball(); else -> onSelect(key) } },
-                        headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        colors = ferryListItemColors(),
-                        border = ferryListItemBorder(),
-                    )
+            Row {
+                Column(Modifier.width(220.dp).fillMaxHeight()) {
+                    Text("Ferry", style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold)
+                    Spacer(Modifier.height(16.dp))
+                    Column(
+                        Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        menuItems.forEach { item ->
+                            ListItem(
+                                modifier = (if (item == currentMenuItem) Modifier.focusRequester(menuFocus) else Modifier)
+                                    .onPreviewKeyEvent { e ->
+                                        // Right goes into a section, like OK.
+                                        if (e.key == Key.DirectionRight && item.section() != null) {
+                                            if (e.type == KeyEventType.KeyDown) enter(item)
+                                            true
+                                        } else false
+                                    },
+                                selected = item == currentMenuItem,
+                                onClick = { enter(item) },
+                                headlineContent = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                colors = ferryListItemColors(),
+                                border = ferryListItemBorder(),
+                            )
+                        }
+                    }
                 }
+                Spacer(Modifier.width(24.dp))
             }
-            Button(
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(top = 12.dp),
-                colors = ferryButtonColors(),
-            ) { Text("Settings & pairing") }
         }
 
-        Spacer(Modifier.width(24.dp))
-        }
+        // Group list (TV Guide and Channel List)
+        androidx.compose.animation.AnimatedVisibility(
+            visible = level == Level.RAIL && hasRail,
+            enter = androidx.compose.animation.expandHorizontally() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkHorizontally() + androidx.compose.animation.fadeOut(),
+        ) {
+            Row {
+                Column(Modifier.width(240.dp).fillMaxHeight().onFocusChanged { railFocused = it.hasFocus }) {
+                    Text(currentMenuItem.label, style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold, maxLines = 1)
+                    Spacer(Modifier.height(16.dp))
+                    LazyColumn(
+                        Modifier.weight(1f),
+                        state = railState,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        // Room for the focused item's scale-up and gold outline at the list edges.
+                        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp),
+                    ) {
+                        items(rail, key = { it.first }) { (key, label) ->
+                            ListItem(
+                                modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
+                                selected = key == effective,
+                                onClick = { onSelect(key); focusContent() },
+                                headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                colors = ferryListItemColors(),
+                                border = ferryListItemBorder(),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(24.dp))
+            }
         }
 
-        // Channel list
-        Column(Modifier.weight(1f).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus }) {
+        // Channels
+        Column(
+            Modifier.weight(1f).fillMaxHeight()
+                .onFocusChanged { channelsFocused = it.hasFocus }
+                .focusRequester(contentFocus)
+                .focusGroup()
+        ) {
             // Leave room on the right for the corner mini player when a stream is playing.
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 6.dp, end = if (nowPlaying.channel != null) MINI_CLEARANCE else 0.dp),
@@ -278,15 +374,11 @@ fun GuideScreen(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                Button(
-                    onClick = onToggleView,
-                    colors = ferryOutlinedButtonColorsAsButton(),
-                    modifier = Modifier.padding(end = 20.dp),
-                ) { Text(if (gridView) "List view" else "Guide view") }
                 Clock()
             }
             if (shown.isEmpty()) {
-                EmptyState(Modifier.weight(1f))
+                if (effective == FAVOURITES && total > 0) NoFavourites(Modifier.weight(1f))
+                else EmptyState(Modifier.weight(1f))
             } else if (gridView) key(effective) {
                 GuideGrid(
                     channels = shown,
@@ -297,7 +389,7 @@ fun GuideScreen(
                     returnSignal = if (returnToRail) 0 else returnSignal,
                     onOpenPlayer = onOpenPlayer,
                     onMenu = { menuFor = it },
-                    onBackToGroups = focusRail,
+                    onBackToGroups = backFromContent,
                     modifier = Modifier.weight(1f),
                 )
             } else {
@@ -324,6 +416,18 @@ fun GuideScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NoFavourites(modifier: Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("No favourites yet", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Hold OK on any channel in the TV Guide or Channel List to add it.",
+            color = FerryColors.Muted,
+        )
     }
 }
 

@@ -117,7 +117,7 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(end = if (playing.channel != null) MINI_WIDTH + 40.dp else 0.dp),
         ) {
-            Text("⚽  Football", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
+            Text("⚽  Sports · Football", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
             Spacer(Modifier.width(28.dp))
             val f = state.fixture
             if (f != null) Text("${f.home.name} v ${f.away.name}", style = MaterialTheme.typography.titleLarge,

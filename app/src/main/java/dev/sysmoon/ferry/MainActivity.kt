@@ -23,7 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
-import dev.sysmoon.ferry.ui.FAVOURITES
+import dev.sysmoon.ferry.ui.ALL
+import dev.sysmoon.ferry.ui.Section
 import dev.sysmoon.ferry.ui.FerryTheme
 import dev.sysmoon.ferry.ui.GuideScreen
 import dev.sysmoon.ferry.ui.VideoLayer
@@ -47,7 +48,9 @@ enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH, FOOTBALL }
 class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf(Screen.GUIDE)
     // Kept here so the guide's list survives trips to the player and back.
-    private var guideGroup by mutableStateOf(FAVOURITES)
+    private var guideGroup by mutableStateOf(ALL)
+    // Main menu section shown on the guide screen.
+    private var section by mutableStateOf(Section.GUIDE)
     // Bumped whenever the guide comes back into view, so it re-takes focus (on the playing
     // channel after the player, on the group list after search/settings).
     private var returnSignal by mutableIntStateOf(0)
@@ -68,7 +71,6 @@ class MainActivity : ComponentActivity() {
         returnSignal++
         screen = Screen.GUIDE
     }
-    private var gridView by mutableStateOf(true)
     // Launched (or brought back from Home) without a deep link: offer the last channel.
     private var pendingResume = false
 
@@ -100,18 +102,18 @@ class MainActivity : ComponentActivity() {
                             .focusProperties { enter = { if (guideActive) FocusRequester.Default else FocusRequester.Cancel } }
                             .focusGroup()
                     ) {
-                        // Back in the group list isn't handled here, so it leaves the app (onStop
+                        // Back in the main menu isn't handled here, so it leaves the app (onStop
                         // stops any stream that's still playing in the mini player).
                         GuideScreen(
                             selected = guideGroup,
                             onSelect = { guideGroup = it },
+                            section = section,
+                            onSection = { section = it },
                             playingId = playing.channel?.id,
                             active = guideActive,
                             playerShowing = screen == Screen.PLAYER,
                             returnSignal = returnSignal,
                             returnToRail = returnToRail,
-                            gridView = gridView,
-                            onToggleView = { gridView = !gridView },
                             onOpenPlayer = { openPlayer(Screen.GUIDE) },
                             onOpenSettings = { screen = Screen.SETTINGS },
                             onOpenSearch = { screen = Screen.SEARCH },
@@ -191,7 +193,9 @@ class MainActivity : ComponentActivity() {
         if (!isChangingConfigurations) pendingResume = true
         // Leaving the app (Home, another app launched) stops playback, like a normal TV app.
         // HA can still start it again via deep link / MQTT.
-        if (!isChangingConfigurations) lifecycleScope.launch { graph.player.stop() }
+        // App scope, not lifecycleScope: Back out of the app destroys the activity straight after
+        // onStop, which would cancel the stop half-way and leave the audio playing.
+        if (!isChangingConfigurations) graph.scope.launch { graph.player.stop() }
     }
 
     private fun handle(intent: Intent?) {
