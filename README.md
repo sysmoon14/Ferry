@@ -47,8 +47,10 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
   sources and favourites are kept, and Ferry restarts on the new version.
   - The first time, Android may ask you to allow Ferry to *install unknown apps*.
   - **Settings** shows the installed version with **Check for updates** / **Update to x.y.z**.
-  - In Home Assistant each box has an **update** entity (`update.<name>_ferry`): it shows when a release is
-    waiting, and **Install** starts the update on that TV (confirm on the TV).
+  - In Home Assistant each box has an **update** entity (`update.<area>_<name>_ferry`): it shows when a release is
+    waiting, and **Install** starts the update on that TV (confirm on the TV). To pop the confirmation up
+    while Ferry isn't open, Ferry needs *Display over other apps* (see below); without it the update waits
+    and asks the next time Ferry is opened.
 - **Every push to main** still publishes the rolling `nightly` pre-release. A nightly reports itself as
   `<latest tag>+dev.<run>` and is only offered newer tagged releases.
 - **Branding:** `branding/` has the icon and banner sources plus `ferry-projectivy-1280x720.png` for
@@ -202,7 +204,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting) and `sleep` (timer stopped playback) |
-| `update.<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
+| `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
 
 Topics (`base = ferry/<device-id>`):
 

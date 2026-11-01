@@ -216,6 +216,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         graph.uiVisible.value = true
         updateHidden = false
+        graph.updater.resumePendingInstall()
         graph.updater.checkIfDue()
         if (!pendingResume) { covered = false; return }
         pendingResume = false

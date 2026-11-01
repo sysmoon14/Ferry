@@ -55,7 +55,13 @@ class Updater(
     private val context: Context,
     private val http: OkHttpClient,
     private val scope: CoroutineScope,
+    /** Ferry's screen is showing (it may then open the installer). */
+    private val uiVisible: () -> Boolean,
 ) {
+    /** Install confirmation Android couldn't show yet (Ferry in the background); shown on next open. */
+    @Volatile private var pendingConfirm: Intent? = null
+    private var confirmTimeout: kotlinx.coroutines.Job? = null
+
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
@@ -124,15 +130,44 @@ class Updater(
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> confirm?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                runCatching { context.startActivity(it) }.onFailure { e ->
-                    _state.value = UpdateState.Failed("couldn't open the installer: ${e.message}", r)
+                // From the background Android only lets Ferry open the installer with "Display over
+                // other apps"; otherwise it's silently dropped. Keep it for the next time Ferry opens.
+                val canShow = uiVisible() || android.provider.Settings.canDrawOverlays(context)
+                if (!canShow) {
+                    pendingConfirm = it
+                    _state.value = UpdateState.Failed("open Ferry on the TV to finish installing", r)
+                    return
                 }
+                showConfirm(it, r)
             }
             PackageInstaller.STATUS_SUCCESS -> _state.value = UpdateState.Idle // the process is replaced anyway
             else -> _state.value = UpdateState.Failed(
                 if (status == PackageInstaller.STATUS_FAILURE_ABORTED) "the update was cancelled" else (message ?: "install failed ($status)"),
                 r,
             )
+        }
+    }
+
+    /** Called when Ferry's screen opens: shows an install confirmation that was held back. */
+    fun resumePendingInstall() {
+        val confirm = pendingConfirm ?: return
+        pendingConfirm = null
+        val r = (_state.value as? UpdateState.Failed)?.release ?: _latest.value ?: return
+        _state.value = UpdateState.Installing(r)
+        showConfirm(confirm, r)
+    }
+
+    private fun showConfirm(confirm: Intent, r: Release?) {
+        runCatching { context.startActivity(confirm) }.onFailure { e ->
+            _state.value = UpdateState.Failed("couldn't open the installer: ${e.message}", r)
+            return
+        }
+        // Nobody answered (or the prompt never appeared): don't sit "in progress" forever, so the
+        // prompt / Home Assistant can offer it again.
+        confirmTimeout?.cancel()
+        confirmTimeout = scope.launch {
+            kotlinx.coroutines.delay(5 * 60_000L)
+            if (_state.value is UpdateState.Installing && r != null) _state.value = UpdateState.Available(r)
         }
     }
 
