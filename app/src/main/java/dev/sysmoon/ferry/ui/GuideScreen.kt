@@ -111,6 +111,8 @@ private fun MenuItem.section() = when (this) {
 }
 
 private val RAIL_WIDTH = 236.dp
+/** Width of the collapsed nav rail: its 56dp icon items plus 12dp padding each side. */
+private val NAV_COLLAPSED = 80.dp
 
 @Composable
 fun GuideScreen(
@@ -300,7 +302,8 @@ fun GuideScreen(
             )
         },
     ) {
-        Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 32.dp, top = 14.dp, bottom = 10.dp)) {
+        // The drawer overlays the content (it doesn't push it), so leave its collapsed width clear.
+        Row(Modifier.fillMaxSize().padding(start = NAV_COLLAPSED + 20.dp, end = 32.dp, top = 14.dp, bottom = 10.dp)) {
             // Group list (TV Guide and Channels)
             AnimatedVisibility(
                 visible = level == Level.RAIL && hasRail,
@@ -406,7 +409,7 @@ fun GuideScreen(
                     LazyColumn(
                         Modifier.weight(1f),
                         state = listState,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                         contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),
                     ) {
                         items(shown, key = { it.id }) { channel ->
@@ -535,7 +538,7 @@ private fun ChannelRow(
                     color = FerryColors.Faint,
                     modifier = Modifier.width(44.dp),
                 )
-                LogoChip(channel.logo, channel.name)
+                LogoChip(channel.logo, channel.name, width = 64.dp, height = 40.dp)
             }
         },
         headlineContent = {
@@ -565,20 +568,20 @@ private fun ChannelRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (now != null) FerryColors.Muted else FerryColors.Faint,
                 )
-                if (now != null) {
-                    ProgressLine(
-                        ((nowMs - now.start).toFloat() / (now.stop - now.start).coerceAtLeast(1)),
-                        Modifier.padding(top = 6.dp, bottom = 4.dp).width(220.dp),
-                    )
-                }
-                next?.let {
-                    Text(
-                        "Next  ${time.format(Date(it.start))}   ${it.title}",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = FerryColors.Faint,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 5.dp)) {
+                    if (now != null) {
+                        ProgressLine(((nowMs - now.start).toFloat() / (now.stop - now.start).coerceAtLeast(1)), Modifier.width(160.dp))
+                        Spacer(Modifier.width(14.dp))
+                    }
+                    next?.let {
+                        Text(
+                            "Next ${time.format(Date(it.start))}  ${it.title}",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = FerryColors.Faint,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR),
+                        )
+                    }
                 }
             }
         },

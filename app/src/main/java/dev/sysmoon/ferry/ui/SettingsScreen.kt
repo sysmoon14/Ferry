@@ -110,10 +110,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 SettingRow(
                     icon = FerryIcons.Refresh,
                     title = "Refresh playlists and guide",
-                    detail = flash?.takeIf { it.first == "refresh" }?.second ?: "Reload every source now instead of waiting for the next scheduled refresh",
+                    detail = flash?.takeIf { it.first == "refresh" }?.second ?: "Reload every source and its listings now",
                 ) {
                     scope.launch { graph.repository.refreshDue(force = true) }
-                    note("refresh", "Refreshing in the background — channels and listings update as they arrive")
+                    note("refresh", "Refreshing — listings update as they arrive")
                 }
                 SettingRow(
                     icon = FerryIcons.Key,
@@ -126,7 +126,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 SettingRow(
                     icon = FerryIcons.LockOpen,
                     title = "Unpair everything",
-                    detail = flash?.takeIf { it.first == "unpair" }?.second ?: "Every phone and Home Assistant will need to pair with this TV again",
+                    detail = flash?.takeIf { it.first == "unpair" }?.second ?: "Phones and Home Assistant must pair again",
                 ) {
                     scope.launch { graph.settings.revokeAllTokens() }
                     note("unpair", "Done — nothing is paired with this TV now")
@@ -138,7 +138,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         // Pairing card
         Column(
-            Modifier.width(360.dp).clip(RoundedCornerShape(20.dp)).background(FerryColors.Navy).padding(24.dp),
+            Modifier.width(380.dp).clip(RoundedCornerShape(20.dp)).background(FerryColors.Navy).padding(horizontal = 24.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -146,22 +146,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Spacer(Modifier.width(10.dp))
                 Text("Set up from your phone", style = MaterialTheme.typography.titleMedium)
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
-                "Scan to open Ferry's settings page — sources, groups, favourites, Sky layout and Home Assistant all live there.",
-                color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall,
+                "Sources, groups, favourites, Sky layout and Home Assistant all live on Ferry's settings page.",
+                color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(18.dp))
-            Box(Modifier.size(248.dp).clip(RoundedCornerShape(14.dp)).background(Color.White), contentAlignment = Alignment.Center) {
-                qr?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "Pairing QR code", modifier = Modifier.size(232.dp)) }
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.size(212.dp).clip(RoundedCornerShape(14.dp)).background(Color.White), contentAlignment = Alignment.Center) {
+                qr?.let { Image(bitmap = it.asImageBitmap(), contentDescription = "Pairing QR code", modifier = Modifier.size(200.dp)) }
                     ?: Text("No network", color = FerryColors.Deep)
             }
-            Spacer(Modifier.height(18.dp))
-            Text("OR OPEN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
-            Text(base ?: "No network connection", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), maxLines = 1)
-            Spacer(Modifier.height(12.dp))
-            Text("PAIRING PIN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
-            Text(pin?.chunked(3)?.joinToString("  ") ?: "…", style = MaterialTheme.typography.displaySmall, color = FerryColors.Gold)
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("OR OPEN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                    Text(base ?: "No network", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), maxLines = 1)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("PIN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                    Text(pin?.chunked(3)?.joinToString(" ") ?: "…", style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TABULAR), color = FerryColors.Gold)
+                }
+            }
         }
     }
 }

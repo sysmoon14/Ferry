@@ -246,7 +246,7 @@ fun ferryOutlinedButtonColorsAsButton() = ButtonDefaults.colors(
  * otherwise a tinted outline (quiet: ENDED, LATER). [dot] puts a pulse-free dot first (LIVE).
  */
 @Composable
-fun Tag(text: String, color: Color = FerryColors.Muted, filled: Boolean = true, dot: Boolean = false, modifier: Modifier = Modifier) {
+fun Tag(text: String, color: Color = FerryColors.Muted, filled: Boolean = true, dot: Boolean = false, upper: Boolean = true, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(6.dp)
     Row(
         modifier
@@ -260,7 +260,7 @@ fun Tag(text: String, color: Color = FerryColors.Muted, filled: Boolean = true, 
             Spacer(Modifier.width(5.dp))
         }
         Text(
-            text.uppercase(),
+            if (upper) text.uppercase() else text,
             color = if (filled) FerryColors.Deep else color,
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,

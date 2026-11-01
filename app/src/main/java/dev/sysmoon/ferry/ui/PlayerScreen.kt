@@ -426,11 +426,12 @@ private fun InfoCard(
             .background(
                 androidx.compose.ui.graphics.Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.35f to Color.Black.copy(alpha = 0.55f),
-                    1f to Color.Black.copy(alpha = 0.92f),
+                    0.22f to Color.Black.copy(alpha = 0.62f),
+                    0.5f to Color.Black.copy(alpha = 0.86f),
+                    1f to Color.Black.copy(alpha = 0.96f),
                 )
             )
-            .padding(start = 56.dp, end = 56.dp, top = 96.dp, bottom = 34.dp)
+            .padding(start = 56.dp, end = 56.dp, top = 120.dp, bottom = 34.dp)
     ) {
         // Channel row
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -450,7 +451,7 @@ private fun InfoCard(
             sleepMinutes?.let { Spacer(Modifier.width(8.dp)); Tag("Sleep ${it}m", FerryColors.Muted, filled = false) }
             if (buffering) { Spacer(Modifier.width(12.dp)); Text("Tuning…", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium) }
             Spacer(Modifier.weight(1f))
-            streamLabels.forEach { Spacer(Modifier.width(8.dp)); Tag(it, FerryColors.Muted, filled = false) }
+            streamLabels.forEach { Spacer(Modifier.width(8.dp)); Tag(it, FerryColors.Muted, filled = false, upper = false) }
             Spacer(Modifier.width(20.dp))
             Text(time.format(Date(nowMs)), style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TABULAR), color = FerryColors.Muted)
         }

@@ -105,7 +105,7 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
         ScreenTitle("Search", FerryIcons.Search)
         Spacer(Modifier.height(18.dp))
         Row(
-            Modifier.width(680.dp).clip(RoundedCornerShape(14.dp))
+            Modifier.width(620.dp).clip(RoundedCornerShape(14.dp))
                 .background(if (fieldFocused) FerryColors.FocusFill else FerryColors.Navy)
                 .border(2.dp, if (fieldFocused) FerryColors.Gold else FerryColors.Line, RoundedCornerShape(14.dp))
                 .padding(horizontal = 18.dp, vertical = 13.dp),
