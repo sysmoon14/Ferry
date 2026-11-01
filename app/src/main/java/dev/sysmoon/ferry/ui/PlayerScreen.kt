@@ -524,7 +524,7 @@ private fun InfoCard(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
-                    val (icon, label) = when (c) {
+                    val (icon, label): Pair<androidx.compose.ui.graphics.vector.ImageVector, String> = when (c) {
                         Control.RESTART -> FerryIcons.Replay to "Restart"
                         Control.BACK30 -> FerryIcons.Rewind to "30s back"
                         Control.PLAY_PAUSE -> if (paused) FerryIcons.Play to "Play" else FerryIcons.Pause to "Pause"

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+
 package dev.sysmoon.ferry.ui
 
 import androidx.compose.foundation.BorderStroke
@@ -28,6 +30,22 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.group
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -365,20 +383,20 @@ private fun icon(name: String, vararg paths: String, evenOdd: Boolean = false): 
 }
 
 object FerryIcons {
-    val Search = androidx.compose.material.icons.Icons.Default.Search
-    val Star = androidx.compose.material.icons.Icons.Default.Star
-    val Settings = androidx.compose.material.icons.Icons.Default.Settings
-    val List = androidx.compose.material.icons.Icons.Default.List
-    val Play = androidx.compose.material.icons.Icons.Default.PlayArrow
-    val Refresh = androidx.compose.material.icons.Icons.Default.Refresh
-    val Info = androidx.compose.material.icons.Icons.Default.Info
-    val Warning = androidx.compose.material.icons.Icons.Default.Warning
-    val Bell = androidx.compose.material.icons.Icons.Default.Notifications
-    val Check = androidx.compose.material.icons.Icons.Default.Check
-    val Close = androidx.compose.material.icons.Icons.Default.Close
-    val ChevronRight = androidx.compose.material.icons.Icons.Default.KeyboardArrowRight
-    val ChevronLeft = androidx.compose.material.icons.Icons.Default.KeyboardArrowLeft
-    val Lock = androidx.compose.material.icons.Icons.Default.Lock
+    val Search = Icons.Default.Search
+    val Star = Icons.Default.Star
+    val Settings = Icons.Default.Settings
+    val List = Icons.Default.List
+    val Play = Icons.Default.PlayArrow
+    val Refresh = Icons.Default.Refresh
+    val Info = Icons.Default.Info
+    val Warning = Icons.Default.Warning
+    val Bell = Icons.Default.Notifications
+    val Check = Icons.Default.Check
+    val Close = Icons.Default.Close
+    val ChevronRight = Icons.Default.KeyboardArrowRight
+    val ChevronLeft = Icons.Default.KeyboardArrowLeft
+    val Lock = Icons.Default.Lock
 
     val StarOutline = icon("StarOutline", "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z")
     val Pause = icon("Pause", "M6 19h4V5H6v14zm8-14v14h4V5h-4z")
