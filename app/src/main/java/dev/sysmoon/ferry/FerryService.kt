@@ -106,6 +106,10 @@ class FerryService : Service() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) FerryService.start(context)
+        // Boot, and after an update (the old process is killed and some TVs don't restart it),
+        // so Home Assistant control and the web page come back on their own.
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            FerryService.start(context)
+        }
     }
 }
