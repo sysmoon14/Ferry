@@ -23,9 +23,13 @@
 -dontwarn javax.**
 -dontwarn kotlinx.coroutines.debug.**
 
-# HiveMQ MQTT client (Netty + RxJava underneath).
+# HiveMQ MQTT client (Netty + RxJava + JCTools underneath). JCTools' queues look their own
+# fields up by name in static initialisers, so nothing in there may be renamed or stripped.
 -keep class com.hivemq.client.** { *; }
 -keep class io.netty.** { *; }
+-keep class org.jctools.** { *; }
+-keep class io.reactivex.** { *; }
+-keepclassmembers class * extends io.netty.util.Recycler$Handle { *; }
 -dontwarn io.netty.**
 -dontwarn io.reactivex.**
 -dontwarn org.jctools.**

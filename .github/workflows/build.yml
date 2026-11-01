@@ -104,7 +104,7 @@ jobs:
           gh release view nightly >/dev/null 2>&1 || \
             gh release create nightly --prerelease --title "Nightly" --notes "Latest debug build from main."
           gh release edit nightly --notes "Latest debug build from main (${GITHUB_SHA::7})."
-          gh release upload nightly ferry.apk ferry-debug.apk --clobber
+          gh release upload nightly ferry.apk ferry-debug.apk ferry-mapping.txt --clobber
 
       # Tagged release: a normal (non-pre) GitHub release, which is what the app's updater and the
       # Home Assistant update entity look at. ferry.apk keeps a fixed name for the updater.
@@ -116,9 +116,10 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk ferry.apk
           cp app/build/outputs/apk/debug/app-debug.apk ferry-debug.apk
+          cp app/build/outputs/mapping/release/mapping.txt ferry-mapping.txt
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
             gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "Ferry $FERRY_VERSION" --generate-notes
-          gh release upload "$RELEASE_TAG" ferry.apk ferry-debug.apk --clobber
+          gh release upload "$RELEASE_TAG" ferry.apk ferry-debug.apk ferry-mapping.txt --clobber
 
       - uses: actions/upload-artifact@v4
         with:
