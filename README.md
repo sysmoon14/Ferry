@@ -53,8 +53,9 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
     and asks the next time Ferry is opened.
 - **Every push to main** still publishes the rolling `nightly` pre-release. A nightly reports itself as
   `<latest tag>+dev.<run>` and is only offered newer tagged releases.
-- **Branding:** `branding/` has the icon and banner sources plus `ferry-projectivy-1280x720.png` for
-  Projectivy Launcher.
+- **Branding:** `branding/` has the icon and banner sources. For Projectivy Launcher use the transparent
+  `ferry-projectivy-clear-1280x720.png` (light text, for dark tiles) or `…-clear-dark-…` (dark text, for light
+  tiles); square transparent icons are `ferry-icon-clear-512.png` / `ferry-icon-clear-dark-512.png`.
 
 ## First run
 
