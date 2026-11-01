@@ -82,8 +82,10 @@ class MatchFinder(private val db: FerryDatabase) {
             val label = "Guide: ${p.title} (${time.format(Date(p.start))})"
             // A listing for this match starts around kick-off and lasts about a match, not a
             // four-hour "Premier League" block.
-            val matchShaped = p.start in (f.kickoff - 45 * 60_000L)..(f.kickoff + 15 * 60_000L) &&
-                p.stop - p.start <= 3 * 3_600_000L + 30 * 60_000L
+            // Up to 75 minutes early: many broadcasters' match block includes the build-up
+            // (Viaplay NL: "Premier League" 15:30 for a 16:30 kick-off).
+            val matchShaped = p.start in (f.kickoff - 75 * 60_000L)..(f.kickoff + 15 * 60_000L) &&
+                p.stop - p.start <= 4 * 3_600_000L
             // One of our teams against someone else is a different match (or a replay).
             val otherMatch = (h xor a) && TeamNames.hasVersus(text)
             for (ch in channels) when {
