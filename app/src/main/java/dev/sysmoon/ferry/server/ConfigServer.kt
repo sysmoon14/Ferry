@@ -54,6 +54,44 @@ import java.util.concurrent.atomic.AtomicLong
  * `Authorization: Bearer <token>` (or ?token= for the WebSocket, since browsers can't set headers).
  */
 class ConfigServer(private val g: AppGraph) {
+    private val diag = java.util.concurrent.ConcurrentHashMap<String, kotlinx.serialization.json.JsonElement>()
+    private val diagRunning = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    private suspend fun guideSearchJson(q: String, from: Long, to: Long): kotlinx.serialization.json.JsonElement {
+        val rows = g.db.channels().allPrimaries().groupBy { it.epgKey }
+        val hits = g.db.programmes().spanning(to, from)
+            .filter { q.isEmpty() || it.title.lowercase().contains(q) || it.description.orEmpty().lowercase().contains(q) }
+            .take(300)
+        return kotlinx.serialization.json.buildJsonArray {
+            hits.forEach { p -> add(kotlinx.serialization.json.buildJsonObject {
+                put("title", kotlinx.serialization.json.JsonPrimitive(p.title))
+                put("start", kotlinx.serialization.json.JsonPrimitive(java.time.Instant.ofEpochMilli(p.start).toString()))
+                put("guide", kotlinx.serialization.json.JsonPrimitive(p.channelKey))
+                put("channels", kotlinx.serialization.json.JsonArray(rows[p.channelKey].orEmpty().take(6).map {
+                    kotlinx.serialization.json.JsonPrimitive((if (it.hidden) "[hidden] " else "") + it.name + " — " + it.groupTitle)
+                }))
+            }) }
+        }
+    }
+
+    private suspend fun candidatesJson(id: String): kotlinx.serialization.json.JsonElement {
+        val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
+            runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 3) }.getOrDefault(emptyList())
+        }
+        val f = all.firstOrNull { it.id == id } ?: return kotlinx.serialization.json.JsonPrimitive("no such fixture")
+        val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
+        val found = g.matchFinder.find(f, sameSlot)
+        return kotlinx.serialization.json.buildJsonArray {
+            found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
+                put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
+                put("name", kotlinx.serialization.json.JsonPrimitive(c.channel.name))
+                put("group", kotlinx.serialization.json.JsonPrimitive(c.channel.groupTitle))
+                put("hidden", kotlinx.serialization.json.JsonPrimitive(c.channel.hidden))
+                put("reason", kotlinx.serialization.json.JsonPrimitive(c.reason))
+            }) }
+        }
+    }
+
     private var engine: EmbeddedServer<*, *>? = null
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -317,6 +355,15 @@ class ConfigServer(private val g: AppGraph) {
                 }
                 get("/football/candidates") {
                     val id = call.request.queryParameters["event"].orEmpty()
+                    // Slow on big playlists: compute in the background; poll until it's ready.
+                    diag[id]?.let { call.respond(it); return@get }
+                    if (diagRunning.add(id)) g.scope.launch {
+                        try { diag[id] = candidatesJson(id) } finally { diagRunning.remove(id) }
+                    }
+                    call.respond(HttpStatusCode.Accepted, ErrorDto("working — ask again in a few seconds"))
+                }
+                get("/football/candidates/now") {
+                    val id = call.request.queryParameters["event"].orEmpty()
                     val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
                         runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 3) }.getOrDefault(emptyList())
                     }
@@ -337,6 +384,18 @@ class ConfigServer(private val g: AppGraph) {
                 // Programmes whose title/description contains q, airing between from..to (epoch ms;
                 // default: now..+12h), with every channel that carries that guide.
                 get("/guide/search") {
+                    val q = call.request.queryParameters["q"].orEmpty().trim().lowercase()
+                    val now = System.currentTimeMillis()
+                    val from = call.request.queryParameters["from"]?.toLongOrNull() ?: now
+                    val to = call.request.queryParameters["to"]?.toLongOrNull() ?: (now + 12 * 3_600_000L)
+                    val key = "guide:$q:$from:$to"
+                    diag[key]?.let { call.respond(it); return@get }
+                    if (diagRunning.add(key)) g.scope.launch {
+                        try { diag[key] = guideSearchJson(q, from, to) } finally { diagRunning.remove(key) }
+                    }
+                    call.respond(HttpStatusCode.Accepted, ErrorDto("working — ask again in a few seconds"))
+                }
+                get("/guide/search/now") {
                     val q = call.request.queryParameters["q"].orEmpty().trim().lowercase()
                     val now = System.currentTimeMillis()
                     val from = call.request.queryParameters["from"]?.toLongOrNull() ?: now
