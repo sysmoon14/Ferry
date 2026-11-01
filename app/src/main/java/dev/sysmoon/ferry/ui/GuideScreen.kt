@@ -229,7 +229,8 @@ fun GuideScreen(
             runCatching { railFocus.requestFocus() }
         }
     }
-    val focusContent: () -> Unit = {
+    /** [toMenu]: where to fall back to if nothing in the channels can take focus. */
+    val focusContent: (toMenu: Boolean) -> Unit = { toMenu ->
         scope.launch {
             level = Level.CONTENT
             withFrameNanos { }
@@ -237,7 +238,7 @@ fun GuideScreen(
             withFrameNanos { }
             // Nothing to focus (no favourites yet, list still loading): stay where we were
             // rather than leaving focus nowhere.
-            if (!channelsFocused) { if (section == Section.FAVOURITES) focusMenu() else focusRail() }
+            if (!channelsFocused) { if (toMenu) focusMenu() else focusRail() }
         }
     }
     /** Back (or Left at the edge) from the channels. */
@@ -250,7 +251,7 @@ fun GuideScreen(
             else -> {
                 val s = item.section()!!
                 onSection(s)
-                if (s == Section.FAVOURITES) focusContent() else focusRail()
+                if (s == Section.FAVOURITES) focusContent(true) else focusRail()
             }
         }
     }
@@ -337,7 +338,7 @@ fun GuideScreen(
                             ListItem(
                                 modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
                                 selected = key == effective,
-                                onClick = { onSelect(key); focusContent() },
+                                onClick = { onSelect(key); focusContent(false) },
                                 headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 colors = ferryListItemColors(),
                                 border = ferryListItemBorder(),
