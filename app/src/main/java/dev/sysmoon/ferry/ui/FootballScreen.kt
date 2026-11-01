@@ -53,7 +53,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class FootballTab(val label: String) { MY_TEAMS("★ My teams"), PL("Premier League"), UCL("Champions League"), CLUBS("Clubs") }
+enum class FootballTab(val label: String) { MY_TEAMS("My teams"), PL("Premier League"), UCL("Champions League"), CLUBS("Clubs") }
 
 /** Kept by MainActivity so a trip to the player comes back to the same list. */
 class FootballState {
@@ -112,19 +112,19 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
     val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val day = remember { SimpleDateFormat("EEEE d MMMM", Locale.getDefault()) }
 
-    Column(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 48.dp, vertical = 28.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(end = if (playing.channel != null) MINI_WIDTH + 40.dp else 0.dp),
-        ) {
-            Text("⚽  Sports · Football", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
-            Spacer(Modifier.width(28.dp))
+    Column(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 56.dp, vertical = 40.dp)) {
+        Box(Modifier.padding(end = if (playing.channel != null) MINI_CLEARANCE else 0.dp)) {
             val f = state.fixture
-            if (f != null) Text("${f.home.name} v ${f.away.name}", style = MaterialTheme.typography.titleLarge,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            else if (state.club != null) Text(state.club!!.name, style = MaterialTheme.typography.titleLarge)
+            ScreenTitle(
+                when {
+                    f != null -> "${f.home.name} v ${f.away.name}"
+                    state.club != null -> state.club!!.name
+                    else -> "Football"
+                },
+                FerryIcons.Football,
+            )
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(18.dp))
 
         val fixture = state.fixture
         when {
@@ -144,7 +144,9 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     val club = state.club!!
                     Button(onClick = { scope.launch { graph.settings.toggleMyTeam(club.id) } }, colors = ferryButtonColors(),
                         modifier = Modifier.focusRequester(entryFocus)) {
-                        Text(if (club.id in myTeams) "★  Remove from My teams" else "☆  Add to My teams")
+                        androidx.tv.material3.Icon(if (club.id in myTeams) FerryIcons.Star else FerryIcons.StarOutline, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (club.id in myTeams) "Remove from My teams" else "Add to My teams")
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -157,12 +159,14 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     else -> all.filter { it.competition == Competition.PREMIER_LEAGUE }
                 }
                 when {
-                    shown == null -> Text(error ?: "Loading fixtures…", color = FerryColors.Muted)
-                    shown.isEmpty() -> Text(
+                    shown == null -> Text(error ?: "Loading fixtures…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
+                    shown.isEmpty() -> EmptyMessage(
+                        FerryIcons.Football,
+                        if (error != null) "Couldn't load fixtures" else "No matches",
                         error ?: if (state.tab == FootballTab.MY_TEAMS && state.club == null && myTeams.isEmpty())
-                            "Pick your clubs under Clubs (☆ Add to My teams) and their matches appear here."
-                        else "No matches in the next two weeks.",
-                        color = FerryColors.Muted,
+                            "Pick your clubs under Clubs and their matches appear here."
+                        else "Nothing in the next two weeks.",
+                        Modifier.fillMaxSize(),
                     )
                     else -> FixtureList(shown, myTeams, time, day, showCompetition = state.tab == FootballTab.MY_TEAMS || state.club != null) { f ->
                         state.fixture = f
@@ -178,14 +182,27 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
 
 @Composable
 private fun Tabs(state: FootballState, haveMyTeams: Boolean, focus: FocusRequester) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FootballTab.entries.filter { it != FootballTab.MY_TEAMS || haveMyTeams }.forEach { t ->
             val selected = state.tab == t
             Button(
                 onClick = { state.tab = t; state.club = null },
-                colors = if (selected) ferryButtonColors() else ferryOutlinedButtonColorsAsButton(),
+                colors = androidx.tv.material3.ButtonDefaults.colors(
+                    containerColor = if (selected) FerryColors.Gold.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = if (selected) FerryColors.Gold else FerryColors.Muted,
+                    focusedContainerColor = FerryColors.Gold,
+                    focusedContentColor = FerryColors.Deep,
+                    pressedContainerColor = FerryColors.Gold,
+                    pressedContentColor = FerryColors.Deep,
+                ),
                 modifier = if (selected) Modifier.focusRequester(focus) else Modifier,
-            ) { Text(if (selected) "• ${t.label}" else t.label) }
+            ) {
+                if (t == FootballTab.MY_TEAMS) {
+                    androidx.tv.material3.Icon(FerryIcons.Star, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(t.label, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }
@@ -210,8 +227,13 @@ private fun FixtureList(
             if (d != lastDay) {
                 lastDay = d
                 item(key = "h$d") {
-                    Text(d.uppercase(), color = FerryColors.Gold, style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp, start = 12.dp)) {
+                        if (f.state == MatchState.LIVE) {
+                            Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(FerryColors.Live))
+                            Spacer(Modifier.width(7.dp))
+                        }
+                        Text(d.uppercase(), color = if (f.state == MatchState.LIVE) FerryColors.Live else FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
             item(key = f.id) {
@@ -220,29 +242,31 @@ private fun FixtureList(
                     onClick = { onPick(f) },
                     colors = ferryListItemColors(),
                     border = ferryListItemBorder(),
+                    shape = ferryListItemShape(),
+                    scale = ferryListItemScale(),
                     leadingContent = {
-                        Text(
+                        Box(Modifier.width(84.dp), contentAlignment = Alignment.CenterStart) {
                             when (f.state) {
-                                MatchState.LIVE -> "● ${f.detail}"
-                                MatchState.FINISHED -> "FT"
-                                MatchState.UPCOMING -> time.format(Date(f.kickoff))
-                            },
-                            color = if (f.state == MatchState.LIVE) FerryColors.Gold else FerryColors.Muted,
-                            modifier = Modifier.width(80.dp), maxLines = 1,
-                        )
+                                MatchState.LIVE -> Tag(f.detail, FerryColors.Live, dot = true)
+                                MatchState.FINISHED -> Tag("FT", FerryColors.Muted, filled = false)
+                                MatchState.UPCOMING -> Text(time.format(Date(f.kickoff)), color = FerryColors.Muted,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), maxLines = 1)
+                            }
+                        }
                     },
                     headlineContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TeamName(f.home, f.home.id in myTeams, Modifier.weight(1f), alignEnd = true)
                             Text(
-                                if (f.homeScore != null) "  ${f.homeScore} – ${f.awayScore}  " else "  v  ",
-                                color = if (f.state == MatchState.LIVE) FerryColors.Gold else FerryColors.Text,
-                                style = MaterialTheme.typography.titleMedium,
+                                if (f.homeScore != null) "${f.homeScore} – ${f.awayScore}" else "v",
+                                color = if (f.homeScore != null) FerryColors.Text else FerryColors.Faint,
+                                style = (if (f.homeScore != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleSmall).copy(fontFeatureSettings = TABULAR),
+                                modifier = Modifier.padding(horizontal = 14.dp),
                             )
                             TeamName(f.away, f.away.id in myTeams, Modifier.weight(1f), alignEnd = false)
                         }
                     },
-                    trailingContent = { if (showCompetition) Text(f.competition.short, color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium) },
+                    trailingContent = { if (showCompetition) Text(f.competition.short, color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium) },
                 )
             }
         }
@@ -253,10 +277,9 @@ private fun FixtureList(
 private fun TeamName(t: Team, mine: Boolean, modifier: Modifier, alignEnd: Boolean) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start) {
         if (!alignEnd) Crest(t)
-        Text(
-            (if (mine && alignEnd) "★ " else "") + t.name + (if (mine && !alignEnd) " ★" else ""),
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp),
-        )
+        if (mine && alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(13.dp))
+        Text(t.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.titleSmall)
+        if (mine && !alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(13.dp))
         if (alignEnd) Crest(t)
     }
 }
@@ -280,9 +303,11 @@ private fun ClubList(teams: List<Team>, myTeams: Set<String>, onPick: (Team) -> 
                 onClick = { onPick(t) },
                 colors = ferryListItemColors(),
                 border = ferryListItemBorder(),
+                shape = ferryListItemShape(),
+                scale = ferryListItemScale(),
                 leadingContent = { Crest(t) },
-                headlineContent = { Text(t.name, maxLines = 1) },
-                trailingContent = { if (t.id in myTeams) Text("★", color = FerryColors.Gold) },
+                headlineContent = { Text(t.name, maxLines = 1, style = MaterialTheme.typography.titleSmall) },
+                trailingContent = { if (t.id in myTeams) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(18.dp)) },
             )
         }
     }
@@ -298,28 +323,31 @@ private fun Candidates(state: FootballState, f: Fixture, active: Boolean, onPlay
         withFrameNanos { }
         runCatching { returnFocus.requestFocus() }
     }
-    Text(
-        listOf(
-            f.competition.label,
-            when (f.state) {
-                MatchState.LIVE -> "Live: ${f.homeScore} – ${f.awayScore} (${f.detail})"
-                MatchState.FINISHED -> "Full time: ${f.homeScore} – ${f.awayScore}"
-                MatchState.UPCOMING -> "Kick-off ${time.format(Date(f.kickoff))}"
-            },
-        ).joinToString("  ·  "),
-        color = FerryColors.Muted,
-    )
-    Spacer(Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (f.state == MatchState.LIVE) { Tag("Live ${f.detail}", FerryColors.Live, dot = true); Spacer(Modifier.width(12.dp)) }
+        Text(
+            listOf(
+                f.competition.label,
+                when (f.state) {
+                    MatchState.LIVE -> "${f.homeScore} – ${f.awayScore}"
+                    MatchState.FINISHED -> "Full time ${f.homeScore} – ${f.awayScore}"
+                    MatchState.UPCOMING -> "Kick-off ${time.format(Date(f.kickoff))}"
+                },
+            ).joinToString("  ·  "),
+            color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR),
+        )
+    }
+    Spacer(Modifier.height(10.dp))
     when {
-        list == null -> Text("Looking through your playlist and guides…", color = FerryColors.Muted)
-        list.isEmpty() -> Text(
-            "No streams found for this match yet. Providers often rename their event channels shortly before kick-off, so check again nearer the time.",
-            color = FerryColors.Muted,
+        list == null -> Text("Looking through your playlist and guides…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
+        list.isEmpty() -> EmptyMessage(
+            FerryIcons.Search, "No streams found yet",
+            "Providers often rename their event channels shortly before kick-off, so check again nearer the time.",
+            Modifier.fillMaxSize(),
         )
         else -> {
-            Text("${list.size} possible streams, best first. While watching, ▲▼ moves through this list; Back returns here.",
-                color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(6.dp))
+            Hint("${list.size} possible streams, best first   ·   while watching, ▲ ▼ moves through this list   ·   Back returns here", color = FerryColors.Muted)
+            Spacer(Modifier.height(8.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
                 items(list, key = { it.channel.id }) { c ->
                     val focusHere = c.channel.id == (state.lastPlayed?.takeIf { id -> list.any { it.channel.id == id } } ?: list.first().channel.id)
@@ -329,20 +357,16 @@ private fun Candidates(state: FootballState, f: Fixture, active: Boolean, onPlay
                         modifier = if (focusHere) Modifier.focusRequester(returnFocus) else Modifier,
                         colors = ferryListItemColors(),
                         border = ferryListItemBorder(),
-                        leadingContent = {
-                            Box(
-                                Modifier.size(width = 52.dp, height = 34.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
-                                contentAlignment = Alignment.Center,
-                            ) { if (c.channel.logo != null) AsyncImage(c.channel.logo, null, Modifier.padding(3.dp)) }
-                        },
-                        headlineContent = { Text(c.channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        shape = ferryListItemShape(),
+                        scale = ferryListItemScale(),
+                        leadingContent = { LogoChip(c.channel.logo, c.channel.name, width = 58.dp, height = 36.dp) },
+                        headlineContent = { Text(c.channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
                         supportingContent = {
                             Text(listOfNotNull(c.reason, c.channel.groupTitle).joinToString("  ·  "),
                                 color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
                         trailingContent = {
-                            Text(c.strength, style = MaterialTheme.typography.labelMedium,
-                                color = when { c.score >= 85 -> FerryColors.Gold; c.score >= 60 -> FerryColors.Sea; else -> FerryColors.Muted })
+                            Tag(c.strength, when { c.score >= 85 -> FerryColors.Gold; c.score >= 60 -> FerryColors.Sea; else -> FerryColors.Muted }, filled = c.score >= 85)
                         },
                     )
                 }

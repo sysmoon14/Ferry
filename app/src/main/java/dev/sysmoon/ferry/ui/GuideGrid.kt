@@ -266,38 +266,45 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     // Keep clear of the corner mini player while a stream is playing; tall enough that the
     // time ruler below starts under it.
     val miniShowing = graph.player.state.collectAsState().value.channel != null
-    Column(Modifier.fillMaxWidth().height(84.dp).padding(start = 4.dp, bottom = 4.dp, end = if (miniShowing) MINI_CLEARANCE else 0.dp)) {
+    Column(Modifier.fillMaxWidth().height(92.dp).padding(start = 4.dp, bottom = 6.dp, end = if (miniShowing) MINI_CLEARANCE else 0.dp)) {
         val (channel, p) = focused ?: return@Column
-        Text(
-            p?.title ?: channel.displayName,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                p?.title ?: channel.displayName,
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(12.dp))
+            when {
+                p != null && p.start <= now && p.stop > now -> Tag("Live", FerryColors.Live, dot = true)
+                p != null && p.stop <= now && graph.player.canCatchUp(channel, p, now) -> Tag("Catch-up", FerryColors.Sea)
+                p != null && p.start > now && "${channel.epgKey}@${p.start}" in reminded -> Tag("Reminder set", FerryColors.Sea)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
             val bits = buildList {
                 if (p != null) {
                     val dayText = if (floorDay(p.start) == floorDay(now)) "Today" else day.format(Date(p.start))
                     add("$dayText ${time.format(Date(p.start))}–${time.format(Date(p.stop))}")
                 }
-                if (p != null) add(channel.displayName)
+                add(channel.displayName)
                 if (channel.streamCount > 1) add("${channel.streamCount} streams")
+                if (p != null && p.start > now && "${channel.epgKey}@${p.start}" !in reminded) add("OK to set a reminder")
             }
-            Text(bits.joinToString("  ·  "), color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            when {
-                p != null && p.start <= now && p.stop > now -> Tag("LIVE", FerryColors.Gold)
-                p != null && p.stop <= now && graph.player.canCatchUp(channel, p, now) -> Tag("CATCH-UP", FerryColors.Sea)
+            if (channel.favourite) {
+                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
             }
-            if (p != null && p.start > now) {
-                if ("${channel.epgKey}@${p.start}" in reminded) Tag("🔔 REMINDER SET", FerryColors.Sea)
-                else Text("   OK to set a reminder", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium)
-            }
-            if (channel.favourite) Tag("★", FerryColors.Gold)
+            Text(bits.joinToString("  ·  "), color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR),
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        p?.description?.let {
-            Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-        } ?: if (p == null) Text("No guide data for this channel", color = FerryColors.Muted) else Unit
+        Text(
+            p?.description ?: if (p == null) "No guide data for this channel" else "",
+            color = FerryColors.Faint, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 3.dp),
+        )
     }
 }
 
@@ -307,26 +314,13 @@ private fun floorDay(t: Long): Long {
 }
 
 @Composable
-private fun Tag(text: String, color: Color) {
-    Text(
-        text,
-        color = FerryColors.Deep,
-        style = MaterialTheme.typography.labelMedium,
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier.padding(start = 12.dp).clip(RoundedCornerShape(4.dp)).background(color)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    )
-}
-
-@Composable
 private fun TimeRuler(windowStart: Long, now: Long) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
-    Row(Modifier.fillMaxWidth().height(20.dp)) {
-        Box(Modifier.width(CHANNEL_COL), contentAlignment = Alignment.CenterStart) {
+    Row(Modifier.fillMaxWidth().height(22.dp).padding(bottom = 2.dp)) {
+        Box(Modifier.width(CHANNEL_COL).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
             val label = if (floorDay(windowStart) == floorDay(now)) "Today"
                 else SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
-            Text(label, color = FerryColors.Gold, style = MaterialTheme.typography.labelMedium)
+            Text(label.uppercase(), color = FerryColors.Gold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 2.dp))
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
             val perMs = maxWidth / WINDOW_MS.toFloat()
@@ -334,9 +328,9 @@ private fun TimeRuler(windowStart: Long, now: Long) {
             while (t < windowStart + WINDOW_MS) {
                 Text(
                     time.format(Date(t)),
-                    color = FerryColors.Muted,
+                    color = FerryColors.Faint,
                     style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.offset(x = perMs * (t - windowStart).toFloat() + 6.dp),
+                    modifier = Modifier.align(Alignment.CenterStart).offset(x = perMs * (t - windowStart).toFloat() + 6.dp),
                 )
                 t += SLOT_MS
             }
@@ -376,24 +370,21 @@ private fun GridRow(
         Row(Modifier.width(CHANNEL_COL).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${channel.shownNumber}",
-                color = FerryColors.Muted,
+                color = FerryColors.Faint,
                 modifier = Modifier.width(38.dp),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
             )
-            Box(
-                Modifier.size(width = 38.dp, height = 22.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(2.dp))
-                else Text(channel.name.take(3).uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
+            LogoChip(channel.logo, channel.name, width = 40.dp, height = 24.dp)
+            if (channel.favourite) {
+                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.padding(start = 7.dp).size(12.dp))
             }
             Text(
-                (if (channel.favourite) "★ " else "") + channel.displayName,
+                channel.displayName,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(start = 8.dp, end = 8.dp),
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                modifier = Modifier.padding(start = if (channel.favourite) 5.dp else 8.dp, end = 8.dp),
             )
         }
 
@@ -437,31 +428,37 @@ private fun GridRow(
                                     else -> false
                                 }
                             },
-                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(4.dp)),
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(6.dp)),
                         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
                         colors = ClickableSurfaceDefaults.colors(
-                            containerColor = if (live) Color(0xFF14243A) else FerryColors.Navy,
-                            contentColor = if (past) FerryColors.Muted else FerryColors.Text,
-                            focusedContainerColor = Color(0xFF1B2D47),
+                            containerColor = when { p == null -> Color(0xFF0F1828); live -> Color(0xFF1A2A44); else -> FerryColors.Navy },
+                            contentColor = when { p == null -> FerryColors.Faint; past -> FerryColors.Muted; else -> FerryColors.Text },
+                            focusedContainerColor = FerryColors.FocusFill,
                             focusedContentColor = FerryColors.Text,
                         ),
                         border = ClickableSurfaceDefaults.border(
-                            focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(4.dp)),
+                            focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(6.dp)),
                         ),
                     ) {
                         // Very short programmes are too narrow for any text; the detail panel names them.
                         if (w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val reminderSet = p != null && "${channel.epgKey}@${p.start}" in reminded
+                            val catchUp = p != null && p.stop <= now && channel.archiveDays > 0 &&
+                                p.start > now - channel.archiveDays * 86_400_000L
+                            if (reminderSet || catchUp) {
+                                androidx.tv.material3.Icon(
+                                    if (reminderSet) FerryIcons.Bell else FerryIcons.Replay, null,
+                                    tint = if (reminderSet) FerryColors.Sea else FerryColors.Muted,
+                                    modifier = Modifier.padding(end = 5.dp).size(13.dp),
+                                )
+                            }
                             Text(
-                                when {
-                                    p == null -> "No guide data"
-                                    "${channel.epgKey}@${p.start}" in reminded -> "🔔 ${p.title}"
-                                    p.stop <= now && channel.archiveDays > 0 &&
-                                        p.start > now - channel.archiveDays * 86_400_000L -> "↺ ${p.title}"
-                                    else -> p.title
-                                },
+                                p?.title ?: "No guide data",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = if (live && p != null) androidx.compose.ui.text.font.FontWeight.Medium else androidx.compose.ui.text.font.FontWeight.Normal,
+                                ),
                             )
                         }
                     }

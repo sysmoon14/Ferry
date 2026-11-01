@@ -27,6 +27,7 @@ androidx-lifecycle-compose = { module = "androidx.lifecycle:lifecycle-runtime-co
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-icons-core = { module = "androidx.compose.material:material-icons-core" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 tv-material = { module = "androidx.tv:tv-material", version.ref = "tvMaterial" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }

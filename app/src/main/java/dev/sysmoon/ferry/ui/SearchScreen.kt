@@ -101,41 +101,46 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
 
-    Column(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 48.dp, vertical = 28.dp)) {
-        Text("Search", style = MaterialTheme.typography.headlineMedium, color = FerryColors.Gold)
-        Spacer(Modifier.height(14.dp))
-        Box(
-            Modifier.width(640.dp).clip(RoundedCornerShape(10.dp)).background(FerryColors.Navy)
-                .border(2.dp, if (fieldFocused) FerryColors.Gold else FerryColors.Navy, RoundedCornerShape(10.dp))
-                .padding(horizontal = 18.dp, vertical = 12.dp)
+    Column(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 56.dp, vertical = 40.dp)) {
+        ScreenTitle("Search", FerryIcons.Search)
+        Spacer(Modifier.height(18.dp))
+        Row(
+            Modifier.width(680.dp).clip(RoundedCornerShape(14.dp))
+                .background(if (fieldFocused) FerryColors.FocusFill else FerryColors.Navy)
+                .border(2.dp, if (fieldFocused) FerryColors.Gold else FerryColors.Line, RoundedCornerShape(14.dp))
+                .padding(horizontal = 18.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (query.isEmpty()) Text("Programme or channel name", color = FerryColors.Muted)
-            BasicTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                textStyle = TextStyle(color = FerryColors.Text, fontSize = 20.sp),
-                cursorBrush = SolidColor(FerryColors.Gold),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {
-                    keyboard?.hide()
-                    scope.launch { withFrameNanos { }; runCatching { firstResult.requestFocus() } }
-                }),
-                modifier = Modifier.fillMaxWidth().focusRequester(field).onFocusChanged { fieldFocused = it.isFocused },
-            )
+            androidx.tv.material3.Icon(FerryIcons.Search, null, tint = if (fieldFocused) FerryColors.Gold else FerryColors.Muted, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) Text("Programme or channel name", color = FerryColors.Faint, style = MaterialTheme.typography.bodyLarge)
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = FerryColors.Text, fontSize = 19.sp),
+                    cursorBrush = SolidColor(FerryColors.Gold),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        keyboard?.hide()
+                        scope.launch { withFrameNanos { }; runCatching { firstResult.requestFocus() } }
+                    }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(field).onFocusChanged { fieldFocused = it.isFocused },
+                )
+            }
         }
-        Spacer(Modifier.height(10.dp))
-        Text(
+        Spacer(Modifier.height(12.dp))
+        Hint(
             when {
-                query.trim().length < 2 -> "Type at least two letters. ▼ moves to the results."
+                query.trim().length < 2 -> "Type at least two letters   ·   ▼  results"
                 searching -> "Searching…"
                 hits.isEmpty() -> "Nothing found"
-                else -> "${hits.size} results  ·  OK plays (or catch-up)  ·  OK on a future programme sets a reminder"
+                else -> "${hits.size} results   ·   OK  watch (or catch-up)   ·   OK on a later programme  remind me"
             },
             color = FerryColors.Muted,
-            style = MaterialTheme.typography.bodySmall,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         LazyColumn(
             Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -145,12 +150,12 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                 val now = System.currentTimeMillis()
                 val ch = h.channel
                 val p = (h as? Hit.Programme)?.programme
-                val status = when {
+                val status: (@Composable () -> Unit)? = when {
                     p == null -> null
-                    p.start <= now && p.stop > now -> "ON NOW"
-                    p.stop <= now -> "↺ CATCH-UP"
-                    "${ch.epgKey}@${p.start}" in reminded -> "🔔 REMINDER SET"
-                    else -> "LATER"
+                    p.start <= now && p.stop > now -> ({ Tag("Live", FerryColors.Live, dot = true) })
+                    p.stop <= now -> ({ Tag("Catch-up", FerryColors.Sea, filled = false) })
+                    "${ch.epgKey}@${p.start}" in reminded -> ({ Tag("Reminder set", FerryColors.Sea) })
+                    else -> ({ Tag("Later", FerryColors.Muted, filled = false) })
                 }
                 ListItem(
                     selected = false,
@@ -165,30 +170,26 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                     modifier = if (h == hits.first()) Modifier.focusRequester(firstResult) else Modifier,
                     colors = ferryListItemColors(),
                     border = ferryListItemBorder(),
+                    shape = ferryListItemShape(),
+                    scale = ferryListItemScale(),
                     leadingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${ch.shownNumber}", color = FerryColors.Muted, modifier = Modifier.width(48.dp), maxLines = 1)
-                            Box(
-                                Modifier.size(width = 52.dp, height = 34.dp).clip(RoundedCornerShape(4.dp)).background(FerryColors.Navy),
-                                contentAlignment = Alignment.Center,
-                            ) { if (ch.logo != null) AsyncImage(ch.logo, null, Modifier.padding(3.dp)) }
+                            Text("${ch.shownNumber}", color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp), maxLines = 1)
+                            LogoChip(ch.logo, ch.name, width = 58.dp, height = 36.dp)
                         }
                     },
                     headlineContent = {
-                        Text(p?.title ?: ch.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(p?.title ?: ch.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     },
                     supportingContent = {
                         val dayText = p?.let { if (sameDay(it.start, now)) "Today" else day.format(Date(it.start)) }
                         Text(
                             if (p == null) "Channel" + (ch.groupTitle?.let { "  ·  $it" } ?: "")
                             else "$dayText ${time.format(Date(p.start))}–${time.format(Date(p.stop))}  ·  ${ch.displayName}",
-                            color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                            color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR), maxLines = 1,
                         )
                     },
-                    trailingContent = {
-                        if (status != null) Text(status, color = if (status == "ON NOW") FerryColors.Gold else FerryColors.Sea,
-                            style = MaterialTheme.typography.labelMedium)
-                    },
+                    trailingContent = status,
                 )
             }
         }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,34 +88,29 @@ fun ChannelMenu(
         if (!heldOk) armed = true
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .onPreviewKeyEvent { e ->
-                    if (armed) return@onPreviewKeyEvent false
-                    val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
-                    if (!ok) return@onPreviewKeyEvent false
-                    if (e.type == KeyEventType.KeyUp) armed = true else heldOk = true
-                    true
+    FerryDialog(
+        onDismiss = onDismiss,
+        width = 640.dp,
+        modifier = Modifier.onPreviewKeyEvent { e ->
+            if (armed) return@onPreviewKeyEvent false
+            val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+            if (!ok) return@onPreviewKeyEvent false
+            if (e.type == KeyEventType.KeyUp) armed = true else heldOk = true
+            true
+        },
+    ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LogoChip(primary.logo, primary.name, width = 64.dp, height = 40.dp)
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(primary.displayName, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(primary.groupTitle, if (streams.size > 1) "${streams.size} streams" else null).joinToString("  ·  "),
+                        color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                .width(620.dp).clip(RoundedCornerShape(14.dp)).background(FerryColors.Deep)
-                .padding(horizontal = 28.dp, vertical = 24.dp)
-        ) {
-            Text(
-                primary.displayName,
-                style = MaterialTheme.typography.headlineSmall,
-                color = FerryColors.Gold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(primary.groupTitle, if (streams.size > 1) "${streams.size} streams" else null)
-                    .joinToString("  ·  "),
-                color = FerryColors.Muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(16.dp))
+            }
+            Spacer(Modifier.height(18.dp))
             Button(
                 onClick = {
                     scope.launch {
@@ -124,13 +120,17 @@ fun ChannelMenu(
                 },
                 colors = ferryButtonColors(),
                 modifier = Modifier.focusRequester(first),
-            ) { Text(if (primary.favourite) "★  Remove from favourites" else "☆  Add to favourites") }
+            ) {
+                androidx.tv.material3.Icon(if (primary.favourite) FerryIcons.Star else FerryIcons.StarOutline, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (primary.favourite) "Remove from favourites" else "Add to favourites")
+            }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(20.dp))
             Text(
-                if (streams.size > 1) "STREAMS — best first; Ferry falls back down this list if one fails" else "STREAM",
-                color = FerryColors.Muted,
-                style = MaterialTheme.typography.labelMedium,
+                if (streams.size > 1) "STREAMS  ·  best first, Ferry falls back down this list" else "STREAM",
+                color = FerryColors.Faint,
+                style = MaterialTheme.typography.labelSmall,
             )
             Spacer(Modifier.height(6.dp))
             LazyColumn(
@@ -150,7 +150,9 @@ fun ChannelMenu(
                         },
                         colors = ferryListItemColors(),
                         border = ferryListItemBorder(),
-                        headlineContent = { Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        shape = ferryListItemShape(),
+                        scale = ferryListItemScale(),
+                        headlineContent = { Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
                         supportingContent = {
                             Text(
                                 listOfNotNull(
@@ -162,14 +164,9 @@ fun ChannelMenu(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         },
-                        trailingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (playing) Text("▶ Playing", color = FerryColors.Gold, style = MaterialTheme.typography.labelLarge)
-                            }
-                        },
+                        trailingContent = if (playing) ({ Tag("Playing", FerryColors.Gold) }) else null,
                     )
                 }
             }
-        }
     }
 }

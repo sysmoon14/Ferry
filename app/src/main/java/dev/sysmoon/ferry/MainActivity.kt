@@ -5,6 +5,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -140,19 +145,22 @@ class MainActivity : ComponentActivity() {
                             onOpenFootball = { screen = Screen.FOOTBALL },
                         )
                     }
-                    when (screen) {
-                        Screen.SEARCH -> {
-                            BackHandler { backToGuide(rail = true) }
-                            SearchScreen(onOpenPlayer = { openPlayer(Screen.GUIDE) })
-                        }
-                        Screen.SETTINGS -> {
-                            BackHandler { backToGuide(rail = true) }
-                            SettingsScreen(onBack = { backToGuide(rail = true) })
-                        }
-                        else -> Unit
+                    // Secondary screens slide up over the guide and fade away again.
+                    val enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 24 }
+                    val exit = fadeOut(tween(150))
+                    AnimatedVisibility(visible = screen == Screen.SEARCH, enter = enter, exit = exit) {
+                        BackHandler { backToGuide(rail = true) }
+                        SearchScreen(onOpenPlayer = { openPlayer(Screen.GUIDE) })
+                    }
+                    AnimatedVisibility(visible = screen == Screen.SETTINGS, enter = enter, exit = exit) {
+                        BackHandler { backToGuide(rail = true) }
+                        SettingsScreen(onBack = { backToGuide(rail = true) })
                     }
                     // Kept composed under the player, so Back from a stream returns to the same list.
-                    if (screen == Screen.FOOTBALL || (screen == Screen.PLAYER && playerReturn == Screen.FOOTBALL)) {
+                    AnimatedVisibility(
+                        visible = screen == Screen.FOOTBALL || (screen == Screen.PLAYER && playerReturn == Screen.FOOTBALL),
+                        enter = enter, exit = exit,
+                    ) {
                         FootballScreen(
                             football,
                             active = screen == Screen.FOOTBALL,

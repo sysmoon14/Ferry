@@ -77,7 +77,7 @@ fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
         val shape = RoundedCornerShape(lerp(12.dp, 0.dp, progress))
         Box(
             Modifier.offset(x, y).size(w, h).clip(shape).background(Color.Black)
-                .border(BorderStroke(2.dp, FerryColors.Gold.copy(alpha = 0.85f * (1f - progress))), shape)
+                .border(BorderStroke(1.5.dp, Color.White.copy(alpha = 0.45f * (1f - progress))), shape)
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -92,7 +92,7 @@ fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
             val channel = np.channel
             if (progress < 0.02f && channel != null) {
                 np.error?.let {
-                    Text("Can't play this channel", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall,
+                    Text("Can't play this channel", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.align(Alignment.Center).padding(12.dp))
                 }
                 Column(
@@ -100,11 +100,11 @@ fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
                         .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 4.dp)
                 ) {
-                    Text("${channel.shownNumber}  ${channel.displayName}", color = FerryColors.Gold,
+                    Text(channel.displayName.uppercase(), color = FerryColors.Gold,
                         style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     np.now?.let {
-                        Text((if (np.catchup) "↺ " else "") + it.title, color = FerryColors.Text,
-                            style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text((if (np.catchup) "Catch-up · " else "") + it.title, color = FerryColors.Text,
+                            style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

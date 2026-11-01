@@ -1,11 +1,20 @@
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, androidx.tv.material3.ExperimentalTvMaterial3Api::class)
 
 package dev.sysmoon.ferry.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -17,8 +26,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -27,41 +38,38 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.tv.material3.Button
-import androidx.tv.material3.ListItem
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
-import coil.compose.AsyncImage
-import dev.sysmoon.ferry.data.ChannelEntity
-import dev.sysmoon.ferry.data.epgKey
-import dev.sysmoon.ferry.data.displayName
-import dev.sysmoon.ferry.data.shownNumber
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
-import dev.sysmoon.ferry.graph
-import kotlinx.coroutines.delay
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.DrawerValue
+import androidx.tv.material3.Icon
+import androidx.tv.material3.ListItem
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.ModalNavigationDrawer
+import androidx.tv.material3.NavigationDrawerItem
+import androidx.tv.material3.NavigationDrawerItemDefaults
+import androidx.tv.material3.NavigationDrawerScope
+import androidx.tv.material3.Text
+import dev.sysmoon.ferry.data.ChannelEntity
+import dev.sysmoon.ferry.data.displayName
+import dev.sysmoon.ferry.data.epgKey
+import dev.sysmoon.ferry.data.shownNumber
+import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.ZapScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -78,21 +86,21 @@ private const val GUIDE_LIMIT = 1_000
 
 /** Top-level menu sections that live on the guide screen (Sports, Search and Settings open their own screens). */
 enum class Section(val label: String) {
-    FAVOURITES("★  Favourites"),
-    GUIDE("📺  TV Guide"),
-    LIST("☰  Channel List"),
+    FAVOURITES("Favourites"),
+    GUIDE("TV Guide"),
+    LIST("Channels"),
 }
 
 /** Where focus is on the guide screen: the main menu, the group list, or the channels. */
 private enum class Level { MENU, RAIL, CONTENT }
 
-private enum class MenuItem(val label: String) {
-    SEARCH("🔍  Search"),
-    FAVOURITES("★  Favourites"),
-    SPORTS("⚽  Sports"),
-    GUIDE("📺  TV Guide"),
-    LIST("☰  Channel List"),
-    SETTINGS("⚙  Settings"),
+private enum class MenuItem(val label: String, val icon: ImageVector) {
+    SEARCH("Search", FerryIcons.Search),
+    FAVOURITES("Favourites", FerryIcons.Star),
+    SPORTS("Sports", FerryIcons.Football),
+    GUIDE("TV Guide", FerryIcons.Grid),
+    LIST("Channels", FerryIcons.List),
+    SETTINGS("Settings", FerryIcons.Settings),
 }
 
 private fun MenuItem.section() = when (this) {
@@ -101,6 +109,8 @@ private fun MenuItem.section() = when (this) {
     MenuItem.LIST -> Section.LIST
     else -> null
 }
+
+private val RAIL_WIDTH = 236.dp
 
 @Composable
 fun GuideScreen(
@@ -185,22 +195,22 @@ fun GuideScreen(
     val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
     val returnFocus = remember { FocusRequester() }
 
+    data class RailEntry(val key: String, val label: String, val icon: ImageVector? = null)
     val rail = buildList {
-        if (recents.isNotEmpty()) add(RECENT to "🕘  Recently watched")
-        add(ALL to if (sky) "All Sky channels" else "All channels")
-        if (sky) skySections.forEach { add(SKY_PREFIX + it to it) }
-        railGroups.forEach { add(it to it) }
+        if (recents.isNotEmpty()) add(RailEntry(RECENT, "Recently watched", FerryIcons.History))
+        add(RailEntry(ALL, if (sky) "All Sky channels" else "All channels", FerryIcons.Tv))
+        if (sky) skySections.forEach { add(RailEntry(SKY_PREFIX + it, it)) }
+        railGroups.forEach { add(RailEntry(it, it)) }
     }
-    val menuItems = MenuItem.entries
     val currentMenuItem = when (section) {
         Section.FAVOURITES -> MenuItem.FAVOURITES
         Section.GUIDE -> MenuItem.GUIDE
         Section.LIST -> MenuItem.LIST
     }
 
-    // Three levels, one visible column on the left at a time: the main menu, then (TV Guide and
-    // Channel List) the group list, then the channels with nothing on the left. Back walks back
-    // up; Back in the main menu leaves the app.
+    // Three levels: the main menu (a rail that opens out while it has focus), then (TV Guide and
+    // Channels) the group list, then the channels. Back walks back up; Back in the main menu
+    // leaves the app.
     val railState = rememberLazyListState()
     val railFocus = remember { FocusRequester() }
     val menuFocus = remember { FocusRequester() }
@@ -221,7 +231,7 @@ fun GuideScreen(
     val focusRail: () -> Unit = {
         scope.launch {
             if (level != Level.RAIL) { level = Level.RAIL; withFrameNanos { } }
-            val index = rail.indexOfFirst { it.first == effective }.coerceAtLeast(0)
+            val index = rail.indexOfFirst { it.key == effective }.coerceAtLeast(0)
             if (railState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
                 railState.scrollToItem(index)
                 withFrameNanos { }
@@ -279,144 +289,139 @@ fun GuideScreen(
         runCatching { returnFocus.requestFocus() }
     }
 
-    Row(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 32.dp, vertical = 12.dp)) {
-        // Main menu
-        androidx.compose.animation.AnimatedVisibility(
-            visible = level == Level.MENU,
-            enter = androidx.compose.animation.expandHorizontally() + androidx.compose.animation.fadeIn(),
-            exit = androidx.compose.animation.shrinkHorizontally() + androidx.compose.animation.fadeOut(),
-        ) {
-            Row {
-                Column(Modifier.width(220.dp).fillMaxHeight()) {
-                    Text("Ferry", style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold)
-                    Spacer(Modifier.height(16.dp))
-                    Column(
-                        Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        menuItems.forEach { item ->
-                            ListItem(
-                                modifier = (if (item == currentMenuItem) Modifier.focusRequester(menuFocus) else Modifier)
-                                    .onPreviewKeyEvent { e ->
-                                        // Right goes into a section, like OK.
-                                        if (e.key == Key.DirectionRight && item.section() != null) {
-                                            if (e.type == KeyEventType.KeyDown) enter(item)
-                                            true
-                                        } else false
+    ModalNavigationDrawer(
+        modifier = Modifier.fillMaxSize().background(FerryColors.Deep),
+        drawerContent = { drawerValue ->
+            NavRail(
+                open = drawerValue == DrawerValue.Open,
+                current = currentMenuItem,
+                menuFocus = menuFocus,
+                onEnter = ::enter,
+            )
+        },
+    ) {
+        Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 32.dp, top = 14.dp, bottom = 10.dp)) {
+            // Group list (TV Guide and Channels)
+            AnimatedVisibility(
+                visible = level == Level.RAIL && hasRail,
+                enter = expandHorizontally(tween(220)) + fadeIn(tween(220)),
+                exit = shrinkHorizontally(tween(180)) + fadeOut(tween(120)),
+            ) {
+                Row {
+                    Column(Modifier.width(RAIL_WIDTH).fillMaxHeight().onFocusChanged { railFocused = it.hasFocus }) {
+                        Text(
+                            currentMenuItem.label,
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 14.dp),
+                        )
+                        LazyColumn(
+                            Modifier.weight(1f),
+                            state = railState,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
+                        ) {
+                            items(rail, key = { it.key }) { entry ->
+                                val isSelected = entry.key == effective
+                                ListItem(
+                                    modifier = if (isSelected) Modifier.focusRequester(railFocus) else Modifier,
+                                    selected = isSelected,
+                                    onClick = { onSelect(entry.key); focusContent(false) },
+                                    leadingContent = if (entry.icon != null) ({ Icon(entry.icon, null, modifier = Modifier.size(20.dp)) }) else null,
+                                    headlineContent = {
+                                        Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                     },
-                                selected = item == currentMenuItem,
-                                onClick = { enter(item) },
-                                headlineContent = { Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                colors = ferryListItemColors(),
-                                border = ferryListItemBorder(),
-                            )
+                                    trailingContent = if (isSelected) ({ Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                                    colors = ferryListItemColors(),
+                                    border = ferryListItemBorder(),
+                                    shape = ferryListItemShape(),
+                                    scale = ferryListItemScale(),
+                                )
+                            }
                         }
                     }
+                    Spacer(Modifier.width(24.dp))
                 }
-                Spacer(Modifier.width(24.dp))
             }
-        }
 
-        // Group list (TV Guide and Channel List)
-        androidx.compose.animation.AnimatedVisibility(
-            visible = level == Level.RAIL && hasRail,
-            enter = androidx.compose.animation.expandHorizontally() + androidx.compose.animation.fadeIn(),
-            exit = androidx.compose.animation.shrinkHorizontally() + androidx.compose.animation.fadeOut(),
-        ) {
-            Row {
-                Column(Modifier.width(240.dp).fillMaxHeight().onFocusChanged { railFocused = it.hasFocus }) {
-                    Text(currentMenuItem.label, style = MaterialTheme.typography.titleLarge, color = FerryColors.Gold, maxLines = 1)
-                    Spacer(Modifier.height(16.dp))
+            // Channels
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .onFocusChanged { channelsFocused = it.hasFocus }
+                    .focusRequester(contentFocus)
+                    .focusGroup()
+            ) {
+                // Leave room on the right for the corner mini player when a stream is playing.
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 10.dp, end = if (nowPlaying.channel != null) MINI_CLEARANCE else 0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        when {
+                            effective == FAVOURITES -> "Favourites"
+                            effective == RECENT -> "Recently watched"
+                            effective == ALL -> if (sky) "All Sky channels" else "All channels"
+                            else -> effective.removePrefix(SKY_PREFIX)
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (effective == ALL && !sky && total > GUIDE_LIMIT) {
+                        Spacer(Modifier.width(14.dp))
+                        Tag("first $GUIDE_LIMIT of $total", FerryColors.Muted, filled = false)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Clock()
+                }
+                if (shown.isEmpty()) {
+                    if (effective == FAVOURITES && total > 0) {
+                        EmptyMessage(
+                            FerryIcons.StarOutline, "No favourites yet",
+                            "Hold OK on any channel in the TV Guide or Channels to add it here.",
+                            Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    } else {
+                        EmptyMessage(
+                            FerryIcons.Tv, "No channels yet",
+                            "Open Settings, scan the code with your phone and add a playlist from there.",
+                            Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    }
+                } else if (gridView) key(effective) {
+                    GuideGrid(
+                        channels = shown,
+                        zap = zapScope,
+                        playingId = playingId,
+                        active = active,
+                        playerShowing = playerShowing,
+                        returnSignal = if (returnToRail) 0 else returnSignal,
+                        onOpenPlayer = onOpenPlayer,
+                        onMenu = { menuFor = it },
+                        onBackToGroups = backFromContent,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
                     LazyColumn(
                         Modifier.weight(1f),
-                        state = railState,
+                        state = listState,
                         verticalArrangement = Arrangement.spacedBy(4.dp),
-                        // Room for the focused item's scale-up and gold outline at the list edges.
-                        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 6.dp),
+                        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),
                     ) {
-                        items(rail, key = { it.first }) { (key, label) ->
-                            ListItem(
-                                modifier = if (key == effective) Modifier.focusRequester(railFocus) else Modifier,
-                                selected = key == effective,
-                                onClick = { onSelect(key); focusContent(false) },
-                                headlineContent = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                colors = ferryListItemColors(),
-                                border = ferryListItemBorder(),
+                        items(shown, key = { it.id }) { channel ->
+                            ChannelRow(
+                                channel = channel,
+                                playing = nowPlaying.channel?.id == channel.id,
+                                modifier = if (channel.id == playingId) Modifier.focusRequester(returnFocus) else Modifier,
+                                onLongClick = { menuFor = channel },
+                                onClick = {
+                                    // Zapping follows the list you started from, not the provider's group.
+                                    graph.player.start(channel, zapScope)
+                                    onOpenPlayer()
+                                },
                             )
                         }
-                    }
-                }
-                Spacer(Modifier.width(24.dp))
-            }
-        }
-
-        // Channels
-        Column(
-            Modifier.weight(1f).fillMaxHeight()
-                .onFocusChanged { channelsFocused = it.hasFocus }
-                .focusRequester(contentFocus)
-                .focusGroup()
-        ) {
-            // Leave room on the right for the corner mini player when a stream is playing.
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 6.dp, end = if (nowPlaying.channel != null) MINI_CLEARANCE else 0.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    when {
-                        effective == FAVOURITES -> "Favourites"
-                        effective == RECENT -> "Recently watched"
-                        effective == ALL -> if (sky) "All Sky channels" else "All channels"
-                        else -> effective.removePrefix(SKY_PREFIX)
-                    },
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                if (effective == ALL && !sky && total > GUIDE_LIMIT) {
-                    Text(
-                        "  first $GUIDE_LIMIT of $total — pick a group",
-                        color = FerryColors.Muted,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Clock()
-            }
-            if (shown.isEmpty()) {
-                if (effective == FAVOURITES && total > 0) NoFavourites(Modifier.weight(1f))
-                else EmptyState(Modifier.weight(1f))
-            } else if (gridView) key(effective) {
-                GuideGrid(
-                    channels = shown,
-                    zap = zapScope,
-                    playingId = playingId,
-                    active = active,
-                    playerShowing = playerShowing,
-                    returnSignal = if (returnToRail) 0 else returnSignal,
-                    onOpenPlayer = onOpenPlayer,
-                    onMenu = { menuFor = it },
-                    onBackToGroups = backFromContent,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                LazyColumn(
-                    Modifier.weight(1f),
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp),
-                ) {
-                    items(shown, key = { it.id }) { channel ->
-                        ChannelRow(
-                            channel = channel,
-                            index = channel.position + 1,
-                            playing = nowPlaying.channel?.id == channel.id,
-                            modifier = if (channel.id == playingId) Modifier.focusRequester(returnFocus) else Modifier,
-                            onLongClick = { menuFor = channel },
-                            onClick = {
-                                // Zapping follows the list you started from, not the provider's group.
-                                graph.player.start(channel, zapScope)
-                                onOpenPlayer()
-                            },
-                        )
                     }
                 }
             }
@@ -424,15 +429,62 @@ fun GuideScreen(
     }
 }
 
+/**
+ * The main menu: a rail of icons that opens out to show labels while it has focus (and dims
+ * what's behind it), like the side menu of any streaming app.
+ */
 @Composable
-private fun NoFavourites(modifier: Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No favourites yet", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Hold OK on any channel in the TV Guide or Channel List to add it.",
-            color = FerryColors.Muted,
-        )
+private fun NavigationDrawerScope.NavRail(open: Boolean, current: MenuItem, menuFocus: FocusRequester, onEnter: (MenuItem) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .background(FerryColors.Deep)
+            .padding(horizontal = 12.dp, vertical = 16.dp),
+    ) {
+        // Brand
+        Row(Modifier.height(56.dp).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(BrandMark, "Ferry", tint = Color.Unspecified, modifier = Modifier.size(40.dp))
+            AnimatedVisibility(visible = open, enter = fadeIn(tween(200)) + expandHorizontally(tween(200)), exit = fadeOut(tween(120)) + shrinkHorizontally(tween(160))) {
+                Text("Ferry", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 14.dp), maxLines = 1, softWrap = false)
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            MenuItem.entries.forEach { item ->
+                val isCurrent = item == current
+                NavigationDrawerItem(
+                    selected = isCurrent,
+                    onClick = { onEnter(item) },
+                    modifier = (if (isCurrent) Modifier.focusRequester(menuFocus) else Modifier)
+                        .onPreviewKeyEvent { e ->
+                            // Right goes into the item, like OK.
+                            if (e.key == Key.DirectionRight) {
+                                if (e.type == KeyEventType.KeyDown) onEnter(item)
+                                true
+                            } else false
+                        },
+                    leadingContent = { Icon(item.icon, null, modifier = Modifier.size(24.dp)) },
+                    shape = NavigationDrawerItemDefaults.shape(shape = RoundedCornerShape(14.dp)),
+                    colors = NavigationDrawerItemDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = FerryColors.Muted,
+                        inactiveContentColor = FerryColors.Muted,
+                        focusedContainerColor = FerryColors.Gold,
+                        focusedContentColor = FerryColors.Deep,
+                        pressedContainerColor = FerryColors.Gold,
+                        pressedContentColor = FerryColors.Deep,
+                        selectedContainerColor = Color.Transparent,
+                        selectedContentColor = FerryColors.Gold,
+                        focusedSelectedContainerColor = FerryColors.Gold,
+                        focusedSelectedContentColor = FerryColors.Deep,
+                        pressedSelectedContainerColor = FerryColors.Gold,
+                        pressedSelectedContentColor = FerryColors.Deep,
+                    ),
+                ) {
+                    Text(item.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false)
+                }
+            }
+        }
     }
 }
 
@@ -445,13 +497,12 @@ private fun Clock() {
             delay(60_000 - value % 60_000) // tick on the minute
         }
     }
-    Text(format.format(Date(now)), style = MaterialTheme.typography.titleLarge, color = FerryColors.Muted)
+    Text(format.format(Date(now)), style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TABULAR), color = FerryColors.Muted)
 }
 
 @Composable
 private fun ChannelRow(
     channel: ChannelEntity,
-    index: Int,
     playing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -462,7 +513,8 @@ private fun ChannelRow(
     val programmes by produceState(initialValue = emptyList(), channel.epgKey) {
         value = graph.db.programmes().upcoming(channel.epgKey, System.currentTimeMillis(), 2)
     }
-    val now = programmes.firstOrNull()?.takeIf { it.start <= System.currentTimeMillis() }
+    val nowMs = System.currentTimeMillis()
+    val now = programmes.firstOrNull()?.takeIf { it.start <= nowMs }
     val next = if (now != null) programmes.getOrNull(1) else programmes.firstOrNull()
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
 
@@ -473,39 +525,36 @@ private fun ChannelRow(
         modifier = modifier,
         colors = ferryListItemColors(),
         border = ferryListItemBorder(),
+        shape = ferryListItemShape(),
+        scale = ferryListItemScale(),
         leadingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "${channel.shownNumber}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = FerryColors.Muted,
-                    modifier = Modifier.width(48.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = FerryColors.Faint,
+                    modifier = Modifier.width(44.dp),
                 )
-                Box(
-                    Modifier.size(width = 72.dp, height = 44.dp).clip(RoundedCornerShape(6.dp))
-                        .background(FerryColors.Navy),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (channel.logo != null) {
-                        AsyncImage(model = channel.logo, contentDescription = null, modifier = Modifier.padding(4.dp))
-                    } else {
-                        Text(channel.name.take(3).uppercase(), color = FerryColors.Muted)
-                    }
-                }
+                LogoChip(channel.logo, channel.name)
             }
         },
         headlineContent = {
-            Text(
-                buildAnnotatedString {
-                    if (channel.favourite) append("★ ")
-                    append(channel.displayName)
-                    if (channel.streamCount > 1) {
-                        withStyle(SpanStyle(color = FerryColors.Muted)) { append("   ${channel.streamCount} streams") }
-                    }
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (channel.favourite) {
+                    Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f, fill = false))
+                if (channel.streamCount > 1) {
+                    Spacer(Modifier.width(10.dp))
+                    Text("${channel.streamCount} streams", color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium)
+                }
+                if (playing) {
+                    Spacer(Modifier.width(10.dp))
+                    Tag("Watching", FerryColors.Gold)
+                }
+            }
         },
         supportingContent = {
             Column {
@@ -513,17 +562,21 @@ private fun ChannelRow(
                     now?.title ?: "No guide data",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (now != null) MaterialTheme.colorScheme.onSurface else FerryColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (now != null) FerryColors.Muted else FerryColors.Faint,
                 )
                 if (now != null) {
-                    ProgressBar(now.start, now.stop, Modifier.padding(vertical = 4.dp).width(220.dp))
+                    ProgressLine(
+                        ((nowMs - now.start).toFloat() / (now.stop - now.start).coerceAtLeast(1)),
+                        Modifier.padding(top = 6.dp, bottom = 4.dp).width(220.dp),
+                    )
                 }
                 next?.let {
                     Text(
-                        "Next ${time.format(Date(it.start))}  ${it.title}",
+                        "Next  ${time.format(Date(it.start))}   ${it.title}",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = FerryColors.Muted,
+                        color = FerryColors.Faint,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -534,21 +587,6 @@ private fun ChannelRow(
 
 @Composable
 fun ProgressBar(start: Long, stop: Long, modifier: Modifier = Modifier) {
-    val fraction = ((System.currentTimeMillis() - start).toFloat() / (stop - start).coerceAtLeast(1))
-        .coerceIn(0f, 1f)
-    Box(modifier.height(4.dp).clip(RoundedCornerShape(2.dp)).background(FerryColors.Navy)) {
-        Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(FerryColors.Gold))
-    }
-}
-
-@Composable
-private fun EmptyState(modifier: Modifier) {
-    Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.Center) {
-        Text("No channels yet", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Open Settings & pairing, scan the QR code with your phone and add a playlist from there.",
-            color = FerryColors.Muted,
-        )
-    }
+    val fraction = ((System.currentTimeMillis() - start).toFloat() / (stop - start).coerceAtLeast(1)).coerceIn(0f, 1f)
+    ProgressLine(fraction, modifier)
 }

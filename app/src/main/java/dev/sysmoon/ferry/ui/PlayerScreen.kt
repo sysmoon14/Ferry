@@ -48,6 +48,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -307,27 +309,43 @@ fun PlayerScreen(onBack: () -> Unit) {
             Text(
                 digits,
                 style = MaterialTheme.typography.displayMedium,
-                color = FerryColors.Gold,
+                color = FerryColors.Text,
                 modifier = Modifier.align(Alignment.TopEnd).padding(48.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(FerryColors.Deep.copy(alpha = 0.85f))
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                    .clip(RoundedCornerShape(16.dp)).background(FerryColors.Deep.copy(alpha = 0.88f))
+                    .border(BorderStroke(1.dp, FerryColors.Line), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 28.dp, vertical = 6.dp),
             )
         }
 
         if (state.state == PlaybackState.ERROR && !cardVisible) {
-            Text(
-                if (state.catchup) "Couldn't play this recording (${state.error ?: "unknown error"}). OK for options, Back for the guide."
-                else if (state.streamCount > 1) "None of this channel's ${state.streamCount} streams would play (${state.error ?: "unknown error"}). ▲▼ to pick another channel."
-                else "Couldn't play this channel (${state.error ?: "unknown error"}). ▲▼ to pick another channel.",
-                modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(12.dp))
-                    .background(FerryColors.Navy).padding(24.dp),
-            )
+            Column(
+                Modifier.align(Alignment.Center).widthIn(max = 640.dp).clip(RoundedCornerShape(20.dp))
+                    .background(FerryColors.Navy).border(BorderStroke(1.dp, FerryColors.Line), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 28.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                androidx.tv.material3.Icon(FerryIcons.Warning, null, tint = FerryColors.Gold, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    when {
+                        state.catchup -> "Couldn't play this recording"
+                        state.streamCount > 1 -> "None of this channel's ${state.streamCount} streams would play"
+                        else -> "Couldn't play this channel"
+                    },
+                    style = MaterialTheme.typography.titleLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(state.error ?: "unknown error", color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(14.dp))
+                Hint(if (state.catchup) "OK  options   ·   Back  guide" else "▲ ▼  another channel   ·   Back  guide")
+            }
         }
 
         AnimatedVisibility(
             visible = cardVisible && browseChannel != null,
-            enter = fadeIn() + slideInVertically { it / 3 },
-            exit = fadeOut() + slideOutVertically { it / 3 },
+            enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 4 },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(200)) { it / 4 },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             val ch = browseChannel ?: return@AnimatedVisibility
@@ -342,10 +360,10 @@ fun PlayerScreen(onBack: () -> Unit) {
                 catchupPos = catchupPos,
                 buffering = isCurrent && state.state == PlaybackState.BUFFERING,
                 paused = isCurrent && state.state == PlaybackState.PAUSED,
-                streamLabel = listOfNotNull(
+                streamLabels = listOfNotNull(
                     if (isCurrent && state.streamCount > 1) state.stream?.let { StreamQuality.parse(it.name).label } else null,
                     if (isCurrent && state.hdr) "HDR" else null,
-                ).joinToString("  ·  ").ifEmpty { null },
+                ),
                 notice = if (isCurrent) state.notice else null,
                 message = message,
                 canCatchUp = { p -> player.canCatchUp(ch, p, nowMs) },
@@ -385,7 +403,7 @@ private fun InfoCard(
     catchupPos: Long?,
     buffering: Boolean,
     paused: Boolean,
-    streamLabel: String?,
+    streamLabels: List<String>,
     notice: String?,
     message: String?,
     canCatchUp: (ProgrammeEntity) -> Boolean,
@@ -399,74 +417,82 @@ private fun InfoCard(
     val p = programmes.getOrNull(index)
     val prev = programmes.getOrNull(index - 1)
     val next = programmes.getOrNull(index + 1)
+    val tabular = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR)
 
+    // A scrim rising from the bottom of the picture, with everything set on one left margin.
     Column(
         Modifier
-            .padding(horizontal = 40.dp, vertical = 24.dp)
-            .widthIn(max = 820.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(FerryColors.Deep.copy(alpha = 0.93f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(16.dp))
-            .padding(horizontal = 20.dp, vertical = 14.dp)
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.35f to Color.Black.copy(alpha = 0.55f),
+                    1f to Color.Black.copy(alpha = 0.92f),
+                )
+            )
+            .padding(start = 56.dp, end = 56.dp, top = 96.dp, bottom = 34.dp)
     ) {
         // Channel row
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("${channel.shownNumber}", style = MaterialTheme.typography.titleMedium, color = FerryColors.Muted)
+            LogoChip(channel.logo, channel.displayName, width = 58.dp, height = 36.dp)
+            Spacer(Modifier.width(12.dp))
+            Text("${channel.shownNumber}", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), color = FerryColors.Faint)
             Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier.size(width = 52.dp, height = 32.dp).clip(RoundedCornerShape(6.dp)).background(FerryColors.Navy),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (channel.logo != null) AsyncImage(channel.logo, null, Modifier.padding(3.dp))
-                else Text(channel.displayName.take(3).uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(channel.displayName, style = MaterialTheme.typography.titleMedium, color = FerryColors.Gold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 320.dp))
+            Text(channel.displayName, style = MaterialTheme.typography.titleMedium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 360.dp))
             Spacer(Modifier.width(14.dp))
             when {
-                !isCurrent -> Pill("PREVIEW — OK TO WATCH", FerryColors.Sea)
-                catchup -> Pill("CATCH-UP", FerryColors.Sea)
-                else -> Pill("WATCHING", FerryColors.Gold)
+                !isCurrent -> Tag("Preview", FerryColors.Sea)
+                catchup -> Tag("Catch-up", FerryColors.Sea)
+                else -> Tag("Watching", FerryColors.Gold)
             }
-            if (paused) Pill("PAUSED", FerryColors.Muted)
-            sleepMinutes?.let { Pill("☾ ${it}m", FerryColors.Muted) }
-            if (buffering) Text("   Tuning…", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
+            if (paused) { Spacer(Modifier.width(8.dp)); Tag("Paused", FerryColors.Muted, filled = false) }
+            sleepMinutes?.let { Spacer(Modifier.width(8.dp)); Tag("Sleep ${it}m", FerryColors.Muted, filled = false) }
+            if (buffering) { Spacer(Modifier.width(12.dp)); Text("Tuning…", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium) }
             Spacer(Modifier.weight(1f))
-            streamLabel?.let { Text(it, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall) }
-            Spacer(Modifier.width(18.dp))
-            Text(time.format(Date(nowMs)), style = MaterialTheme.typography.titleSmall, color = FerryColors.Muted)
+            streamLabels.forEach { Spacer(Modifier.width(8.dp)); Tag(it, FerryColors.Muted, filled = false) }
+            Spacer(Modifier.width(20.dp))
+            Text(time.format(Date(nowMs)), style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TABULAR), color = FerryColors.Muted)
         }
-        notice?.let { Text(it, color = FerryColors.Sea, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
-        Spacer(Modifier.height(8.dp))
+        notice?.let {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                androidx.tv.material3.Icon(FerryIcons.Info, null, tint = FerryColors.Sea, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(it, color = FerryColors.Sea, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
 
         if (p == null) {
-            Text("No guide data for this channel", style = MaterialTheme.typography.titleSmall, color = FerryColors.Muted)
+            Text("No guide data for this channel", style = MaterialTheme.typography.titleLarge, color = FerryColors.Muted)
         } else {
             // Neighbouring programmes: ◀ previous · selected · next ▶
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(prev?.let { "◀  ${time.format(Date(it.start))}  ${it.title}" } ?: "",
-                    color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(16.dp))
-                Text(next?.let { "${time.format(Date(it.start))}  ${it.title}  ▶" } ?: "",
-                    color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                if (prev != null) {
+                    androidx.tv.material3.Icon(FerryIcons.ChevronLeft, null, tint = FerryColors.Faint, modifier = Modifier.size(16.dp))
+                    Text("${time.format(Date(prev.start))}  ${prev.title}", color = FerryColors.Faint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = tabular.copy(fontSize = 13.sp), modifier = Modifier.weight(1f))
+                } else Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(24.dp))
+                if (next != null) {
+                    Text("${time.format(Date(next.start))}  ${next.title}", color = FerryColors.Faint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = tabular.copy(fontSize = 13.sp), modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                    androidx.tv.material3.Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Faint, modifier = Modifier.size(16.dp))
+                } else Spacer(Modifier.weight(1f))
             }
-            Spacer(Modifier.height(6.dp))
-            Text(p.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+            Spacer(Modifier.height(4.dp))
+            Text(p.title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                 val dayText = if (sameDay(p.start, nowMs)) "" else day.format(Date(p.start)) + "  "
                 Text("$dayText${time.format(Date(p.start))} – ${time.format(Date(p.stop))}  ·  ${(p.stop - p.start) / 60_000} min",
-                    color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    color = FerryColors.Muted, style = tabular)
+                Spacer(Modifier.width(12.dp))
                 when {
-                    p.start <= nowMs && p.stop > nowMs -> Pill("LIVE", FerryColors.Gold)
-                    p.stop <= nowMs && canCatchUp(p) -> Pill("↺ CATCH-UP", FerryColors.Sea)
-                    p.stop <= nowMs -> Pill("ENDED", FerryColors.Muted)
-                    hasReminder(p) -> Pill("🔔 REMINDER", FerryColors.Sea)
-                    else -> Pill("LATER", FerryColors.Muted)
+                    p.start <= nowMs && p.stop > nowMs -> Tag("Live", FerryColors.Live, dot = true)
+                    p.stop <= nowMs && canCatchUp(p) -> Tag("Catch-up", FerryColors.Sea, filled = false)
+                    p.stop <= nowMs -> Tag("Ended", FerryColors.Muted, filled = false)
+                    hasReminder(p) -> Tag("Reminder set", FerryColors.Sea)
+                    else -> Tag("Later", FerryColors.Muted, filled = false)
                 }
             }
             // Progress: real position when watching catch-up, wall clock for live.
@@ -477,77 +503,74 @@ private fun InfoCard(
                 else -> null
             }
             if (position != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                    Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(FerryColors.Navy)) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth((position.toFloat() / length).coerceIn(0f, 1f))
-                            .background(if (watchingSelected && catchup) FerryColors.Sea else FerryColors.Gold))
-                    }
-                    Spacer(Modifier.width(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                    ProgressLine(position.toFloat() / length, Modifier.weight(1f), color = if (watchingSelected && catchup) FerryColors.Sea else FerryColors.Gold)
+                    Spacer(Modifier.width(14.dp))
                     Text(
                         if (watchingSelected && catchup) "${time.format(Date(p.start + position))} · ${(length - position) / 60_000} min left"
                         else "${(length - position) / 60_000} min left",
-                        color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                        color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1,
                     )
                 }
             }
             p.description?.let {
-                Text(it, color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                Text(it, color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).widthIn(max = 1100.dp))
             }
         }
 
         if (controls != null) {
-            Spacer(Modifier.height(10.dp))
-            // All eight on one line: compact pills that share the width rather than overflowing.
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
-                    val label = when (c) {
-                        Control.PLAY_PAUSE -> if (paused) "▶ Play" else "❚❚ Pause"
-                        Control.SLEEP -> if (sleepMinutes == null) "☾ Sleep" else "☾ ${sleepMinutes}m"
-                        else -> c.label
+                    val (icon, label) = when (c) {
+                        Control.RESTART -> FerryIcons.Replay to "Restart"
+                        Control.BACK30 -> FerryIcons.Rewind to "30s back"
+                        Control.PLAY_PAUSE -> if (paused) FerryIcons.Play to "Play" else FerryIcons.Pause to "Pause"
+                        Control.FWD30 -> FerryIcons.Forward to "30s on"
+                        Control.LIVE -> FerryIcons.LiveTv to "Live"
+                        Control.PREVIOUS -> FerryIcons.SkipPrevious to "Previous"
+                        Control.SLEEP -> FerryIcons.Moon to (if (sleepMinutes == null) "Sleep" else "Sleep ${sleepMinutes}m")
+                        Control.STREAMS -> FerryIcons.Layers to "Streams"
                     }
-                    Text(
-                        label,
-                        color = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.45f) },
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        softWrap = false,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.weight(1f, fill = false).clip(RoundedCornerShape(18.dp))
-                            .background(if (focused) FerryColors.Gold else FerryColors.Navy)
-                            .padding(horizontal = 11.dp, vertical = 6.dp),
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp)) {
+                        Box(
+                            Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(when { focused -> FerryColors.Gold; on -> Color.White.copy(alpha = 0.12f); else -> Color.White.copy(alpha = 0.05f) }),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            androidx.tv.material3.Icon(
+                                icon, null,
+                                tint = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.35f) },
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            label,
+                            color = when { focused -> FerryColors.Gold; on -> FerryColors.Muted; else -> FerryColors.Faint.copy(alpha = 0.5f) },
+                            style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Text(
+        Spacer(Modifier.height(12.dp))
+        Hint(
             message ?: when {
-                controls != null -> "◀▶ choose  ·  OK select  ·  ▲ or Back to close"
-                p != null && p.start > nowMs -> (if (hasReminder(p)) "OK  cancel reminder" else "OK  remind me") + "  ·  ▲▼ channels  ·  ◀▶ programmes"
-                !isCurrent && p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start  ·  ▲▼ channels  ·  ◀▶ programmes"
-                !isCurrent -> "OK  watch this channel  ·  ▲▼ channels  ·  ◀▶ programmes  ·  Back to close"
-                watchingSelected -> "OK  controls  ·  ▲▼ channels  ·  ◀▶ programmes"
-                p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start  ·  ◀▶ programmes"
-                else -> "▲▼ channels  ·  ◀▶ programmes  ·  Back to close"
+                controls != null -> "◀ ▶  choose   ·   OK  select   ·   ▲ or Back  close"
+                p != null && p.start > nowMs -> (if (hasReminder(p)) "OK  cancel reminder" else "OK  remind me") + "   ·   ▲ ▼  channels   ·   ◀ ▶  programmes"
+                !isCurrent && p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start   ·   ▲ ▼  channels   ·   ◀ ▶  programmes"
+                !isCurrent -> "OK  watch this channel   ·   ▲ ▼  channels   ·   ◀ ▶  programmes   ·   Back  close"
+                watchingSelected -> "OK  controls   ·   ▲ ▼  channels   ·   ◀ ▶  programmes"
+                p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start   ·   ◀ ▶  programmes"
+                else -> "▲ ▼  channels   ·   ◀ ▶  programmes   ·   Back  close"
             },
-            color = if (message != null) FerryColors.Sea else FerryColors.Muted.copy(alpha = 0.8f),
-            style = MaterialTheme.typography.labelSmall,
+            color = if (message != null) FerryColors.Sea else FerryColors.Faint,
         )
     }
-}
-
-@Composable
-private fun Pill(text: String, color: Color) {
-    Text(
-        text,
-        color = FerryColors.Deep,
-        style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier.padding(start = 8.dp).clip(RoundedCornerShape(4.dp)).background(color)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    )
 }
 
 private fun sameDay(a: Long, b: Long): Boolean {
