@@ -233,7 +233,11 @@ class ChannelRepository(
                 .thenByDescending { counts[it] }
         ).take(MAX_COUNTRY_FEEDS)
         val filled = HashSet<String>()
-        for (code in feeds) {
+        // epgshare01's file names change now and then (US1 went away): read its listing (daily).
+        val index = runCatching {
+            cachedFeed(SportsGuides.INDEX_URL, maxAgeMs = 24 * 3_600_000L).use { SportsGuides.parseIndex(it.reader().readText()) }
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
+        for (code in feeds) for (file in SportsGuides.filesFor(code, index)) {
             val left = rows.filter { it.key !in filled && (code == SportsGuides.BEIN || it.country == code) }
             if (left.isEmpty()) continue
             val byId = left.filter { it.tvg != null }.groupBy({ SportsGuides.idKey(it.tvg!!) }, { it })
@@ -242,7 +246,7 @@ class ChannelRepository(
             val idMap = HashMap<String, List<String>>()
             val batch = ArrayList<ProgrammeEntity>(BATCH)
             runCatching {
-                cachedFeed(SportsGuides.feedUrl(code)).use { input ->
+                cachedFeed(SportsGuides.fileUrl(file)).use { input ->
                     XmltvParser.parse(input, Xml.newPullParser(), accept = { it in idMap },
                         onChannel = { id, names ->
                             // Same-named channels exist in many countries (beIN Sports 1 FR/US/MENA…).
@@ -263,15 +267,15 @@ class ChannelRepository(
                     }
                 }
                 if (batch.isNotEmpty()) db.programmes().insert(batch)
-            }.onFailure { errors += "Sports guide $code: ${it.message ?: it.javaClass.simpleName}" }
+            }.onFailure { errors += "Sports guide $file: ${it.message ?: it.javaClass.simpleName}" }
         }
         return filled.size
     }
 
     /** Backup feeds are big and change slowly: download at most every 6 hours. */
-    private fun cachedFeed(url: String): InputStream {
+    private fun cachedFeed(url: String, maxAgeMs: Long = 6 * 3_600_000L): InputStream {
         val file = java.io.File(cacheDir, "backup_epg_" + Integer.toHexString(url.hashCode()))
-        if (!file.exists() || System.currentTimeMillis() - file.lastModified() > 6 * 3_600_000L) {
+        if (!file.exists() || System.currentTimeMillis() - file.lastModified() > maxAgeMs) {
             val response = http.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).build()).execute()
             response.use {
                 if (!it.isSuccessful) error("HTTP ${it.code}")

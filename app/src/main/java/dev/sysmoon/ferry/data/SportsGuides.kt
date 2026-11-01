@@ -9,7 +9,23 @@ package dev.sysmoon.ferry.data
 object SportsGuides {
     const val BEIN = "BEIN"
 
-    fun feedUrl(code: String) = "https://epgshare01.online/epgshare01/epg_ripper_${code}1.xml.gz"
+    const val INDEX_URL = "https://epgshare01.online/epgshare01/"
+    fun fileUrl(file: String) = "https://epgshare01.online/epgshare01/epg_ripper_$file.xml.gz"
+
+    /** File codes in epgshare01's directory listing ("UK1", "US_SPORTS1", "BEIN1"…). */
+    fun parseIndex(html: String): Set<String> =
+        Regex("""epg_ripper_([A-Za-z0-9_]+)\.xml\.gz""").findAll(html).map { it.groupValues[1] }.toSet()
+
+    /**
+     * The files to read for [code]: its numbered country files ("UK1", "UK2") and any sports file
+     * ("US_SPORTS1"), at most three. Without the listing, just "<code>1" (the usual name).
+     */
+    fun filesFor(code: String, index: Set<String>?): List<String> {
+        if (index == null) return listOf("${code}1")
+        val own = index.filter { it.matches(Regex("${code}\\d+")) }.sorted()
+        val sports = index.filter { it.matches(Regex("${code}_SPORTS\\d*")) }.sorted()
+        return (sports + own).take(3)
+    }
 
     /** Playlist country prefixes → epgshare01 file codes. */
     private val CODES = mapOf(
