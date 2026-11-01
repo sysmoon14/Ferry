@@ -136,6 +136,9 @@ Choosing a match lists every stream that might show it, best first, with the rea
    two of a numbered family count; replay/24-7 loops don't.
 5. Just the competition at kick-off on a sports channel (weakest).
 
+"Around kick-off" means a listing starting up to 75 minutes before (build-up shows that run into the
+game, e.g. Viaplay's 15:30 "Premier League" for a 16:30 kick-off) and lasting no more than 4 hours.
+
 Other sports (incl. darts' "Premier League"), youth/women's games, magazine shows ("Preview", "Highlights")
 and look-alike names are filtered out; UK streams
 rank first. Playing one makes that list the channel up/down list, so if a stream dies, ▲ tries the next;
