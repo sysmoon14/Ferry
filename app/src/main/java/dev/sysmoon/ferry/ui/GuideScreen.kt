@@ -200,7 +200,7 @@ fun GuideScreen(
     data class RailEntry(val key: String, val label: String, val icon: ImageVector? = null)
     val rail = buildList {
         if (recents.isNotEmpty()) add(RailEntry(RECENT, "Recently watched"))
-        add(RailEntry(ALL, if (sky) "All Sky channels" else "All channels"))
+        add(RailEntry(ALL, "All channels"))
         if (sky) skySections.forEach { add(RailEntry(SKY_PREFIX + it, it)) }
         railGroups.forEach { add(RailEntry(it, it)) }
     }
@@ -363,7 +363,7 @@ fun GuideScreen(
                         when {
                             effective == FAVOURITES -> "Favourites"
                             effective == RECENT -> "Recently watched"
-                            effective == ALL -> if (sky) "All Sky channels" else "All channels"
+                            effective == ALL -> "All channels"
                             else -> effective.removePrefix(SKY_PREFIX)
                         },
                         style = MaterialTheme.typography.headlineSmall,

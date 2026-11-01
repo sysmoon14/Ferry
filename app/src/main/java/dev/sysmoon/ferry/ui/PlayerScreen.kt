@@ -531,7 +531,7 @@ private fun InfoCard(
                         Control.PLAY_PAUSE -> if (paused) FerryIcons.Play to "Play" else FerryIcons.Pause to "Pause"
                         Control.FWD30 -> FerryIcons.Forward to "30s on"
                         Control.LIVE -> FerryIcons.LiveTv to "Live"
-                        Control.PREVIOUS -> FerryIcons.SkipPrevious to "Previous"
+                        Control.PREVIOUS -> FerryIcons.LastChannel to "Last channel"
                         Control.SLEEP -> FerryIcons.Moon to (if (sleepMinutes == null) "Sleep" else "Sleep ${sleepMinutes}m")
                         Control.STREAMS -> FerryIcons.Layers to "Streams"
                     }
