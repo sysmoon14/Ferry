@@ -15,7 +15,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
 | Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
-| Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down |
+| Player | Sky+-style info card, controls (restart, ±30s, pause, live), number entry, channel up/down. HDR streams play as HDR (the TV switches mode; the card shows **HDR**), and falling back to an SDR backup switches back cleanly. Resuming the last channel at launch goes straight into the stream |
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
 | Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
 | Search | Programmes (catch-up, on now, coming up) and channels, from the main menu |
@@ -307,8 +307,9 @@ app/src/main/assets/web/index.html   config page (no build step)
 
 - Up on the remote = previous channel in the list, Down = next.
 - CI publishes `ferry.apk` (release, recommended) and `ferry-debug.apk` to the rolling `nightly` release.
-- If a live stream fails, drops or freezes for 10 s mid-programme, Ferry moves through the channel's other
-  streams (each once), then retries from the best one; it only gives up after 3 full rounds in a minute.
+- If a live stream that was playing fails, drops or freezes for 10 s, Ferry first restarts the same stream
+  (same quality, same timing — like flicking away and back; up to 3 times a minute). If that doesn't stick
+  it moves through the channel's other streams (each once), then retries from the best one; it only gives up after 3 full rounds in a minute.
   A stream that has played steadily for 30 s resets the round. HLS streams that fall behind the live
   window jump back to live instead of switching.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.

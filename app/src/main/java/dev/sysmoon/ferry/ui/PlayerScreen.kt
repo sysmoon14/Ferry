@@ -342,7 +342,10 @@ fun PlayerScreen(onBack: () -> Unit) {
                 catchupPos = catchupPos,
                 buffering = isCurrent && state.state == PlaybackState.BUFFERING,
                 paused = isCurrent && state.state == PlaybackState.PAUSED,
-                streamLabel = if (isCurrent && state.streamCount > 1) state.stream?.let { StreamQuality.parse(it.name).label } else null,
+                streamLabel = listOfNotNull(
+                    if (isCurrent && state.streamCount > 1) state.stream?.let { StreamQuality.parse(it.name).label } else null,
+                    if (isCurrent && state.hdr) "HDR" else null,
+                ).joinToString("  ·  ").ifEmpty { null },
                 notice = if (isCurrent) state.notice else null,
                 message = message,
                 canCatchUp = { p -> player.canCatchUp(ch, p, nowMs) },

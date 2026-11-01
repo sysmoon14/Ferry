@@ -2,7 +2,10 @@ package dev.sysmoon.ferry.ui
 
 import android.view.LayoutInflater
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -53,14 +56,18 @@ private val MINI_TOP = 12.dp
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun VideoLayer(full: Boolean, show: Boolean) {
+/** [animate] false: jump straight to the new size (launching directly into a stream). */
+fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
     val graph = LocalContext.current.graph
     val np by graph.player.state.collectAsState()
-    val progress by animateFloatAsState(
-        targetValue = if (full) 1f else 0f,
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "video",
-    )
+    val anim = remember { Animatable(if (full) 1f else 0f) }
+    val animateNow by rememberUpdatedState(animate)
+    LaunchedEffect(full) {
+        val target = if (full) 1f else 0f
+        if (animateNow) anim.animateTo(target, tween(420, easing = FastOutSlowInEasing)) else anim.snapTo(target)
+    }
+    // While not animating, draw the target straight away (the effect snaps a frame later).
+    val progress = if (animate) anim.value else (if (full) 1f else 0f)
     if (!show && progress == 0f) return
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = lerp(MINI_WIDTH, maxWidth, progress)

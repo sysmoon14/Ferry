@@ -71,6 +71,8 @@ data class NowPlaying(
     val streamCount: Int = 1,
     /** Short message for the banner, e.g. after falling back to a backup stream. */
     val notice: String? = null,
+    /** The stream on screen is HDR (PQ/HLG); false again after falling back to an SDR backup. */
+    val hdr: Boolean = false,
 ) {
     val progress: Float?
         get() = now?.let {
@@ -131,6 +133,12 @@ class PlayerController(
                     }
                 }
                 sync()
+            }
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val transfer = player.videoFormat?.colorInfo?.colorTransfer
+                val hdr = transfer == androidx.media3.common.C.COLOR_TRANSFER_ST2084 ||
+                    transfer == androidx.media3.common.C.COLOR_TRANSFER_HLG
+                if (_state.value.hdr != hdr) _state.update { it.copy(hdr = hdr) }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 stableJob?.cancel()
@@ -265,6 +273,7 @@ class PlayerController(
         streamIndex = list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0)
         tried.clear(); tried += streamIndex
         drops.clear()
+        sameRestarts.clear()
         // Look up now/next first so the banner never flashes "No guide data".
         val (now, next) = programmesFor(primary)
         playCurrentStream(primary, now, next, notice = null)
@@ -331,6 +340,10 @@ class PlayerController(
     private fun reconnect(reason: String, error: PlaybackException? = null) {
         val current = _state.value
         val channel = current.channel ?: return
+        // First, if this stream had been playing, just restart it (what flicking away and back
+        // does): same quality, same timing, no jump in a live match. Only if that doesn't stick
+        // (fails before playing again, or 3 restarts in a minute) move on to other streams.
+        if (streamStarted && restartSame(channel, current, reason)) return
         if (failover(reason)) return
         val now = System.currentTimeMillis()
         drops.addLast(now)
@@ -352,6 +365,20 @@ class PlayerController(
             if (streams.size > 1) { streamIndex = 0; tried.clear(); tried += 0 }
             playCurrentStream(channel, current.now, current.next, notice = "Reconnected after the stream $reason")
         }
+    }
+
+    private val sameRestarts = ArrayDeque<Long>()
+
+    private fun restartSame(channel: ChannelEntity, current: NowPlaying, reason: String): Boolean {
+        val now = System.currentTimeMillis()
+        while (sameRestarts.isNotEmpty() && sameRestarts.first() < now - 60_000) sameRestarts.removeFirst()
+        if (sameRestarts.size >= 3) return false
+        sameRestarts.addLast(now)
+        playJob?.cancel()
+        playJob = scope.launch {
+            playCurrentStream(channel, current.now, current.next, notice = "Stream $reason — restarting it")
+        }
+        return true
     }
 
     /** Moves to the next untried stream of the current channel, keeping the banner on the same channel. */

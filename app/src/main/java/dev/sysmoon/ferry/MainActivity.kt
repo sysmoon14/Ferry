@@ -62,6 +62,22 @@ class MainActivity : ComponentActivity() {
 
     private fun openPlayer(from: Screen) { playerReturn = from; screen = Screen.PLAYER }
 
+    // Launching straight into a stream (resume last channel, or a deep link with the app closed):
+    // cover everything in black until the player is up, and put the video full screen at once
+    // instead of growing it out of the mini player, so the guide and menus never flash up.
+    private var covered by mutableStateOf(false)
+    private var snapVideo by mutableStateOf(false)
+
+    private fun openPlayerInstantly() {
+        snapVideo = true
+        openPlayer(Screen.GUIDE)
+        covered = false
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(300) // a few frames: the layer has snapped to full screen
+            snapVideo = false
+        }
+    }
+
     private fun leavePlayer() {
         if (playerReturn == Screen.FOOTBALL) screen = Screen.FOOTBALL else backToGuide(rail = false)
     }
@@ -78,6 +94,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         FerryService.start(this)
         pendingResume = savedInstanceState == null
+        covered = pendingResume
         handle(intent)
         setContent {
             FerryTheme {
@@ -143,6 +160,7 @@ class MainActivity : ComponentActivity() {
                     // Full screen in the player; shrinks to the corner over the guide and search.
                     VideoLayer(
                         full = screen == Screen.PLAYER,
+                        animate = !snapVideo,
                         show = screen == Screen.PLAYER ||
                             ((screen == Screen.GUIDE || screen == Screen.SEARCH || screen == Screen.FOOTBALL) && playing.channel != null),
                     )
@@ -151,6 +169,7 @@ class MainActivity : ComponentActivity() {
                         BackHandler { leavePlayer() }
                         PlayerScreen(onBack = { leavePlayer() })
                     }
+                    if (covered) Box(Modifier.fillMaxSize().background(Color.Black))
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
                         ReminderPopup(
@@ -178,11 +197,15 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         graph.uiVisible.value = true
-        if (!pendingResume) return
+        if (!pendingResume) { covered = false; return }
         pendingResume = false
+        covered = true
         lifecycleScope.launch {
-            if (!graph.settings.resumeLastChannel() || graph.settings.lastChannelId() == null) return@launch
-            openPlayer(Screen.GUIDE)
+            if (!graph.settings.resumeLastChannel() || graph.settings.lastChannelId() == null) {
+                covered = false
+                return@launch
+            }
+            openPlayerInstantly()
             if (!graph.player.play(PlayTarget.Last)) backToGuide(rail = true)
         }
     }
@@ -203,12 +226,13 @@ class MainActivity : ComponentActivity() {
         if (action != null) pendingResume = false // a deep link says what to show
         when (action) {
             is LaunchAction.Play -> {
-                openPlayer(Screen.GUIDE)
+                // App not on screen yet (launched by HA / a deep link): straight into the stream.
+                if (screen != Screen.PLAYER && !graph.uiVisible.value) openPlayerInstantly() else openPlayer(Screen.GUIDE)
                 lifecycleScope.launch {
                     if (!graph.player.play(action.target)) backToGuide(rail = true)
                 }
             }
-            LaunchAction.Guide -> backToGuide(rail = true)
+            LaunchAction.Guide -> { covered = false; backToGuide(rail = true) }
             null -> Unit
         }
     }
