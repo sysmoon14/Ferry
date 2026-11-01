@@ -609,6 +609,7 @@ class PlayerController(
      * (seen as "playing" with no channel in Home Assistant).
      */
     suspend fun stop() = withContext(Dispatchers.Main.immediate) {
+        android.util.Log.i("FerryPlayer", "stop() while ${_state.value.state} on ${_state.value.channel?.name}", Throwable("stop() called from"))
         playJob?.cancel()
         watchdog?.cancel()
         stallJob?.cancel()
