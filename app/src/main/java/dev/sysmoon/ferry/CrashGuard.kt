@@ -66,38 +66,59 @@ object CrashGuard {
                 val s = graph?.player?.state?.value
                 val live = s?.channel != null && !s.catchup &&
                     (s.state == PlaybackState.PLAYING || s.state == PlaybackState.BUFFERING)
-                if (live) {
+                val now = System.currentTimeMillis()
+                val recent = prefs.getString("resumes", "").orEmpty().split(',')
+                    .mapNotNull { it.toLongOrNull() }.filter { it > now - RESUME_WINDOW_MS }
+                if (live && recent.size >= MAX_RESUMES) Log.w(TAG, "Crashed ${recent.size + 1} times in 10 minutes: not reopening")
+                if (live && recent.size < MAX_RESUMES) {
+                    val id = s!!.channel!!.id
                     prefs.edit()
-                        .putString("resume_channel", s!!.channel!!.id)
-                        .putLong("resume_at", System.currentTimeMillis())
+                        .putString("resume_channel", id)
+                        .putLong("resume_at", now)
+                        .putString("resumes", (recent + now).joinToString(","))
                         .commit() // the process is about to die: write now
+                    // Android restarts the service only after a back-off (25 s+), so ask it to open
+                    // Ferry on the channel in a couple of seconds instead.
+                    reopenSoon(context, id)
                 }
             }
             previous?.uncaughtException(thread, e)
         }
     }
 
-    /** After the graph is up: if Ferry crashed mid-channel moments ago, reopen it on that channel. */
+    private fun reopenSoon(context: Context, channelId: String) {
+        val intent = DeepLinks.playIntent(context, PlayTarget.Id(channelId))
+        val pending = android.app.PendingIntent.getActivity(
+            context, 7001, intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        val alarms = context.getSystemService(android.app.AlarmManager::class.java)
+        val at = System.currentTimeMillis() + 2_000
+        // Exact alarms need extra permission from Android 12; a normal one is close enough there.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            alarms.set(android.app.AlarmManager.RTC_WAKEUP, at, pending)
+        } else {
+            alarms.setExact(android.app.AlarmManager.RTC_WAKEUP, at, pending)
+        }
+    }
+
+    /**
+     * After the graph is up: if Ferry crashed mid-channel moments ago, make sure it's back on that
+     * channel (normally the reopen alarm has already done it; this covers it not firing).
+     */
     fun resumeAfterCrash(graph: AppGraph) {
         val id = prefs.getString("resume_channel", null) ?: return
         val at = prefs.getLong("resume_at", 0)
         prefs.edit().remove("resume_channel").remove("resume_at").apply()
-        val now = System.currentTimeMillis()
-        if (now - at > RESUME_WITHIN_MS) return
-        val recent = prefs.getString("resumes", "").orEmpty().split(',')
-            .mapNotNull { it.toLongOrNull() }.filter { it > now - RESUME_WINDOW_MS }
-        if (recent.size >= MAX_RESUMES) {
-            Log.w(TAG, "Crashed ${recent.size + 1} times in 10 minutes: not reopening")
-            return
-        }
-        prefs.edit().putString("resumes", (recent + now).joinToString(",")).apply()
+        if (System.currentTimeMillis() - at > RESUME_WITHIN_MS) return
         graph.scope.launch {
-            delay(1_500) // let the service and player settle
-            Log.i(TAG, "Reopening Ferry on the channel that was playing before the crash")
-            graph.commands.play(PlayTarget.Id(id))
+            delay(4_000) // give the reopen alarm's deep link time to start the channel
+            if (graph.player.state.value.channel == null) {
+                Log.i(TAG, "Reopening Ferry on the channel that was playing before the crash")
+                graph.commands.play(PlayTarget.Id(id))
+            } else Log.i(TAG, "Back on the channel that was playing before the crash")
             _last.value?.let { r ->
-                val resumed = r.copy(resumed = true)
-                _last.value = resumed
+                _last.value = r.copy(resumed = true)
                 prefs.edit().putBoolean("resumed", true).apply()
             }
         }
