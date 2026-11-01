@@ -234,6 +234,10 @@ fun GuideScreen(
             level = Level.CONTENT
             withFrameNanos { }
             runCatching { contentFocus.requestFocus() }
+            withFrameNanos { }
+            // Nothing to focus (no favourites yet, list still loading): stay where we were
+            // rather than leaving focus nowhere.
+            if (!channelsFocused) { if (section == Section.FAVOURITES) focusMenu() else focusRail() }
         }
     }
     /** Back (or Left at the edge) from the channels. */
