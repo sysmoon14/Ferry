@@ -172,6 +172,8 @@ own **BBC iPlayer** group, separate from your playlists, with schedules from iPl
 
 ### MQTT entities (one device per TV)
 
+Each TV's device page has a **Visit** link to its web setup page.
+
 | Entity | What it does |
 |---|---|
 | `select.<name>_channel` | Favourites; choosing one tunes the TV |

@@ -6,6 +6,8 @@ import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
 import dev.sysmoon.ferry.AppGraph
 import dev.sysmoon.ferry.BuildConfig
+import dev.sysmoon.ferry.FerryService
+import dev.sysmoon.ferry.net.Network
 import dev.sysmoon.ferry.data.MqttConfig
 import dev.sysmoon.ferry.player.NowPlaying
 import kotlinx.coroutines.Job
@@ -154,6 +156,8 @@ class MqttBridge(private val g: AppGraph) {
         put("manufacturer", "Ferry")
         put("model", "Android TV IPTV")
         put("sw_version", BuildConfig.VERSION_NAME)
+        // HA shows this as "Visit" on the device page: the box's web setup page.
+        Network.localIpv4()?.let { put("configuration_url", "http://$it:${FerryService.PORT}") }
     }
 
     private fun common(id: String, name: String, base: String, key: String, label: String) = buildMap<String, Any?> {
