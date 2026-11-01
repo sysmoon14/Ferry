@@ -93,4 +93,12 @@ class FootballTest {
         assertFalse(TeamNames.notFirstTeam(TeamNames.normalise("Live Super Sunday: Liverpool v Arsenal")))
         assertFalse(TeamNames.otherSport("SuperSport Premier League"))
     }
+
+    @Test fun feedsAndEventChannels() {
+        assertEquals(8, TeamNames.feedNumber(TeamNames.normalise("Optus Sport 8 FHD")))
+        assertEquals(10, TeamNames.feedNumber(TeamNames.normalise("Hub Premier 10 FHD")))
+        assertEquals(null, TeamNames.feedNumber(TeamNames.normalise("SuperSport Premier League")))
+        assertTrue(TeamNames.isEventChannelOf("Peacock | Event 3", "peacock"))
+        assertFalse(TeamNames.isEventChannelOf("Peacock | Event 3", "nbc"))
+    }
 }

@@ -103,8 +103,14 @@ class MatchFinder(private val db: FerryDatabase) {
             if (TeamNames.otherSport(ch.name) || TeamNames.notFirstTeam(name)) continue
             if (f.competition.channelWords.none { name.contains(" $it ") }) continue
             if (name.contains(" premier sports ")) continue // a broadcaster, not the league
-            if (sameSlot <= 1) add(ch, 64, "${f.competition.label} channel (only game on)")
-            else add(ch, 38, "${f.competition.label} channel ($sameSlot games at this time)")
+            if (TeamNames.isReplay(ch)) continue
+            // Numbered feeds ("Optus Sport 1…12", "Hub Premier 1…11"): with one game on, it's on the
+            // first one or two; the rest are spare.
+            val n = TeamNames.feedNumber(name)
+            if (n != null && n > 2) continue
+            val base = if (n == 2) 52 else 64
+            if (sameSlot <= 1) add(ch, base, "${f.competition.label} channel (only game on)")
+            else add(ch, base - 26, "${f.competition.label} channel ($sameSlot games at this time)")
         }
 
         // Broadcasters ESPN lists (mostly US: NBC, Peacock, USA Network, CBS, Paramount+…)
@@ -113,10 +119,15 @@ class MatchFinder(private val db: FerryDatabase) {
             if (key.length < 3) continue
             // The network itself ("USA Network", "NBC HD", "Peacock 1"), not everything with its name in.
             rows.filter { TeamNames.isNetwork(it.name, key) }.take(4).forEach { add(it, 55, "Listed broadcaster: $b") }
+            // Streaming services as numbered event channels ("Peacock | Event 1"): the match is on
+            // one of the first few.
+            rows.filter { TeamNames.isEventChannelOf(it.name, key) }
+                .sortedBy { TeamNames.feedNumber(TeamNames.normalise(it.name)) ?: 99 }.take(3)
+                .forEach { add(it, 46, "Listed broadcaster: $b (event channel)") }
         }
 
         return found.values.sortedWith(compareByDescending<StreamCandidate> { it.score }.thenByDescending { it.channel.quality })
-            .take(40)
+            .take(60)
     }
 
     /** UK streams first, then better quality. */
@@ -215,6 +226,20 @@ object TeamNames {
 
     private val SHOW_WORDS = Regex("""\b(preview|review|highlights|show|news|classic|classics|rewind|magazine|talk|tonight|extra|goals|gameday|matchday live|reaction|countdown|build up)\b""")
     fun isMagazineShow(normalisedTitle: String) = SHOW_WORDS.containsMatchIn(normalisedTitle)
+
+    private val REPLAY = Regex("""\b(replay|replays|vod|24 7|highlights|classic|classics|rewind)\b""")
+    /** Replay / VOD / 24-7 loops: never the live match. */
+    fun isReplay(ch: ChannelEntity) = REPLAY.containsMatchIn(normalise(ch.name + " " + ch.groupTitle.orEmpty()))
+
+    /** The feed number in "optus sport 8 fhd", "hub premier 10", "peacock event 3". */
+    fun feedNumber(normalisedName: String): Int? =
+        Regex(""" (\d{1,2}) (?:uhd |fhd |hd |sd |4k |1080p |720p |50fps )*$""").find(normalisedName)?.groupValues?.get(1)?.toIntOrNull()
+
+    /** "Peacock | Event 3" / "Peacock Event 3" for broadcaster [key]. */
+    fun isEventChannelOf(name: String, key: String): Boolean {
+        val n = normalise(name)
+        return n.contains(" $key ") && n.contains(" event ") && feedNumber(n) != null
+    }
 
     /** A date like "31/10" or "31.10" in a channel name. */
     fun dateIn(name: String, year: Int): java.time.LocalDate? {
