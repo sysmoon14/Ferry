@@ -524,7 +524,7 @@ private fun InfoCard(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 controls.forEach { (c, on) ->
                     val focused = c == focusedControl
-                    val (icon, label): Pair<androidx.compose.ui.graphics.vector.ImageVector, String> = when (c) {
+                    val iconLabel: Pair<androidx.compose.ui.graphics.vector.ImageVector, String> = when (c) {
                         Control.RESTART -> FerryIcons.Replay to "Restart"
                         Control.BACK30 -> FerryIcons.Rewind to "30s back"
                         Control.PLAY_PAUSE -> if (paused) FerryIcons.Play to "Play" else FerryIcons.Pause to "Pause"
@@ -534,6 +534,7 @@ private fun InfoCard(
                         Control.SLEEP -> FerryIcons.Moon to (if (sleepMinutes == null) "Sleep" else "Sleep ${sleepMinutes}m")
                         Control.STREAMS -> FerryIcons.Layers to "Streams"
                     }
+                    val (icon, label) = iconLabel
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp)) {
                         Box(
                             Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape)
