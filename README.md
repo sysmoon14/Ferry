@@ -39,8 +39,8 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 
 ## Releases & updates
 
-- **Release:** tag a version and push it — `git tag v0.2.0 && git push origin v0.2.0`. CI builds it and
-  publishes a GitHub release with `ferry.apk` (and `ferry-debug.apk`), with notes generated from the commits.
+- **Release:** either tag a version and push it (`git tag v0.3.0 && git push origin v0.3.0`), or on GitHub
+  go to **Actions → Build → Run workflow** and enter the version. CI builds it and publishes a GitHub release with `ferry.apk` (and `ferry-debug.apk`), with notes generated from the commits.
 - **Updating the boxes:** each Ferry checks the latest release when it opens (at most every 6 hours, and in
   the background for Home Assistant). If it's newer, Ferry offers **Update now / Later** — never over
   full-screen viewing — then downloads it and opens Android's install prompt (press **Install**). Settings,

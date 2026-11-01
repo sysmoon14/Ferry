@@ -7,6 +7,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a release with this version (e.g. 0.3.0). Leave empty for a normal build.'
+        required: false
+        default: ''
 
 concurrency:
   group: build-${{ github.ref }}
@@ -29,8 +34,12 @@ jobs:
       # number, so each build installs over the last.
       - name: Version
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ -n "${{ inputs.release }}" ]]; then
+            v="${{ inputs.release }}"; v="${v#v}"
+            echo "RELEASE_TAG=v$v" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             v="${GITHUB_REF_NAME#v}"
+            echo "RELEASE_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
           else
             last=$(git tag --list 'v*' --sort=-v:refname | head -1)
             v="${last#v}"; v="${v:-0.1.0}+dev.${GITHUB_RUN_NUMBER}"
@@ -99,16 +108,17 @@ jobs:
 
       # Tagged release: a normal (non-pre) GitHub release, which is what the app's updater and the
       # Home Assistant update entity look at. ferry.apk keeps a fixed name for the updater.
+      # Either a pushed tag, or "Run workflow" with a version (CI creates the tag on this commit).
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/release/app-release.apk ferry.apk
           cp app/build/outputs/apk/debug/app-debug.apk ferry-debug.apk
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --title "Ferry $FERRY_VERSION" --generate-notes --verify-tag
-          gh release upload "$GITHUB_REF_NAME" ferry.apk ferry-debug.apk --clobber
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "Ferry $FERRY_VERSION" --generate-notes
+          gh release upload "$RELEASE_TAG" ferry.apk ferry-debug.apk --clobber
 
       - uses: actions/upload-artifact@v4
         with:
