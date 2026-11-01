@@ -164,6 +164,14 @@ After each refresh Ferry looks for channels with nothing in the guide for the ne
 first from Sky's own schedules (for Sky-matched channels), then from any **backup guide data** XMLTV URLs
 added under **Sources**.
 
+**Sports guides from other countries** (on by default, under **Sources**) then fills foreign sports channels
+— hidden ones too — from the free [epgshare01](https://epgshare01.online/epgshare01/) guides, so the football
+finder can see what they're showing. beIN's own guide comes first (it also covers the Arabic "AR:" beIN
+channels), then up to 14 countries, football-rights markets first (UK, IE, ES, PT, FR, IT, DE, NL, Nordics,
+ZA, AU, US…). A channel's country comes from its name or group ("NO: V Sport 1", "SuperSport | ZA",
+"Netherlands Locals") or its guide ID. Ferry reads epgshare01's file list each day, so renamed files
+(e.g. the US guide) are still found.
+
 ### Backup & sync between boxes
 
 **Device → Backup & sync → Export settings** downloads a JSON file with this box's playlists (including
