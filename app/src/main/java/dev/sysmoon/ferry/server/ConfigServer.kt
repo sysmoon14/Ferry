@@ -298,6 +298,64 @@ class ConfigServer(private val g: AppGraph) {
                     call.respond(OkDto())
                 }
                 get("/favourites") { call.respond(g.db.channels().favourites().map { it.toDto() }) }
+
+                // ---- Football finder diagnostics (also handy from the web page)
+                get("/football/fixtures") {
+                    val days = (call.request.queryParameters["days"]?.toIntOrNull() ?: 2).coerceIn(1, 7)
+                    val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
+                        runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), days) }.getOrDefault(emptyList())
+                    }.sortedBy { it.kickoff }
+                    call.respond(kotlinx.serialization.json.buildJsonArray {
+                        all.forEach { f -> add(kotlinx.serialization.json.buildJsonObject {
+                            put("id", kotlinx.serialization.json.JsonPrimitive(f.id))
+                            put("title", kotlinx.serialization.json.JsonPrimitive(f.title))
+                            put("competition", kotlinx.serialization.json.JsonPrimitive(f.competition.name))
+                            put("kickoff", kotlinx.serialization.json.JsonPrimitive(java.time.Instant.ofEpochMilli(f.kickoff).toString()))
+                            put("broadcasts", kotlinx.serialization.json.JsonArray(f.broadcasts.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                        }) }
+                    })
+                }
+                get("/football/candidates") {
+                    val id = call.request.queryParameters["event"].orEmpty()
+                    val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
+                        runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 3) }.getOrDefault(emptyList())
+                    }
+                    val f = all.firstOrNull { it.id == id }
+                    if (f == null) { call.respond(HttpStatusCode.NotFound, ErrorDto("No such fixture")); return@get }
+                    val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
+                    val found = g.matchFinder.find(f, sameSlot)
+                    call.respond(kotlinx.serialization.json.buildJsonArray {
+                        found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
+                            put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
+                            put("name", kotlinx.serialization.json.JsonPrimitive(c.channel.name))
+                            put("group", kotlinx.serialization.json.JsonPrimitive(c.channel.groupTitle))
+                            put("hidden", kotlinx.serialization.json.JsonPrimitive(c.channel.hidden))
+                            put("reason", kotlinx.serialization.json.JsonPrimitive(c.reason))
+                        }) }
+                    })
+                }
+                // Programmes whose title/description contains q, airing between from..to (epoch ms;
+                // default: now..+12h), with every channel that carries that guide.
+                get("/guide/search") {
+                    val q = call.request.queryParameters["q"].orEmpty().trim().lowercase()
+                    val now = System.currentTimeMillis()
+                    val from = call.request.queryParameters["from"]?.toLongOrNull() ?: now
+                    val to = call.request.queryParameters["to"]?.toLongOrNull() ?: (now + 12 * 3_600_000L)
+                    val rows = g.db.channels().allPrimaries().groupBy { it.epgKey }
+                    val hits = g.db.programmes().spanning(to, from) // start <= to AND stop >= from
+                        .filter { q.isEmpty() || it.title.lowercase().contains(q) || it.description.orEmpty().lowercase().contains(q) }
+                        .take(300)
+                    call.respond(kotlinx.serialization.json.buildJsonArray {
+                        hits.forEach { p -> add(kotlinx.serialization.json.buildJsonObject {
+                            put("title", kotlinx.serialization.json.JsonPrimitive(p.title))
+                            put("start", kotlinx.serialization.json.JsonPrimitive(java.time.Instant.ofEpochMilli(p.start).toString()))
+                            put("guide", kotlinx.serialization.json.JsonPrimitive(p.channelKey))
+                            put("channels", kotlinx.serialization.json.JsonArray(rows[p.channelKey].orEmpty().take(6).map {
+                                kotlinx.serialization.json.JsonPrimitive((if (it.hidden) "[hidden] " else "") + it.name + " — " + it.groupTitle)
+                            }))
+                        }) }
+                    })
+                }
                 post("/favourites/order") {
                     call.receive<OrderRequest>().ids.forEachIndexed { i, id -> g.db.channels().setSortOrder(id, i) }
                     call.respond(OkDto())
