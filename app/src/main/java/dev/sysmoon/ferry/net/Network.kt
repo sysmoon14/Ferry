@@ -3,7 +3,7 @@ package dev.sysmoon.ferry.net
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -35,8 +35,8 @@ class NsdAdvertiser(context: Context) {
             setAttribute("api", "1")
         }
         val l = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(info: NsdServiceInfo) { Log.i(TAG, "Advertised ${info.serviceName}") }
-            override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) { Log.w(TAG, "NSD register failed $code") }
+            override fun onServiceRegistered(info: NsdServiceInfo) { Logs.i(TAG, "Advertised ${info.serviceName}") }
+            override fun onRegistrationFailed(info: NsdServiceInfo, code: Int) { Logs.w(TAG, "NSD register failed $code") }
             override fun onServiceUnregistered(info: NsdServiceInfo) = Unit
             override fun onUnregistrationFailed(info: NsdServiceInfo, code: Int) = Unit
         }

@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -93,7 +93,7 @@ class Updater(
                         if (r != null && isNewer(r.version, installedVersion)) UpdateState.Available(r) else UpdateState.UpToDate
                     },
                     onFailure = {
-                        Log.w(TAG, "Update check failed", it)
+                        Logs.w(TAG, "Update check failed", it)
                         UpdateState.Failed("couldn't reach GitHub: ${it.message ?: it.javaClass.simpleName}")
                     },
                 )
@@ -117,7 +117,7 @@ class Updater(
                     _state.value = UpdateState.Installing(r)
                     withContext(Dispatchers.IO) { startInstall(apk) }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Update failed", e)
+                    Logs.w(TAG, "Update failed", e)
                     _state.value = UpdateState.Failed(e.message ?: e.javaClass.simpleName, r)
                 }
             }

@@ -2,7 +2,7 @@ package dev.sysmoon.ferry
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.player.PlayTarget
 import dev.sysmoon.ferry.player.PlaybackState
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -49,7 +49,7 @@ object CrashGuard {
 
     /** For the app scope: an exception escaping a background coroutine is recorded, not fatal. */
     val handler = CoroutineExceptionHandler { context, e ->
-        Log.e(TAG, "Caught error in background work ($context)", e)
+        Logs.e(TAG, "Caught error in background work ($context)", e)
         record(e, Thread.currentThread().name, fatal = false)
     }
 
@@ -69,7 +69,7 @@ object CrashGuard {
                 val now = System.currentTimeMillis()
                 val recent = prefs.getString("resumes", "").orEmpty().split(',')
                     .mapNotNull { it.toLongOrNull() }.filter { it > now - RESUME_WINDOW_MS }
-                if (live && recent.size >= MAX_RESUMES) Log.w(TAG, "Crashed ${recent.size + 1} times in 10 minutes: not reopening")
+                if (live && recent.size >= MAX_RESUMES) Logs.w(TAG, "Crashed ${recent.size + 1} times in 10 minutes: not reopening")
                 if (live && recent.size < MAX_RESUMES) {
                     val id = s!!.channel!!.id
                     prefs.edit()
@@ -114,9 +114,9 @@ object CrashGuard {
         graph.scope.launch {
             delay(4_000) // give the reopen alarm's deep link time to start the channel
             if (graph.player.state.value.channel == null) {
-                Log.i(TAG, "Reopening Ferry on the channel that was playing before the crash")
+                Logs.i(TAG, "Reopening Ferry on the channel that was playing before the crash")
                 graph.commands.play(PlayTarget.Id(id))
-            } else Log.i(TAG, "Back on the channel that was playing before the crash")
+            } else Logs.i(TAG, "Back on the channel that was playing before the crash")
             _last.value?.let { r ->
                 _last.value = r.copy(resumed = true)
                 prefs.edit().putBoolean("resumed", true).apply()

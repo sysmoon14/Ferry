@@ -1,5 +1,6 @@
 package dev.sysmoon.ferry.player
 
+import dev.sysmoon.ferry.Logs
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -27,7 +28,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -82,6 +86,38 @@ data class NowPlaying(
         }
 }
 
+/** How the picture fills a 16:9 screen (PlayerView resize modes). */
+enum class Zoom(val label: String) { FIT("Fit"), FILL("Stretch"), ZOOM("Zoom") }
+
+/** What the player is actually doing, for the stats overlay, `/api/status` and Home Assistant. */
+data class PlayerStats(
+    val width: Int = 0,
+    val height: Int = 0,
+    val frameRate: Float = 0f,
+    /** Declared video bitrate (bit/s), or 0 when the stream doesn't say. */
+    val bitrate: Int = 0,
+    val videoCodec: String? = null,
+    val audioCodec: String? = null,
+    val audioChannels: Int = 0,
+    val decoder: String? = null,
+    val droppedFrames: Int = 0,
+    val renderedFrames: Int = 0,
+    val bufferedMs: Long = 0,
+    val tunnelled: Boolean = false,
+    val hdr: Boolean = false,
+) {
+    val resolution: String? get() = if (width > 0) "${width}×$height" else null
+}
+
+/** An audio or subtitle track the viewer can pick. */
+data class TrackOption(val group: Int, val track: Int, val label: String, val selected: Boolean)
+
+/** Things worth telling Home Assistant about as they happen. */
+sealed interface PlayerEvent {
+    data class Failover(val reason: String, val fromStream: Int, val toStream: Int, val streamCount: Int, val channel: String) : PlayerEvent
+    data class Backstop(val reason: String, val action: String, val channel: String) : PlayerEvent
+}
+
 /**
  * Single long-lived ExoPlayer shared by the UI, deep links, the web API and MQTT.
  * All player calls hop to Main; callers can be on any thread.
@@ -103,12 +139,17 @@ class PlayerController(
 
     private val _state = MutableStateFlow(NowPlaying())
     val state: StateFlow<NowPlaying> = _state.asStateFlow()
+    private val _events = MutableSharedFlow<PlayerEvent>(extraBufferCapacity = 16)
+    val events: SharedFlow<PlayerEvent> = _events.asSharedFlow()
+    private val _zoom = MutableStateFlow(Zoom.FIT)
+    val zoom: StateFlow<Zoom> = _zoom.asStateFlow()
 
     val player: ExoPlayer
     private val trackSelector: androidx.media3.exoplayer.trackselection.DefaultTrackSelector
     /** Tunnelled playback is on (see [Settings.tunnelling]). */
     @Volatile var tunnelling: Boolean = false
         private set
+    @Volatile private var decoderName_: String? = null
 
     init {
         val http = DefaultHttpDataSource.Factory()
@@ -138,6 +179,7 @@ class PlayerController(
         scope.launch {
             tunnelling = settings.tunnelling()
             trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(tunnelling))
+            _zoom.value = runCatching { Zoom.valueOf(settings.zoom()) }.getOrDefault(Zoom.FIT)
         }
         player = ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http, extractors))
@@ -170,7 +212,13 @@ class PlayerController(
                 val hdr = transfer == androidx.media3.common.C.COLOR_TRANSFER_ST2084 ||
                     transfer == androidx.media3.common.C.COLOR_TRANSFER_HLG
                 if (_state.value.hdr != hdr) _state.update { it.copy(hdr = hdr) }
+                player.videoFormat?.let { f ->
+                    Logs.i(TAG, "Tracks: ${f.width}×${f.height}@${f.frameRate.toInt()} ${f.sampleMimeType} ${f.bitrate / 1000} kbit/s" +
+                        (player.audioFormat?.let { a -> ", audio ${a.sampleMimeType} ${a.channelCount}ch" } ?: "") +
+                        (if (hdr) ", HDR" else "") + (if (tunnelling) ", tunnelled" else ""))
+                }
             }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 stableJob?.cancel()
                 if (isPlaying) {
@@ -185,11 +233,12 @@ class PlayerController(
                 sync()
             }
             override fun onPlayerError(error: PlaybackException) {
+                Logs.w(TAG, "Player error ${error.errorCodeName} on ${_state.value.stream?.name}: ${error.cause?.message ?: error.message}")
                 // Some TVs (the Philips' MediaTek audio HAL, for one) can't open a tunnelled audio
                 // track. Turn tunnelling off for good on this box and carry on with the same stream.
                 if (tunnelling && (error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
                         error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED)) {
-                    android.util.Log.w("FerryPlayer", "Tunnelled playback failed (${error.errorCodeName}): switching it off on this TV")
+                    Logs.w(TAG, "Tunnelled playback failed (${error.errorCodeName}): switching it off on this TV")
                     tunnelling = false
                     trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(false))
                     scope.launch { settings.setTunnelling(false) }
@@ -214,6 +263,15 @@ class PlayerController(
                 }
             }
         })
+        player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onVideoDecoderInitialized(
+                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+                decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long,
+            ) {
+                decoderName_ = decoderName
+                Logs.i(TAG, "Video decoder $decoderName (${initializationDurationMs} ms)")
+            }
+        })
         // Keep now/next fresh while something is playing.
         scope.launch {
             while (isActive) {
@@ -228,6 +286,92 @@ class PlayerController(
                 backstop(System.currentTimeMillis())
             }
         }
+    }
+
+    // ---------- Stats, tracks, zoom
+
+    /** A snapshot of what the player is doing (main thread). */
+    suspend fun stats(): PlayerStats = withContext(Dispatchers.Main.immediate) {
+        val v = player.videoFormat
+        val a = player.audioFormat
+        val c = player.videoDecoderCounters?.also { it.ensureUpdated() }
+        PlayerStats(
+            width = v?.width?.takeIf { it > 0 } ?: 0,
+            height = v?.height?.takeIf { it > 0 } ?: 0,
+            frameRate = v?.frameRate?.takeIf { it > 0 } ?: 0f,
+            bitrate = v?.bitrate?.takeIf { it > 0 } ?: 0,
+            videoCodec = v?.sampleMimeType?.substringAfterLast('/')?.let(::codecName),
+            audioCodec = a?.sampleMimeType?.substringAfterLast('/')?.let(::codecName),
+            audioChannels = a?.channelCount?.takeIf { it > 0 } ?: 0,
+            decoder = decoderName_,
+            droppedFrames = c?.droppedBufferCount ?: 0,
+            renderedFrames = c?.renderedOutputBufferCount ?: 0,
+            bufferedMs = (player.bufferedPosition - player.currentPosition).coerceAtLeast(0),
+            tunnelled = tunnelling,
+            hdr = _state.value.hdr,
+        )
+    }
+
+    private fun codecName(mime: String) = when (mime.lowercase()) {
+        "avc" -> "H.264"; "hevc" -> "HEVC"; "mp4a-latm" -> "AAC"; "ac3" -> "AC-3"; "eac3" -> "E-AC-3"
+        "mpeg" -> "MP3"; "mpeg-l2" -> "MP2"; "av01" -> "AV1"; "x-vnd.on2.vp9" -> "VP9"
+        else -> mime.uppercase()
+    }
+
+    /** The audio tracks of what's playing, in the order the stream lists them. */
+    suspend fun audioTracks(): List<TrackOption> = tracks(androidx.media3.common.C.TRACK_TYPE_AUDIO)
+    /** Subtitle tracks of what's playing (none for most live streams). */
+    suspend fun textTracks(): List<TrackOption> = tracks(androidx.media3.common.C.TRACK_TYPE_TEXT)
+
+    private suspend fun tracks(type: Int): List<TrackOption> = withContext(Dispatchers.Main.immediate) {
+        val out = mutableListOf<TrackOption>()
+        player.currentTracks.groups.forEachIndexed { gi, g ->
+            if (g.type != type) return@forEachIndexed
+            for (ti in 0 until g.length) {
+                if (!g.isTrackSupported(ti)) continue
+                val f = g.getTrackFormat(ti)
+                val lang = f.language?.takeIf { it != "und" }?.let { java.util.Locale.forLanguageTag(it).displayLanguage.ifBlank { it } }
+                val parts = listOfNotNull(
+                    f.label ?: lang,
+                    if (type == androidx.media3.common.C.TRACK_TYPE_AUDIO) f.sampleMimeType?.substringAfterLast('/')?.let(::codecName) else null,
+                    if (type == androidx.media3.common.C.TRACK_TYPE_AUDIO && f.channelCount > 0) "${f.channelCount}ch" else null,
+                    if ((f.roleFlags and androidx.media3.common.C.ROLE_FLAG_DESCRIBES_VIDEO) != 0) "audio description" else null,
+                    if ((f.roleFlags and androidx.media3.common.C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0) "hard of hearing" else null,
+                )
+                out += TrackOption(gi, ti, parts.ifEmpty { listOf("Track ${out.size + 1}") }.joinToString(" · "), g.isTrackSelected(ti))
+            }
+        }
+        out
+    }
+
+    /** Picks one audio track (by its [TrackOption]). */
+    fun selectAudio(option: TrackOption) = selectTrack(androidx.media3.common.C.TRACK_TYPE_AUDIO, option)
+
+    /** Picks a subtitle track, or none when [option] is null. */
+    fun selectText(option: TrackOption?) = selectTrack(androidx.media3.common.C.TRACK_TYPE_TEXT, option)
+
+    private fun selectTrack(type: Int, option: TrackOption?) {
+        scope.launch {
+            val groups = player.currentTracks.groups
+            val b = player.trackSelectionParameters.buildUpon().clearOverridesOfType(type)
+            if (option == null) {
+                b.setTrackTypeDisabled(type, true)
+            } else {
+                val g = groups.getOrNull(option.group) ?: return@launch
+                b.setTrackTypeDisabled(type, false)
+                b.setOverrideForType(androidx.media3.common.TrackSelectionOverride(g.mediaTrackGroup, option.track))
+            }
+            player.trackSelectionParameters = b.build()
+            Logs.i(TAG, "Selected ${if (type == androidx.media3.common.C.TRACK_TYPE_AUDIO) "audio" else "subtitles"}: ${option?.label ?: "off"}")
+        }
+    }
+
+    /** Fit → Stretch → Zoom → Fit. Remembered across launches. */
+    fun cycleZoom(): Zoom {
+        val next = Zoom.entries[(_zoom.value.ordinal + 1) % Zoom.entries.size]
+        _zoom.value = next
+        scope.launch { settings.setZoom(next.name) }
+        return next
     }
 
     // ---------- Backstop
@@ -246,13 +390,14 @@ class PlayerController(
         val wanted = s.channel != null && !s.catchup && streams.isNotEmpty() &&
             (player.playWhenReady || s.state == PlaybackState.ERROR)
         if (!wanted) { stuckSince = 0; return }
-        val counters = player.videoDecoderCounters
-        val frames = counters?.let {
+        // In tunnelled mode the decoder renders straight to the display and the frame counters
+        // don't always tick, so only the position is trusted there. Audio-only streams have no
+        // video counters either: the position alone says it's moving.
+        val frames = if (tunnelling) null else player.videoDecoderCounters?.let {
             it.ensureUpdated()
             (it.renderedOutputBufferCount + it.skippedOutputBufferCount + it.droppedBufferCount).toLong()
         }
         val position = player.currentPosition
-        // Audio-only streams have no video counters: the position alone says it's moving.
         val moving = player.isPlaying && position != lastPosition && (frames == null || frames != lastFrames)
         lastFrames = frames ?: -1
         lastPosition = position
@@ -266,8 +411,9 @@ class PlayerController(
             player.playbackState == Player.STATE_BUFFERING -> "kept buffering"
             else -> "froze"
         }
-        android.util.Log.w("FerryPlayer", "Backstop: stream $why for a minute, $action (state=${s.state}, exo=${player.playbackState})")
+        Logs.w(TAG, "Backstop: stream $why for a minute, $action (state=${s.state}, exo=${player.playbackState})")
         val channel = s.channel ?: return
+        _events.tryEmit(PlayerEvent.Backstop(why, if (action is Recovery.Action.Switch) "switch to stream ${action.index + 1}" else "retune", channel.name))
         player.stop()
         playJob?.cancel()
         playJob = scope.launch {
@@ -366,6 +512,7 @@ class PlayerController(
             else -> ZapScope.All
         }
         val list = if (primary.streamCount > 1) streamsFor(primary) else listOf(primary)
+        Logs.i(TAG, "Tune ${primary.name} (${list.size} stream${if (list.size == 1) "" else "s"})")
         streams = list
         recovery.tuned(list.size, list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0))
         // Look up now/next first so the banner never flashes "No guide data".
@@ -433,7 +580,10 @@ class PlayerController(
         val current = _state.value
         val channel = current.channel ?: return
         val from = streamIndex
-        when (val action = recovery.onFailure(hadStarted = streamStarted)) {
+        val action = recovery.onFailure(hadStarted = streamStarted)
+        Logs.w(TAG, "Stream ${from + 1}/${streams.size} of ${channel.name} $reason (started=$streamStarted): $action")
+        if (action is Recovery.Action.Switch) _events.tryEmit(PlayerEvent.Failover(reason, from + 1, action.index + 1, streams.size, channel.name))
+        when (action) {
             Recovery.Action.RestartSame -> {
                 playJob?.cancel()
                 playJob = scope.launch {
@@ -650,6 +800,7 @@ class PlayerController(
     }
 
     companion object {
+        private const val TAG = "FerryPlayer"
         private const val STALL_TIMEOUT_MS = 12_000L
         /** Buffering this long after the stream was playing counts as a failure. */
         private const val MID_STALL_TIMEOUT_MS = 15_000L

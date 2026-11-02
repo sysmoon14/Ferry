@@ -1,6 +1,6 @@
 package dev.sysmoon.ferry.data
 
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import android.util.Xml
 import androidx.room.withTransaction
 import dev.sysmoon.ferry.parse.M3uEntry
@@ -58,7 +58,7 @@ class ChannelRepository(
         val lineup = try {
             sky.channels(region)
         } catch (e: Exception) {
-            Log.w(TAG, "Sky line-up unavailable", e)
+            Logs.w(TAG, "Sky line-up unavailable", e)
             skyReport = SkyReport(region, 0, 0, emptyList(), e.message ?: e.javaClass.simpleName)
             return@withContext
         }
@@ -84,7 +84,7 @@ class ChannelRepository(
         // 3. Schedules, for renames the playlist hasn't caught up with.
         val usedIds = manualIds + byName.matches.map { it.channelId }
         val bySchedule = runCatching { matchBySchedule(byName.unmatched, rows.filter { it.id !in usedIds }) }
-            .onFailure { Log.w(TAG, "Sky schedule matching failed", it) }
+            .onFailure { Logs.w(TAG, "Sky schedule matching failed", it) }
             .getOrDefault(emptyList())
         val nameById = rows.associate { it.id to it.name }
         bySchedule.forEach { notes += SkyNote(it.sky.number, it.sky.title, nameById[it.channelId].orEmpty(), "schedule") }
@@ -97,7 +97,7 @@ class ChannelRepository(
         }
         val total = matches.size + unmatched.size
         skyReport = SkyReport(region, total, matches.size, unmatched, notes = notes)
-        Log.i(TAG, "Sky layout: matched ${matches.size} of $total for region $region (${bySchedule.size} by schedule)")
+        Logs.i(TAG, "Sky layout: matched ${matches.size} of $total for region $region (${bySchedule.size} by schedule)")
     }
 
     /** Compares Sky's schedule for unmatched Sky channels with the playlist guide (next ~10 hours). */
@@ -211,7 +211,7 @@ class ChannelRepository(
         val fromSports = if (settings.sportsGuides()) fillSportsGuides(covered, filled, now, generation, errors) else 0
         for (source in listOf(SKY_GUIDE_SOURCE, BACKUP_GUIDE_SOURCE, SPORTS_GUIDE_SOURCE)) db.programmes().deleteStale(source, generation)
         gapReport = GapReport(missing.size, fromSky, fromBackup, errors, fromSportsGuides = fromSports)
-        Log.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds $fromBackup, sports guides $fromSports")
+        Logs.i(TAG, "Guide gaps: ${missing.size} empty, Sky filled $fromSky, backup feeds $fromBackup, sports guides $fromSports")
     }
 
     /**
@@ -327,7 +327,7 @@ class ChannelRepository(
                     SourceType.M3U -> refreshChannels(src, playlistUrl)
                     SourceType.BBC -> storeChannels(src, bbc.entries(bbcRegion(src)).asSequence())
                 }
-                Log.i(TAG, "${src.name}: $count channels in ${System.currentTimeMillis() - started}ms")
+                Logs.i(TAG, "${src.name}: $count channels in ${System.currentTimeMillis() - started}ms")
                 if (src.type == SourceType.BBC) refreshBbcSchedules(src)
                 else epgUrl?.let { refreshEpg(src, it) }
                 db.sources().update(
@@ -337,11 +337,11 @@ class ChannelRepository(
                     )
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "Refresh failed for ${src.name}", e)
+                Logs.w(TAG, "Refresh failed for ${src.name}", e)
                 db.sources().update(src.copy(lastError = e.message ?: e.javaClass.simpleName))
             }
-            runCatching { applySky() }.onFailure { Log.w(TAG, "Sky layout failed", it) }
-            runCatching { fillGuideGaps() }.onFailure { Log.w(TAG, "Guide gap fill failed", it) }
+            runCatching { applySky() }.onFailure { Logs.w(TAG, "Sky layout failed", it) }
+            runCatching { fillGuideGaps() }.onFailure { Logs.w(TAG, "Guide gap fill failed", it) }
         }
     }
 
@@ -365,7 +365,7 @@ class ChannelRepository(
             .toList()
         require(parsed.isNotEmpty()) { "No live channels found" }
         val channels = Duplicates.merge(parsed, settings.mergeDuplicates())
-        Log.i(TAG, "${src.name}: ${channels.count { it.primaryId != null }} duplicate streams folded")
+        Logs.i(TAG, "${src.name}: ${channels.count { it.primaryId != null }} duplicate streams folded")
         db.withTransaction {
             db.channels().deleteForSource(src.id)
             channels.chunked(500).forEach { db.channels().upsert(it) }
@@ -378,7 +378,7 @@ class ChannelRepository(
         val programmes = bbc.schedules(bbcRegion(src), src.id).map { it.copy(generation = generation) }
         programmes.chunked(BATCH).forEach { db.programmes().insert(it) }
         db.programmes().deleteStale(src.id, generation)
-        Log.i(TAG, "${src.name}: ${programmes.size} BBC schedule entries")
+        Logs.i(TAG, "${src.name}: ${programmes.size} BBC schedule entries")
     }
 
     private fun bbcRegion(src: SourceEntity) =

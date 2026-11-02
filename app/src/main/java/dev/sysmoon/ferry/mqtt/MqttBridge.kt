@@ -1,6 +1,6 @@
 package dev.sysmoon.ferry.mqtt
 
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.datatypes.MqttQos
 import com.hivemq.client.mqtt.mqtt3.Mqtt3AsyncClient
@@ -36,7 +36,8 @@ import java.time.Instant
  *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (+ JSON attributes)
  *  - button.<name>_channel_up / _channel_down / _stop / _pause / _previous_channel / _live
  *  - image.<name>_channel_logo, number.<name>_sleep_timer, sensor.<name>_next_reminder
- *  - event.<name>_events       "reminder" (a reminded programme is starting) and "sleep" (timer stopped playback)
+ *  - event.<name>_events       "reminder" (a reminded programme is starting), "sleep" (timer stopped
+ *                              playback), "failover" (fell back to another stream), "backstop" (retuned a frozen stream)
  *
  * Topics (base = <baseTopic>/<deviceId>):
  *  base/availability   online | offline (LWT, retained)
@@ -61,7 +62,7 @@ class MqttBridge(private val g: AppGraph) {
                 // Reconnect loop: collectLatest cancels this when settings change.
                 while (true) {
                     runCatching { runConnected(cfg) }
-                        .onFailure { Log.w(TAG, "MQTT session ended: ${it.message}") }
+                        .onFailure { Logs.w(TAG, "MQTT session ended: ${it.message}") }
                     delay(15_000)
                 }
             }
@@ -104,7 +105,7 @@ class MqttBridge(private val g: AppGraph) {
                 // Re-published every minute too, so the sleep timer's minutes count down in HA.
                 val minutes = kotlinx.coroutines.flow.flow { while (true) { emit(Unit); delay(60_000) } }
                 kotlinx.coroutines.flow.combine(g.player.state, g.sleep.endsAt, minutes) { st, _, _ -> st }
-                    .collect { client.publish("$base/state", stateJson(it).toString()) }
+                    .collect { client.publish("$base/state", stateJson(it, if (it.channel != null) g.player.stats() else null).toString()) }
             }
             launch {
                 g.player.state.map { it.channel?.logo }.distinctUntilChanged().collect { logo ->
@@ -143,6 +144,22 @@ class MqttBridge(private val g: AppGraph) {
                     client.publish("$base/event", buildJsonObject { put("event_type", "sleep") }.toString(), retain = false)
                 }
             }
+            launch {
+                // Stream trouble as it happens: a fallback to another stream, or the backstop retuning.
+                g.player.events.collect { e ->
+                    client.publish("$base/event", buildJsonObject {
+                        when (e) {
+                            is dev.sysmoon.ferry.player.PlayerEvent.Failover -> {
+                                put("event_type", "failover"); put("channel", e.channel); put("reason", e.reason)
+                                put("from_stream", e.fromStream); put("to_stream", e.toStream); put("streams", e.streamCount)
+                            }
+                            is dev.sysmoon.ferry.player.PlayerEvent.Backstop -> {
+                                put("event_type", "backstop"); put("channel", e.channel); put("reason", e.reason); put("action", e.action)
+                            }
+                        }
+                    }.toString(), retain = false)
+                }
+            }
             awaitCancellation()
         } finally {
             runCatching {
@@ -160,7 +177,7 @@ class MqttBridge(private val g: AppGraph) {
             "sleep" -> payload.toFloatOrNull()?.let { g.sleep.set(it.toInt()) }
             // From HA's update entity: download and open the install prompt on the TV.
             "update" -> if (payload == "check") g.updater.check() else g.updater.install()
-            else -> Log.d(TAG, "Unknown command $command")
+            else -> Logs.d(TAG, "Unknown command $command")
         }
     }
 
@@ -259,7 +276,7 @@ class MqttBridge(private val g: AppGraph) {
         )))
         c.publish("$p/event/ferry_$id/events/config", json(common(id, name, base, "events", "Events") + mapOf(
             "state_topic" to "$base/event",
-            "event_types" to JsonArray(listOf("reminder", "sleep").map(::JsonPrimitive)),
+            "event_types" to JsonArray(listOf("reminder", "sleep", "failover", "backstop").map(::JsonPrimitive)),
             "icon" to "mdi:bell",
         )))
     }
@@ -294,6 +311,8 @@ class MqttBridge(private val g: AppGraph) {
             put("count", r.count)
             // The top of the stack: enough to find the line without flooding HA.
             put("where", r.stack.lineSequence().map { it.trim() }.filter { it.startsWith("at dev.sysmoon") }.take(3).joinToString(" | "))
+            // What Ferry was doing just before (its own log; the full log is at /api/debug/log).
+            put("log", dev.sysmoon.ferry.Logs.dump(25).take(8_000))
         })
     }
 
@@ -328,7 +347,7 @@ class MqttBridge(private val g: AppGraph) {
         )))
     }
 
-    private fun stateJson(s: NowPlaying): JsonObject = buildJsonObject {
+    private fun stateJson(s: NowPlaying, stats: dev.sysmoon.ferry.player.PlayerStats?): JsonObject = buildJsonObject {
         put("state", s.state.name.lowercase())
         put("channel", s.channel?.name)
         put("favourite", s.channel?.takeIf { it.favourite }?.name)
@@ -346,6 +365,18 @@ class MqttBridge(private val g: AppGraph) {
         put("error", s.error)
         put("catchup", s.catchup)
         put("sleep_minutes", g.sleep.minutesLeft())
+        put("stream", s.stream?.name?.takeIf { s.streamCount > 1 })
+        put("streams", s.streamCount)
+        put("hdr", s.hdr)
+        // Picture quality, so HA can graph dropped frames or flag a stream that fell back to SD.
+        put("resolution", stats?.resolution)
+        put("frame_rate", stats?.frameRate?.takeIf { it > 0 }?.let { Math.round(it) })
+        put("bitrate_kbps", stats?.bitrate?.takeIf { it > 0 }?.div(1000))
+        put("video_codec", stats?.videoCodec)
+        put("audio_codec", stats?.audioCodec)
+        put("dropped_frames", stats?.droppedFrames)
+        put("buffer_seconds", stats?.bufferedMs?.div(1000))
+        put("tunnelled", stats?.tunnelled)
         putJsonObject("deep_link") {
             s.channel?.let { ch -> put("url", ch.tvgId?.let { "ferry://tvg/$it" } ?: "ferry://channel/${ch.id}") }
         }

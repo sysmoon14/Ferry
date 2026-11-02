@@ -57,6 +57,9 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.epgKey
@@ -78,6 +81,7 @@ private const val LOAD_BUCKET_MS = 3 * 3_600_000L   // programmes are loaded in 
 private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
+private const val LOAD_MARGIN = 30                    // rows either side of the screen to load programmes for
 private val CHANNEL_COL: Dp = 210.dp
 private val ROW_HEIGHT: Dp = 34.dp
 
@@ -87,7 +91,8 @@ private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
  * TiviMate-style timeline guide. Rows are the channels of the selected list; the time window
  * moves in 30-minute steps when focus is pushed past either edge. OK on a programme that's on
  * now plays live; OK on a past programme plays it from the provider's archive when the channel
- * has catch-up. Long-press OK toggles the channel as a favourite.
+ * has catch-up. Long-press OK opens the channel menu. Channel +/− page a screenful of rows at a
+ * time; Play/Pause jumps the window back to now.
  */
 @Composable
 fun GuideGrid(
@@ -123,13 +128,27 @@ fun GuideGrid(
     val bucket = Math.floorDiv(windowStart, LOAD_BUCKET_MS)
     // Reload when guide data changes (a refresh replaces it), not just on a timer.
     val epgVersion by remember { graph.db.programmes().observeCount().catch { emit(-1) } }.collectAsState(initial = 0)
-    val programmes by produceState(emptyMap<String, List<ProgrammeEntity>>(), channels, bucket, epgVersion) {
+    // Programmes are loaded for the rows on screen plus a margin either side, as the list scrolls
+    // (a 1000-channel list no longer pulls every programme of the next 12 hours at once). The map
+    // starts again when the list, the time bucket or the guide data changes.
+    val listState = rememberLazyListState()
+    var programmes by remember { mutableStateOf(emptyMap<String, List<ProgrammeEntity>>()) }
+    LaunchedEffect(channels, bucket, epgVersion) {
+        programmes = emptyMap()
+        val loaded = HashSet<String>()
         val from = bucket * LOAD_BUCKET_MS - LOAD_BUCKET_MS
         val until = bucket * LOAD_BUCKET_MS + 3 * LOAD_BUCKET_MS
-        val keys = channels.map { it.epgKey }.distinct()
-        value = runCatching {
-            keys.chunked(500).flatMap { graph.db.programmes().window(it, from, until) }.groupBy { it.channelKey }
-        }.getOrDefault(emptyMap())
+        snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.visibleItemsInfo.size }
+            .collectLatest { (first, count) ->
+                val lo = (first - LOAD_MARGIN).coerceAtLeast(0)
+                val hi = (first + count.coerceAtLeast(25) + LOAD_MARGIN).coerceAtMost(channels.size)
+                if (lo >= hi) return@collectLatest
+                val keys = channels.subList(lo, hi).map { it.epgKey }.distinct().filter { it !in loaded }
+                if (keys.isEmpty()) return@collectLatest
+                val rows = runCatching { graph.db.programmes().window(keys, from, until) }.getOrDefault(emptyList()).groupBy { it.channelKey }
+                loaded += keys
+                programmes = programmes + keys.associateWith { rows[it].orEmpty() }
+            }
     }
 
     var focused by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
@@ -164,7 +183,6 @@ fun GuideGrid(
 
     // While the player covers the guide, keep the playing channel in view at "now", so the guide
     // is already in place when the player shrinks away; then focus what's on now.
-    val listState = rememberLazyListState()
     val returnFocus = remember { FocusRequester() }
     LaunchedEffect(playingId, channels, playerShowing) {
         if (!playerShowing) return@LaunchedEffect
@@ -184,7 +202,41 @@ fun GuideGrid(
         if (runCatching { returnFocus.requestFocus() }.isFailure) onBackToGroups()
     }
 
-    Column(modifier.onFocusChanged { gridFocused = it.hasFocus }) {
+    var focusedIndex by remember { mutableIntStateOf(-1) }
+    /** Focus row [target] at the time cursor, scrolling it on screen first if needed. */
+    fun moveTo(target: Int, scrollTo: Int? = null): Boolean {
+        if (target !in channels.indices) return false
+        val ch = channels[target]
+        val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
+        scope.launch {
+            // Off-screen rows aren't composed yet: scroll first.
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == target }) listState.scrollToItem(scrollTo ?: target)
+            withFrameNanos { } // let the row (or a shifted window's cells) compose first
+            verticalNav = true
+            if (runCatching { req.requestFocus() }.isFailure) verticalNav = false
+        }
+        return true
+    }
+    /** Rows that fit on screen: a page for Channel +/−. */
+    fun pageSize() = listState.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1)
+
+    Column(
+        modifier.onFocusChanged { gridFocused = it.hasFocus }.onPreviewKeyEvent { e ->
+            if (e.type != KeyEventType.KeyDown || !gridFocused) return@onPreviewKeyEvent false
+            when (e.key) {
+                // A screenful at a time, like a set-top box's page keys.
+                Key.ChannelUp, Key.PageUp -> moveTo((focusedIndex - pageSize()).coerceAtLeast(0), scrollTo = (focusedIndex - pageSize()).coerceAtLeast(0))
+                Key.ChannelDown, Key.PageDown -> moveTo((focusedIndex + pageSize()).coerceAtMost(channels.lastIndex), scrollTo = focusedIndex + 1)
+                // Jump back to what's on now, from wherever in time the grid has been scrolled to.
+                Key.MediaPlayPause, Key.MediaPlay -> {
+                    windowStart = nowSlot
+                    cursorTime = System.currentTimeMillis()
+                    moveTo(focusedIndex.coerceAtLeast(0))
+                }
+                else -> false
+            }
+        },
+    ) {
         DetailPanel(focused, now, reminded)
         TimeRuler(windowStart, now)
         // Fill the rest of the screen; the last row may be partly visible.
@@ -215,27 +267,13 @@ fun GuideGrid(
                     },
                     onFocus = { p ->
                         focused = channel to p
+                        focusedIndex = index
                         if (verticalNav) verticalNav = false
                         else cursorTime = maxOf(p?.start ?: windowStart, windowStart)
                     },
                     requesterFor = { start -> requester(channel.id, start) },
                     onVertical = { delta ->
-                        val target = index + delta
-                        if (target !in channels.indices) false
-                        else {
-                            val ch = channels[target]
-                            val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
-                            scope.launch {
-                                // Off-screen rows aren't composed yet: scroll one row first.
-                                if (listState.layoutInfo.visibleItemsInfo.none { it.index == target }) {
-                                    listState.scrollToItem(if (delta > 0) listState.firstVisibleItemIndex + 1 else target)
-                                    withFrameNanos { }
-                                }
-                                verticalNav = true
-                                if (runCatching { req.requestFocus() }.isFailure) verticalNav = false
-                            }
-                            true
-                        }
+                        moveTo(index + delta, scrollTo = if (delta > 0) listState.firstVisibleItemIndex + 1 else index + delta)
                     },
                     onSelect = { p ->
                         val t = System.currentTimeMillis()

@@ -49,10 +49,32 @@ import kotlinx.coroutines.launch
 
 enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH, FOOTBALL }
 
+/**
+ * What's on screen, bottom to top. The guide is always at the bottom (it stays composed under
+ * everything); Search, Settings and Sports sit on it; the player sits on the guide or on Sports
+ * (so Back from a match stream returns to the match's stream list). Back pops one level.
+ */
+private class NavStack {
+    var stack by mutableStateOf(listOf(Screen.GUIDE))
+        private set
+    val top: Screen get() = stack.last()
+    /** [screen] is somewhere in the stack (composed, maybe under the player). */
+    operator fun contains(screen: Screen) = screen in stack
+    /** Opens [screen] over the guide alone. */
+    fun open(screen: Screen) { stack = listOf(Screen.GUIDE, screen) }
+    /** Puts the player on top of whatever is showing. */
+    fun pushPlayer() { if (top != Screen.PLAYER) stack = stack + Screen.PLAYER }
+    /** Back: the screen underneath. Returns the new top. */
+    fun pop(): Screen { if (stack.size > 1) stack = stack.dropLast(1); return top }
+    fun reset() { stack = listOf(Screen.GUIDE) }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 class MainActivity : ComponentActivity() {
-    private var screen by mutableStateOf(Screen.GUIDE)
-    // Kept here so the guide's list survives trips to the player and back.
+    private val nav = NavStack()
+    private val screen: Screen get() = nav.top
+    // Kept here so the guide's list survives trips to the player and back, and saved so the next
+    // launch opens where this one left off.
     private var guideGroup by mutableStateOf(ALL)
     // Main menu section shown on the guide screen.
     private var section by mutableStateOf(Section.GUIDE)
@@ -62,10 +84,8 @@ class MainActivity : ComponentActivity() {
     private var returnToRail by mutableStateOf(false)
 
     private val football = FootballState()
-    /** Where Back from the player goes: the guide, or the football stream list it was started from. */
-    private var playerReturn by mutableStateOf(Screen.GUIDE)
 
-    private fun openPlayer(from: Screen) { playerReturn = from; screen = Screen.PLAYER }
+    private fun openPlayer() { nav.pushPlayer() }
 
     // Launching straight into a stream (resume last channel, or a deep link with the app closed):
     // cover everything in black until the player is up, and put the video full screen at once
@@ -74,10 +94,13 @@ class MainActivity : ComponentActivity() {
     /** "Later"/"Hide" on the update prompt: don't show it again until the next launch. */
     private var updateHidden by mutableStateOf(false)
     private var snapVideo by mutableStateOf(false)
+    /** When the remote was last touched; "Still watching?" after hours without. */
+    private var lastKeyAt by mutableStateOf(System.currentTimeMillis())
+    private var stillWatching by mutableStateOf(false)
 
     private fun openPlayerInstantly() {
         snapVideo = true
-        openPlayer(Screen.GUIDE)
+        nav.reset(); openPlayer()
         covered = false
         lifecycleScope.launch {
             kotlinx.coroutines.delay(300) // a few frames: the layer has snapped to full screen
@@ -85,14 +108,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Back from the player: whatever it was opened over. */
     private fun leavePlayer() {
-        if (playerReturn == Screen.FOOTBALL) screen = Screen.FOOTBALL else backToGuide(rail = false)
+        if (nav.pop() == Screen.GUIDE) guideReturned(rail = false)
     }
 
     private fun backToGuide(rail: Boolean) {
+        nav.reset()
+        guideReturned(rail)
+    }
+
+    private fun guideReturned(rail: Boolean) {
         returnToRail = rail || graph.player.state.value.channel == null
         returnSignal++
-        screen = Screen.GUIDE
+    }
+
+    private fun savePlace() {
+        lifecycleScope.launch { graph.settings.setLastPlace(section.name, guideGroup) }
     }
     // Launched (or brought back from Home) without a deep link: offer the last channel.
     private var pendingResume = false
@@ -102,6 +134,11 @@ class MainActivity : ComponentActivity() {
         FerryService.start(this)
         pendingResume = savedInstanceState == null
         covered = pendingResume
+        lifecycleScope.launch {
+            val (sec, grp) = graph.settings.lastPlace()
+            sec?.let { name -> Section.entries.firstOrNull { it.name == name }?.let { section = it } }
+            grp?.let { guideGroup = it }
+        }
         handle(intent)
         setContent {
             FerryTheme {
@@ -109,9 +146,20 @@ class MainActivity : ComponentActivity() {
                 val sleepWarning by graph.sleep.warning.collectAsState()
                 val due by graph.reminders.due.collectAsState()
                 val update by graph.updater.state.collectAsState()
+                val idleHours by graph.settings.idleStopHours.collectAsState(initial = 0)
                 LaunchedEffect(Unit) { graph.sleep.slept.collect { backToGuide(rail = true) } }
+                // "Still watching?" after [idleHours] of playback with the remote untouched.
+                LaunchedEffect(idleHours, playing.channel?.id) {
+                    if (idleHours <= 0 || playing.channel == null) return@LaunchedEffect
+                    while (true) {
+                        kotlinx.coroutines.delay(60_000)
+                        if (!stillWatching && graph.player.state.value.state == dev.sysmoon.ferry.player.PlaybackState.PLAYING &&
+                            System.currentTimeMillis() - lastKeyAt >= idleHours * 3_600_000L) stillWatching = true
+                    }
+                }
                 Box(
                     Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
+                        lastKeyAt = System.currentTimeMillis()
                         // Sleep timer's last minute: any key keeps watching.
                         if (!sleepWarning) return@onPreviewKeyEvent false
                         if (e.type == KeyEventType.KeyUp) graph.sleep.cancel()
@@ -131,18 +179,18 @@ class MainActivity : ComponentActivity() {
                         // stops any stream that's still playing in the mini player).
                         GuideScreen(
                             selected = guideGroup,
-                            onSelect = { guideGroup = it },
+                            onSelect = { guideGroup = it; savePlace() },
                             section = section,
-                            onSection = { section = it },
+                            onSection = { section = it; savePlace() },
                             playingId = playing.channel?.id,
                             active = guideActive,
                             playerShowing = screen == Screen.PLAYER,
                             returnSignal = returnSignal,
                             returnToRail = returnToRail,
-                            onOpenPlayer = { openPlayer(Screen.GUIDE) },
-                            onOpenSettings = { screen = Screen.SETTINGS },
-                            onOpenSearch = { screen = Screen.SEARCH },
-                            onOpenFootball = { screen = Screen.FOOTBALL },
+                            onOpenPlayer = { openPlayer() },
+                            onOpenSettings = { nav.open(Screen.SETTINGS) },
+                            onOpenSearch = { nav.open(Screen.SEARCH) },
+                            onOpenFootball = { nav.open(Screen.FOOTBALL) },
                         )
                     }
                     // Secondary screens slide up over the guide and fade away again.
@@ -150,21 +198,18 @@ class MainActivity : ComponentActivity() {
                     val exit = fadeOut(tween(150))
                     AnimatedVisibility(visible = screen == Screen.SEARCH, enter = enter, exit = exit) {
                         BackHandler { backToGuide(rail = true) }
-                        SearchScreen(onOpenPlayer = { openPlayer(Screen.GUIDE) })
+                        SearchScreen(onOpenPlayer = { nav.reset(); openPlayer() })
                     }
                     AnimatedVisibility(visible = screen == Screen.SETTINGS, enter = enter, exit = exit) {
                         BackHandler { backToGuide(rail = true) }
                         SettingsScreen(onBack = { backToGuide(rail = true) })
                     }
                     // Kept composed under the player, so Back from a stream returns to the same list.
-                    AnimatedVisibility(
-                        visible = screen == Screen.FOOTBALL || (screen == Screen.PLAYER && playerReturn == Screen.FOOTBALL),
-                        enter = enter, exit = exit,
-                    ) {
+                    AnimatedVisibility(visible = Screen.FOOTBALL in nav, enter = enter, exit = exit) {
                         FootballScreen(
                             football,
                             active = screen == Screen.FOOTBALL,
-                            onOpenPlayer = { openPlayer(Screen.FOOTBALL) },
+                            onOpenPlayer = { openPlayer() },
                             onBack = { backToGuide(rail = true) },
                         )
                     }
@@ -195,6 +240,18 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+                    if (stillWatching) {
+                        dev.sysmoon.ferry.ui.StillWatching(
+                            hours = idleHours,
+                            onKeep = { stillWatching = false; lastKeyAt = System.currentTimeMillis() },
+                            onStop = {
+                                stillWatching = false
+                                Logs.i("Ferry", "Still watching? — no answer after $idleHours h, stopping playback")
+                                graph.scope.launch { graph.player.stop() }
+                                backToGuide(rail = true)
+                            },
+                        )
+                    }
                     if (covered) Box(Modifier.fillMaxSize().background(Color.Black))
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
@@ -202,7 +259,7 @@ class MainActivity : ComponentActivity() {
                             r,
                             onWatch = {
                                 graph.reminders.dismiss()
-                                openPlayer(Screen.GUIDE)
+                                nav.reset(); openPlayer()
                                 lifecycleScope.launch {
                                     if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
                                 }
@@ -256,7 +313,7 @@ class MainActivity : ComponentActivity() {
         when (action) {
             is LaunchAction.Play -> {
                 // App not on screen yet (launched by HA / a deep link): straight into the stream.
-                if (screen != Screen.PLAYER && !graph.uiVisible.value) openPlayerInstantly() else openPlayer(Screen.GUIDE)
+                if (screen != Screen.PLAYER && !graph.uiVisible.value) openPlayerInstantly() else { nav.reset(); openPlayer() }
                 lifecycleScope.launch {
                     if (!graph.player.play(action.target)) backToGuide(rail = true)
                 }

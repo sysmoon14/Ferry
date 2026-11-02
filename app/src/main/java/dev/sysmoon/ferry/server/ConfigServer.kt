@@ -1,7 +1,7 @@
 package dev.sysmoon.ferry.server
 
 import io.ktor.server.response.respondText
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.AppGraph
 import dev.sysmoon.ferry.data.BbcIplayer
 import dev.sysmoon.ferry.data.CatchupProbe
@@ -102,7 +102,7 @@ class ConfigServer(private val g: AppGraph) {
 
     fun start(port: Int) {
         engine = embeddedServer(CIO, port = port, host = "0.0.0.0") { module() }.start(wait = false)
-        Log.i(TAG, "Config server on :$port")
+        Logs.i(TAG, "Config server on :$port")
     }
 
     fun stop() {
@@ -127,7 +127,7 @@ class ConfigServer(private val g: AppGraph) {
         }
         install(StatusPages) {
             exception<Throwable> { call, e ->
-                Log.w(TAG, "API error", e)
+                Logs.w(TAG, "API error", e)
                 call.respond(HttpStatusCode.BadRequest, ErrorDto(e.message ?: e.javaClass.simpleName))
             }
         }
@@ -157,7 +157,7 @@ class ConfigServer(private val g: AppGraph) {
             }
 
             authenticate(AUTH) { route("/api") {
-                get("/status") { call.respond(g.player.state.value.toStatus(g.settings.deviceName())) }
+                get("/status") { call.respond(g.player.state.value.toStatus(g.settings.deviceName(), g.player.stats())) }
 
                 put("/device") {
                     val req = call.receive<DeviceDto>()
@@ -269,6 +269,7 @@ class ConfigServer(private val g: AppGraph) {
                 put("/options") {
                     val o = call.receive<OptionsInput>()
                     o.resumeLastChannel?.let { g.settings.setResumeLastChannel(it) }
+                    o.idleStopHours?.let { g.settings.setIdleStopHours(it) }
                     o.mergeDuplicates?.let { merge ->
                         val changed = merge != g.settings.mergeDuplicates()
                         g.settings.setMergeDuplicates(merge)
@@ -480,6 +481,11 @@ class ConfigServer(private val g: AppGraph) {
 
                 // ---- Keep in sync with another Ferry
                 get("/sync") { call.respond(g.sync.status()) }
+                // Ferry's own log: the last few hundred lines, newest last (?n=200 for fewer).
+                get("/debug/log") {
+                    val n = call.request.queryParameters["n"]?.toIntOrNull() ?: 600
+                    call.respondText(dev.sysmoon.ferry.Logs.dump(n), ContentType.Text.Plain)
+                }
                 get("/debug/crash") {
                     val r = dev.sysmoon.ferry.CrashGuard.last.value
                     call.respondText(
@@ -572,6 +578,7 @@ class ConfigServer(private val g: AppGraph) {
         resumeLastChannel = g.settings.resumeLastChannel(),
         backupEpgUrls = g.settings.backupEpgUrls(),
         sportsGuides = g.settings.sportsGuides(),
+        idleStopHours = g.settings.idleStopHours(),
         guideGaps = g.repository.gapReport?.let { GuideGapsDto(it.missing, it.fromSky, it.fromBackup, it.errors, it.at, it.fromSportsGuides) },
     )
 

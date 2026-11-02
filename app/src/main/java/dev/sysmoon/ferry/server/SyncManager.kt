@@ -1,6 +1,6 @@
 package dev.sysmoon.ferry.server
 
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.AppGraph
 import dev.sysmoon.ferry.net.NsdBrowser
 import kotlinx.coroutines.Dispatchers
@@ -69,12 +69,12 @@ class SyncManager(private val g: AppGraph) {
             val export = json.decodeFromString(FerryExport.serializer(), body)
             val hash = fingerprint(export)
             if (hash != s.hash) {
-                Log.i(TAG, "Settings changed on ${s.name}: applying")
+                Logs.i(TAG, "Settings changed on ${s.name}: applying")
                 Backup.import(g, export)
             }
             g.settings.setSyncResult(hash, null)
         } catch (e: Exception) {
-            Log.w(TAG, "Sync from $url failed", e)
+            Logs.w(TAG, "Sync from $url failed", e)
             g.settings.setSyncResult(null, e.message ?: e.javaClass.simpleName)
         }
         status()

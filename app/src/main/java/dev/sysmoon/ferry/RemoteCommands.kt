@@ -1,6 +1,6 @@
 package dev.sysmoon.ferry
 
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.player.PlayTarget
 
 /** One entry point for commands arriving from MQTT and the web API. */
@@ -8,7 +8,7 @@ class RemoteCommands(private val graph: AppGraph) {
 
     fun play(target: PlayTarget) {
         runCatching { graph.context.startActivity(DeepLinks.playIntent(graph.context, target)) }
-            .onFailure { Log.w(TAG, "Couldn't bring Ferry to the front", it) }
+            .onFailure { Logs.w(TAG, "Couldn't bring Ferry to the front", it) }
     }
 
     suspend fun key(key: String): Boolean {

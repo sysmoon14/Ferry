@@ -69,6 +69,8 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val backupEpgUrls: List<String> = emptyList(),
     val sportsGuides: Boolean = true,
     val guideGaps: GuideGapsDto? = null,
+    /** Hours of playback with the remote untouched before "Still watching?" (0 = never). */
+    val idleStopHours: Int = 4,
 )
 @Serializable data class GuideGapsDto(val missing: Int, val fromSky: Int, val fromBackup: Int, val errors: List<String>, val at: Long, val fromSportsGuides: Int = 0)
 /** Partial update: only the fields sent are changed. */
@@ -77,6 +79,7 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val resumeLastChannel: Boolean? = null,
     val backupEpgUrls: List<String>? = null,
     val sportsGuides: Boolean? = null,
+    val idleStopHours: Int? = null,
 )
 
 @Serializable data class SkyRegionDto(val id: Int, val name: String)
@@ -151,9 +154,33 @@ data class StatusDto(
     val nextStart: Long?,
     val error: String?,
     val catchup: Boolean = false,
+    /** Which of the channel's streams is playing and how many it has. */
+    val stream: String? = null,
+    val streams: Int = 1,
+    val hdr: Boolean = false,
+    /** What the player reports about the stream (null when nothing is playing). */
+    val playback: PlaybackDto? = null,
 )
 
-fun NowPlaying.toStatus(deviceName: String) = StatusDto(
+@Serializable
+data class PlaybackDto(
+    val resolution: String?,
+    val frameRate: Float,
+    val bitrate: Int,
+    val videoCodec: String?,
+    val audioCodec: String?,
+    val audioChannels: Int,
+    val decoder: String?,
+    val droppedFrames: Int,
+    val bufferedMs: Long,
+    val tunnelled: Boolean,
+)
+
+fun dev.sysmoon.ferry.player.PlayerStats.toDto() = PlaybackDto(
+    resolution, frameRate, bitrate, videoCodec, audioCodec, audioChannels, decoder, droppedFrames, bufferedMs, tunnelled,
+)
+
+fun NowPlaying.toStatus(deviceName: String, stats: dev.sysmoon.ferry.player.PlayerStats? = null) = StatusDto(
     deviceName = deviceName,
     state = state.name.lowercase(),
     channel = channel?.toDto(),
@@ -164,6 +191,10 @@ fun NowPlaying.toStatus(deviceName: String) = StatusDto(
     nextStart = next?.start,
     error = error,
     catchup = catchup,
+    stream = stream?.name,
+    streams = streamCount,
+    hdr = hdr,
+    playback = if (channel != null) stats?.toDto() else null,
 )
 
 @Serializable data class BbcRegionDto(val id: String, val label: String)

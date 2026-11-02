@@ -34,7 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import dev.sysmoon.ferry.player.Zoom
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import dev.sysmoon.ferry.R
@@ -60,6 +62,7 @@ private val MINI_TOP = 12.dp
 fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
     val graph = LocalContext.current.graph
     val np by graph.player.state.collectAsState()
+    val zoom by graph.player.zoom.collectAsState()
     val anim = remember { Animatable(if (full) 1f else 0f) }
     val animateNow by rememberUpdatedState(animate)
     LaunchedEffect(full) {
@@ -85,6 +88,15 @@ fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
                     (LayoutInflater.from(ctx).inflate(R.layout.mini_player_view, null) as PlayerView).apply {
                         isFocusable = false
                         player = graph.player.player
+                    }
+                },
+                update = { view ->
+                    // Zoom only applies full screen; the mini picture always fits.
+                    view.resizeMode = when {
+                        progress < 0.98f -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        zoom == Zoom.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                        zoom == Zoom.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
                 onRelease = { it.player = null },

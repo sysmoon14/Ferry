@@ -76,7 +76,7 @@ import java.util.Locale
 /** Buttons in the player controls row, left to right. */
 private enum class Control(val label: String) {
     RESTART("⟲ Restart"), BACK30("« 30s"), PLAY_PAUSE(""), FWD30("30s »"), LIVE("● Live"),
-    PREVIOUS("↩ Previous"), SLEEP(""), STREAMS("≡ Streams")
+    PREVIOUS("↩ Previous"), SLEEP(""), OPTIONS("Options")
 }
 
 private const val SKIP_MS = 30_000L
@@ -90,7 +90,8 @@ private var lastCardedChannel: String? = null
  *    (the stream keeps playing); ◀▶ step through that channel's previous/next programmes.
  *  - OK on a browsed channel watches it; OK on a past programme plays it from catch-up.
  *  - OK on the card for what you're watching opens the controls row: restart, skip back/forward,
- *    play/pause, back to live, streams.
+ *    play/pause, back to live, last channel, sleep, options (audio, subtitles, picture, streams).
+ *  - Long-press Info shows playback stats.
  *  - Channel +/- zap straight away; Back closes the card, then returns to the guide.
  */
 @OptIn(UnstableApi::class)
@@ -102,6 +103,8 @@ fun PlayerScreen(onBack: () -> Unit) {
     val state by player.state.collectAsState()
     val focus = remember { FocusRequester() }
     var menuOpen by remember { mutableStateOf(false) }
+    var statsVisible by remember { mutableStateOf(false) }
+    var infoLongPressed by remember { mutableStateOf(false) }
 
     // ---- Card state
     var cardVisible by remember { mutableStateOf(false) }
@@ -176,7 +179,7 @@ fun PlayerScreen(onBack: () -> Unit) {
     fun enabled(c: Control) = when (c) {
         Control.RESTART, Control.BACK30 -> canRewind
         Control.FWD30, Control.LIVE -> state.catchup
-        Control.STREAMS -> state.streamCount > 1
+        Control.OPTIONS -> state.channel != null
         Control.PREVIOUS -> recents.any { it != state.channel?.id }
         Control.PLAY_PAUSE, Control.SLEEP -> true
     }
@@ -189,7 +192,7 @@ fun PlayerScreen(onBack: () -> Unit) {
             Control.FWD30 -> player.seekBy(SKIP_MS)
             Control.PLAY_PAUSE -> scope.launch { player.togglePause() }
             Control.LIVE -> { player.goLive(); closeCard() }
-            Control.STREAMS -> { menuOpen = true; closeCard() }
+            Control.OPTIONS -> { menuOpen = true; closeCard() }
             Control.PREVIOUS -> player.previousChannel()
             Control.SLEEP -> graph.sleep.cycle()
         }
@@ -223,6 +226,13 @@ fun PlayerScreen(onBack: () -> Unit) {
             .focusable()
             .onKeyEvent { e ->
                 val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                if (e.key == Key.Info) {
+                    when {
+                        e.type == KeyEventType.KeyUp -> { if (!infoLongPressed) { if (cardVisible) closeCard() else openCard() }; infoLongPressed = false }
+                        e.nativeKeyEvent.repeatCount == 1 -> { infoLongPressed = true; statsVisible = !statsVisible }
+                    }
+                    return@onKeyEvent true
+                }
                 if (ok && e.type == KeyEventType.KeyUp) {
                     if (!okLongPressed) when {
                         controlsVisible -> if (enabled(control)) activate(control)
@@ -284,8 +294,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                     Key.LastChannel -> { player.previousChannel(); true }
                     Key.ChannelUp -> { player.zap(1); true }
                     Key.ChannelDown -> { player.zap(-1); true }
-                    Key.Info -> { if (cardVisible) closeCard() else openCard(); true }
-                    Key.Menu -> { if (state.channel != null) { menuOpen = true; closeCard() }; true }
+                    Key.Menu, Key.Settings -> { if (state.channel != null) { menuOpen = true; closeCard() }; true }
+                    Key.Captions -> { if (state.channel != null) { menuOpen = true; closeCard() }; true }
                     Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { scope.launch { player.togglePause() }; true }
                     Key.MediaFastForward -> { player.seekBy(SKIP_MS); true }
                     Key.MediaRewind -> { player.seekBy(-SKIP_MS); true }
@@ -304,6 +314,10 @@ fun PlayerScreen(onBack: () -> Unit) {
     ) {
         // The picture itself is MainActivity's VideoLayer (shared with the mini player), drawn
         // underneath this screen's card and controls.
+
+        if (statsVisible) {
+            StatsOverlay(player, Modifier.align(Alignment.TopStart).padding(40.dp))
+        }
 
         if (digits.isNotEmpty()) {
             Text(
@@ -386,6 +400,7 @@ fun PlayerScreen(onBack: () -> Unit) {
                     runCatching { focus.requestFocus() }
                 },
                 onPlayed = {},
+                onHidden = onBack,
             )
         }
     }
@@ -533,7 +548,7 @@ private fun InfoCard(
                         Control.LIVE -> FerryIcons.LiveTv to "Live"
                         Control.PREVIOUS -> FerryIcons.LastChannel to "Last channel"
                         Control.SLEEP -> FerryIcons.Moon to (if (sleepMinutes == null) "Sleep" else "Sleep ${sleepMinutes}m")
-                        Control.STREAMS -> FerryIcons.Layers to "Streams"
+                        Control.OPTIONS -> FerryIcons.Tune to "Options"
                     }
                     val (icon, label) = iconLabel
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp)) {

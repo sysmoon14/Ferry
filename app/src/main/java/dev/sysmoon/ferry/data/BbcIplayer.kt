@@ -1,6 +1,6 @@
 package dev.sysmoon.ferry.data
 
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.parse.M3uEntry
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
@@ -131,7 +131,7 @@ class BbcIplayer(private val http: OkHttpClient) {
         return lineup(region).flatMap { ch ->
             listOf(today, today.plusDays(1)).flatMap { day ->
                 runCatching { schedule(ch, day, sourceId) }
-                    .onFailure { Log.w(TAG, "Schedule failed for ${ch.scheduleId} $day: ${it.message}") }
+                    .onFailure { Logs.w(TAG, "Schedule failed for ${ch.scheduleId} $day: ${it.message}") }
                     .getOrDefault(emptyList())
             }
         }

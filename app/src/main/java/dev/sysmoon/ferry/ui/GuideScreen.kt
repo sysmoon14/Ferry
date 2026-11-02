@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -192,7 +193,8 @@ fun GuideScreen(
     }
     // Long-press menu (favourite + stream picker) for this channel, if open.
     var menuFor by remember { mutableStateOf<ChannelEntity?>(null) }
-    menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer) }
+    var hiddenSignal by remember { mutableIntStateOf(0) }
+    menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer, onHidden = { hiddenSignal++ }) }
 
     // Each group gets its own scroll position, so opening a group always starts at the top.
     val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
@@ -256,6 +258,8 @@ fun GuideScreen(
     }
     /** Back (or Left at the edge) from the channels. */
     val backFromContent: () -> Unit = { if (hasRail) focusRail() else focusMenu() }
+    // A hidden channel's row vanishes under the focus: put it back on the list (or the group list).
+    LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(!hasRail) }
     fun enter(item: MenuItem) {
         when (item) {
             MenuItem.SEARCH -> onOpenSearch()

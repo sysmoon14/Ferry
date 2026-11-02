@@ -1,6 +1,5 @@
 package dev.sysmoon.ferry.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,8 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.item
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,13 +24,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
@@ -39,7 +38,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.delay
-import androidx.tv.material3.Button
+import androidx.tv.material3.Icon
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -47,11 +46,15 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.StreamQuality
 import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.graph
+import dev.sysmoon.ferry.player.TrackOption
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.launch
 
+private enum class Picker { AUDIO, SUBTITLES }
+
 /**
- * Long-press menu for a channel: favourite toggle plus every stream the row has (best first),
+ * Long-press / Options menu for a channel: favourite and hide, then — while it's the channel
+ * playing — audio track, subtitles and picture zoom, and every stream the row has (best first)
  * so a backup or a different quality can be picked by hand.
  */
 @Composable
@@ -61,6 +64,8 @@ fun ChannelMenu(
     onDismiss: () -> Unit,
     /** Called after a stream was started, e.g. to switch to the player screen. */
     onPlayed: () -> Unit,
+    /** Called after the channel was hidden, e.g. so the guide moves on. */
+    onHidden: () -> Unit = {},
 ) {
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
@@ -73,9 +78,20 @@ fun ChannelMenu(
         value = graph.player.streamsFor(channel)
     }
     val nowPlaying by graph.player.state.collectAsState()
-    val playingId = nowPlaying.stream?.id.takeIf { nowPlaying.channel?.id == primaryId }
+    val isPlaying = nowPlaying.channel?.id == primaryId && nowPlaying.channel != null
+    val playingId = nowPlaying.stream?.id.takeIf { isPlaying }
+    val zoom by graph.player.zoom.collectAsState()
+    var tracksVersion by remember { mutableStateOf(0) }
+    val audio by produceState(emptyList<TrackOption>(), isPlaying, nowPlaying.state, tracksVersion) {
+        value = if (isPlaying) graph.player.audioTracks() else emptyList()
+    }
+    val subs by produceState(emptyList<TrackOption>(), isPlaying, nowPlaying.state, tracksVersion) {
+        value = if (isPlaying) graph.player.textTracks() else emptyList()
+    }
+    var picker by remember { mutableStateOf<Picker?>(null) }
+
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(picker) {
         withFrameNanos { }
         runCatching { first.requestFocus() }
     }
@@ -89,7 +105,7 @@ fun ChannelMenu(
     }
 
     FerryDialog(
-        onDismiss = onDismiss,
+        onDismiss = { if (picker != null) picker = null else onDismiss() },
         width = 640.dp,
         modifier = Modifier.onPreviewKeyEvent { e ->
             if (armed) return@onPreviewKeyEvent false
@@ -99,45 +115,64 @@ fun ChannelMenu(
             true
         },
     ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LogoChip(primary.logo, primary.name, width = 64.dp, height = 40.dp)
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(primary.displayName, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(primary.groupTitle, if (streams.size > 1) "${streams.size} streams" else null).joinToString("  ·  "),
-                        color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LogoChip(primary.logo, primary.name, width = 64.dp, height = 40.dp)
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(primary.displayName, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull(primary.groupTitle, if (streams.size > 1) "${streams.size} streams" else null).joinToString("  ·  "),
+                    color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.height(18.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        graph.db.channels().setFavourite(primaryId, !primary.favourite)
-                        onDismiss()
-                    }
-                },
-                colors = ferryButtonColors(),
-                modifier = Modifier.focusRequester(first),
-            ) {
-                androidx.tv.material3.Icon(if (primary.favourite) FerryIcons.Star else FerryIcons.StarOutline, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(if (primary.favourite) "Remove from favourites" else "Add to favourites")
-            }
+        }
+        Spacer(Modifier.height(16.dp))
 
-            Spacer(Modifier.height(20.dp))
-            Text(
-                if (streams.size > 1) "STREAMS  ·  best first, Ferry falls back down this list" else "STREAM",
-                color = FerryColors.Faint,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Spacer(Modifier.height(6.dp))
-            LazyColumn(
-                Modifier.heightIn(max = 380.dp),
+        when (val p = picker) {
+            null -> LazyColumn(
+                Modifier.heightIn(max = 520.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
             ) {
+                item("fav") {
+                    MenuRow(
+                        icon = if (primary.favourite) FerryIcons.Star else FerryIcons.StarOutline,
+                        title = if (primary.favourite) "Remove from favourites" else "Add to favourites",
+                        modifier = Modifier.focusRequester(first),
+                    ) {
+                        scope.launch { graph.db.channels().setFavourite(primaryId, !primary.favourite); onDismiss() }
+                    }
+                }
+                if (isPlaying) {
+                    if (audio.size > 1) item("audio") {
+                        MenuRow(FerryIcons.Audio, "Audio", audio.firstOrNull { it.selected }?.label ?: "${audio.size} tracks") { picker = Picker.AUDIO }
+                    }
+                    if (subs.isNotEmpty()) item("subs") {
+                        MenuRow(FerryIcons.Subtitles, "Subtitles", subs.firstOrNull { it.selected }?.label ?: "Off") { picker = Picker.SUBTITLES }
+                    }
+                    item("zoom") {
+                        MenuRow(FerryIcons.AspectRatio, "Picture", zoom.label + "  ·  OK to change") { graph.player.cycleZoom() }
+                    }
+                }
+                item("hide") {
+                    MenuRow(FerryIcons.Hide, "Hide channel", "Removed from every list; bring it back from the web page") {
+                        scope.launch {
+                            graph.db.channels().setHidden(primaryId, true)
+                            if (isPlaying) graph.player.stop()
+                            onDismiss()
+                            onHidden()
+                        }
+                    }
+                }
+                item("streams-head") {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        if (streams.size > 1) "STREAMS  ·  best first, Ferry falls back down this list" else "STREAM",
+                        color = FerryColors.Faint,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
                 itemsIndexed(streams, key = { _, s -> s.id }) { i, s ->
                     val info = StreamQuality.parse(s.name)
                     val playing = s.id == playingId
@@ -168,5 +203,60 @@ fun ChannelMenu(
                     )
                 }
             }
+            else -> {
+                val options = if (p == Picker.AUDIO) audio else subs
+                Text(if (p == Picker.AUDIO) "AUDIO TRACK" else "SUBTITLES", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.height(6.dp))
+                LazyColumn(
+                    Modifier.heightIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp),
+                ) {
+                    if (p == Picker.SUBTITLES) item("off") {
+                        val off = options.none { it.selected }
+                        ListItem(
+                            selected = off,
+                            onClick = { graph.player.selectText(null); tracksVersion++; picker = null },
+                            colors = ferryListItemColors(), border = ferryListItemBorder(), shape = ferryListItemShape(), scale = ferryListItemScale(),
+                            headlineContent = { Text("Off", style = MaterialTheme.typography.titleSmall) },
+                            trailingContent = if (off) ({ Icon(FerryIcons.Check, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                            modifier = if (off) Modifier.focusRequester(first) else Modifier,
+                        )
+                    }
+                    items(options, key = { "${it.group}/${it.track}" }) { o ->
+                        ListItem(
+                            selected = o.selected,
+                            onClick = {
+                                if (p == Picker.AUDIO) graph.player.selectAudio(o) else graph.player.selectText(o)
+                                tracksVersion++
+                                picker = null
+                            },
+                            colors = ferryListItemColors(), border = ferryListItemBorder(), shape = ferryListItemShape(), scale = ferryListItemScale(),
+                            headlineContent = { Text(o.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
+                            trailingContent = if (o.selected) ({ Icon(FerryIcons.Check, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                            modifier = if (o.selected) Modifier.focusRequester(first) else Modifier,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Hint("Back  menu")
+            }
+        }
     }
+}
+
+@Composable
+private fun MenuRow(icon: ImageVector, title: String, subtitle: String? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    ListItem(
+        selected = false,
+        onClick = onClick,
+        colors = ferryListItemColors(),
+        border = ferryListItemBorder(),
+        shape = ferryListItemShape(),
+        scale = ferryListItemScale(),
+        leadingContent = { Icon(icon, null, modifier = Modifier.size(22.dp)) },
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = subtitle?.let { { Text(it, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+        modifier = modifier,
+    )
 }

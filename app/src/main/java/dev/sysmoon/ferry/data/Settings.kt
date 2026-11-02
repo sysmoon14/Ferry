@@ -58,6 +58,10 @@ class Settings(private val context: Context) {
         val backupEpgUrls = stringPreferencesKey("backup_epg_urls")
         val resumeLastChannel = booleanPreferencesKey("resume_last_channel")
         val tunnelling = booleanPreferencesKey("tunnelling")
+        val zoom = stringPreferencesKey("zoom")
+        val idleStopHours = intPreferencesKey("idle_stop_hours")
+        val lastSection = stringPreferencesKey("last_section")
+        val lastGroup = stringPreferencesKey("last_group")
         val mqttEnabled = booleanPreferencesKey("mqtt_enabled")
         val mqttHost = stringPreferencesKey("mqtt_host")
         val mqttPort = intPreferencesKey("mqtt_port")
@@ -210,6 +214,19 @@ class Settings(private val context: Context) {
     suspend fun setTunnelling(on: Boolean) = store.edit { it[Keys.tunnelling] = on }
     suspend fun resumeLastChannel(): Boolean = store.data.first()[Keys.resumeLastChannel] ?: true
     suspend fun setResumeLastChannel(on: Boolean) = store.edit { it[Keys.resumeLastChannel] = on }
+    /** Picture zoom mode name (see player Zoom). */
+    suspend fun zoom(): String = store.data.first()[Keys.zoom] ?: "FIT"
+    suspend fun setZoom(name: String) = store.edit { it[Keys.zoom] = name }
+    /** Hours of unattended playback before "Still watching?" (0 = never ask). */
+    val idleStopHours: Flow<Int> = store.data.map { it[Keys.idleStopHours] ?: DEFAULT_IDLE_STOP_HOURS }
+    suspend fun idleStopHours(): Int = idleStopHours.first()
+    suspend fun setIdleStopHours(hours: Int) = store.edit { it[Keys.idleStopHours] = hours.coerceIn(0, 24) }
+    /** Where the guide was last left: nav rail section and group, restored on the next launch. */
+    suspend fun lastPlace(): Pair<String?, String?> = store.data.first().let { it[Keys.lastSection] to it[Keys.lastGroup] }
+    suspend fun setLastPlace(section: String?, group: String?) = store.edit {
+        if (section == null) it.remove(Keys.lastSection) else it[Keys.lastSection] = section
+        if (group == null) it.remove(Keys.lastGroup) else it[Keys.lastGroup] = group
+    }
 
     suspend fun lastChannelId(): String? = store.data.first()[Keys.lastChannel]
     suspend fun setLastChannelId(id: String) = store.edit { it[Keys.lastChannel] = id }
@@ -223,10 +240,11 @@ class Settings(private val context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?: "Ferry ${Build.MODEL}".trim()
 
-    private companion object {
-        const val RECENTS_MAX = 20
-        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-        val reminderList = kotlinx.serialization.builtins.ListSerializer(Reminder.serializer())
+    companion object {
+        const val DEFAULT_IDLE_STOP_HOURS = 4
+        private const val RECENTS_MAX = 20
+        private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        private val reminderList = kotlinx.serialization.builtins.ListSerializer(Reminder.serializer())
     }
 
     private suspend fun getOrCreate(key: Preferences.Key<String>, create: () -> String): String {

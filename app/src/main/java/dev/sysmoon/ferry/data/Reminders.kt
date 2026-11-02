@@ -81,5 +81,5 @@ class ReminderManager(private val settings: Settings, scope: CoroutineScope) {
         }
     }
 
-    private companion object { const val LEAD_MS = 30_000L }
+    private companion object { const val LEAD_MS = 120_000L }
 }

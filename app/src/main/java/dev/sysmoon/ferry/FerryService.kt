@@ -10,7 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
+import dev.sysmoon.ferry.Logs
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -41,7 +41,7 @@ class FerryService : Service() {
         // Ferry's first screen by a couple of seconds.
         g.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             g.settings.claimDevice() // before anything reads the device identity
-            runCatching { server.start(PORT) }.onFailure { Log.w(TAG, "Config server failed to start", it) }
+            runCatching { server.start(PORT) }.onFailure { Logs.w(TAG, "Config server failed to start", it) }
             g.settings.pin() // make sure a pairing PIN exists before anyone opens Settings
             g.mqtt.start()
             nsd.register(g.settings.deviceName(), PORT, g.settings.deviceId())
@@ -59,14 +59,14 @@ class FerryService : Service() {
                     continue
                 }
                 heldSince = 0L
-                runCatching { g.repository.refreshDue() }.onFailure { Log.w(TAG, "refresh loop", it) }
+                runCatching { g.repository.refreshDue() }.onFailure { Logs.w(TAG, "refresh loop", it) }
                 delay(30 * 60_000L)
             }
         }
         syncJob = g.scope.launch {
             delay(60_000) // let start-up and the first tune finish
             while (isActive) {
-                runCatching { g.sync.syncNow() }.onFailure { Log.w(TAG, "sync loop", it) }
+                runCatching { g.sync.syncNow() }.onFailure { Logs.w(TAG, "sync loop", it) }
                 delay(15 * 60_000L)
             }
         }
