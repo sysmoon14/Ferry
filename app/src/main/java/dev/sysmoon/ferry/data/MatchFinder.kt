@@ -53,7 +53,8 @@ class MatchFinder(
     fun find(f: Fixture, sameSlot: Int = 1): Flow<List<StreamCandidate>> = flow {
         cached(f)?.let { emit(it); return@flow }
         val t0 = System.currentTimeMillis()
-        val rows = withContext(Dispatchers.IO) { db.channels().allPrimaries() }
+        val (rows, norm) = channelsNormalised()
+        val tRows = System.currentTimeMillis() - t0
         val home = TeamNames.aliases(f.home)
         val away = TeamNames.aliases(f.away)
         val ukPicks = picks.picks(f.competition).toSet()
@@ -71,9 +72,7 @@ class MatchFinder(
         }
         fun snapshot() = found.values.sortedWith(compareByDescending<StreamCandidate> { it.score }.thenByDescending { it.channel.quality }).take(60)
 
-        // ---- 1. The channel list alone (milliseconds). Names are normalised once: 20k channels
-        // through the regexes several times over was most of the old finder's time.
-        val norm = rows.map { TeamNames.normalise(it.name) }
+        // ---- 1. The channel list alone.
         val koDate = java.time.Instant.ofEpochMilli(f.kickoff).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
         for ((i, ch) in rows.withIndex()) {
             val text = norm[i]
@@ -180,9 +179,26 @@ class MatchFinder(
         }
         val result = snapshot()
         synchronized(this) { cache[f.id] = Cached(System.currentTimeMillis(), result) }
-        Logs.i(TAG, "Finder: ${result.size} streams for ${f.title} in ${System.currentTimeMillis() - t0} ms (names $tNames ms, Sky $tSky ms, guide ${System.currentTimeMillis() - t0 - tNames - tSky} ms)")
+        Logs.i(TAG, "Finder: ${result.size} streams for ${f.title} in ${System.currentTimeMillis() - t0} ms (channels $tRows ms, names ${tNames - tRows} ms, Sky $tSky ms, guide ${System.currentTimeMillis() - t0 - tNames - tSky} ms)")
         emit(result)
     }.flowOn(Dispatchers.Default)
+
+    private var rowsCache: Triple<Long, List<ChannelEntity>, List<String>>? = null
+
+    /** Reads the channel list ahead of the first search (called when the Sports screen opens). */
+    suspend fun warm() { runCatching { channelsNormalised() } }
+
+    /**
+     * Every primary channel with its normalised name. Reading 20k rows and running them through
+     * the regexes takes seconds on a TV, so it's kept for a few minutes (channels rarely change).
+     */
+    private suspend fun channelsNormalised(): Pair<List<ChannelEntity>, List<String>> {
+        rowsCache?.takeIf { System.currentTimeMillis() - it.first < ROWS_CACHE_MS }?.let { return it.second to it.third }
+        val rows = withContext(Dispatchers.IO) { db.channels().allPrimaries() }
+        val norm = rows.map { TeamNames.normalise(it.name) }
+        rowsCache = Triple(System.currentTimeMillis(), rows, norm)
+        return rows to norm
+    }
 
     /**
      * Sky's schedule for the day, for the sports channels the Sky layout matched (Sky Sports,
@@ -221,7 +237,7 @@ class MatchFinder(
                 when {
                     h && a && show -> { hits++; channels.forEach { add(it, 50, label) } }
                     h && a -> { hits++; channels.forEach { add(it, 96, label) } }
-                    (h || a) && comp && !TeamNames.hasVersus(text) -> { hits++; channels.forEach { add(it, 74, label) } }
+                    (h || a) && comp && !show && !TeamNames.hasVersus(text) -> { hits++; channels.forEach { add(it, 74, label) } }
                 }
             }
         }
@@ -249,6 +265,7 @@ class MatchFinder(
     private companion object {
         const val TAG = "Football"
         const val CACHE_MS = 3 * 60_000L
+        const val ROWS_CACHE_MS = 10 * 60_000L
     }
 }
 

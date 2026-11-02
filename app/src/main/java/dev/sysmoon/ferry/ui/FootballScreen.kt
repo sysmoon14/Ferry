@@ -55,7 +55,9 @@ import dev.sysmoon.ferry.data.Team
 import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.ZapScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -101,6 +103,7 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
     var fixtures by remember { mutableStateOf<List<Fixture>?>(null) }
     var teams by remember { mutableStateOf<List<Team>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { withContext(Dispatchers.Default) { graph.matchFinder.warm() } }
     LaunchedEffect(competitions) {
         error = null
         val from = FootballData.today().minusDays(1)
@@ -456,7 +459,7 @@ private fun Candidates(
             val focusId = state.lastPlayed?.takeIf { id -> list.any { it.channel.id == id } }
             // Rows arriving above the first visible one would otherwise push the list down.
             val listState = rememberLazyListState()
-            LaunchedEffect(list.size, state.searching) { if (state.searching) listState.scrollToItem(0) }
+            LaunchedEffect(list.size) { if (focusId == null) listState.scrollToItem(0) }
             LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
                 for (group in StreamCandidate.Group.entries) {
                     val members = list.filter { it.group == group }
