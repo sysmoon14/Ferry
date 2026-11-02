@@ -194,10 +194,13 @@ fun GuideScreen(
     // Long-press menu (favourite + stream picker) for this channel, if open.
     var menuFor by remember { mutableStateOf<ChannelEntity?>(null) }
     var hiddenSignal by remember { mutableIntStateOf(0) }
+    // Bumped when a group is picked from the group list: the channels start from the top, not
+    // wherever the list was left (the grid follows the playing channel while a stream is on).
+    var enterSignal by remember { mutableIntStateOf(0) }
     menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer, onHidden = { hiddenSignal++ }) }
 
-    // Each group gets its own scroll position, so opening a group always starts at the top.
     val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
+    LaunchedEffect(enterSignal) { if (enterSignal > 0 && !gridView) listState.scrollToItem(0) }
     val returnFocus = remember { FocusRequester() }
 
     data class RailEntry(val key: String, val label: String, val icon: ImageVector? = null)
@@ -334,7 +337,7 @@ fun GuideScreen(
                                 ListItem(
                                     modifier = if (isSelected) Modifier.focusRequester(railFocus) else Modifier,
                                     selected = isSelected,
-                                    onClick = { onSelect(entry.key); focusContent(false) },
+                                    onClick = { onSelect(entry.key); enterSignal++; focusContent(false) },
                                     leadingContent = if (entry.icon != null) ({ Icon(entry.icon, null, modifier = Modifier.size(20.dp)) }) else null,
                                     headlineContent = {
                                         Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -404,6 +407,7 @@ fun GuideScreen(
                         active = active,
                         playerShowing = playerShowing,
                         returnSignal = if (returnToRail) 0 else returnSignal,
+                        enterSignal = enterSignal,
                         onOpenPlayer = onOpenPlayer,
                         onMenu = { menuFor = it },
                         onBackToGroups = backFromContent,

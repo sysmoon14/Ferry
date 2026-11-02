@@ -130,10 +130,10 @@ class Updater(
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> confirm?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                // From the background Android only lets Ferry open the installer with "Display over
-                // other apps"; otherwise it's silently dropped. Keep it for the next time Ferry opens.
-                val canShow = uiVisible() || android.provider.Settings.canDrawOverlays(context)
-                if (!canShow) {
+                // Only while Ferry is on screen: with "Display over other apps" granted the installer
+                // would otherwise pop up over whatever is being watched (seen over Silo when Home
+                // Assistant pressed Install). Held until the next time Ferry opens instead.
+                if (!uiVisible()) {
                     pendingConfirm = it
                     _state.value = UpdateState.Failed("open Ferry on the TV to finish installing", r)
                     return

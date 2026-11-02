@@ -272,7 +272,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `sensor.<name>_next_match` | Kick-off of the next match for My teams (timestamp), with title, competition, score and `deep_link` attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting), `sleep` (timer stopped playback), `failover` (fell back to another stream: `channel`, `reason`, `from_stream`, `to_stream`) and `backstop` (retuned a frozen stream) |
-| `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
+| `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** downloads it and asks to confirm the next time Ferry is on screen (never over another app) |
 | `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel, and the last 25 lines of Ferry's log |
 
 Topics (`base = ferry/<device-id>`):

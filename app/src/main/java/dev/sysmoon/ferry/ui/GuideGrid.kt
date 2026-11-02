@@ -104,6 +104,8 @@ fun GuideGrid(
     playerShowing: Boolean,
     /** Bumped when the guide comes back from the player (0 = never / not for this grid). */
     returnSignal: Int,
+    /** Bumped when this group was just picked from the group list: start at the top, at now. */
+    enterSignal: Int = 0,
     onOpenPlayer: () -> Unit,
     /** Long press: open the channel menu (favourite, stream picker). */
     onMenu: (ChannelEntity) -> Unit,
@@ -190,6 +192,12 @@ fun GuideGrid(
         cursorTime = System.currentTimeMillis()
         val index = channels.indexOfFirst { it.id == playingId }
         if (index >= 0) listState.scrollToItem((index - 2).coerceAtLeast(0))
+    }
+    LaunchedEffect(enterSignal) {
+        if (enterSignal == 0) return@LaunchedEffect
+        windowStart = nowSlot
+        cursorTime = System.currentTimeMillis()
+        listState.scrollToItem(0)
     }
     LaunchedEffect(returnSignal) {
         if (returnSignal == 0) return@LaunchedEffect
