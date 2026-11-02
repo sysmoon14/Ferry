@@ -212,11 +212,12 @@ class PlayerController(
                 val hdr = transfer == androidx.media3.common.C.COLOR_TRANSFER_ST2084 ||
                     transfer == androidx.media3.common.C.COLOR_TRANSFER_HLG
                 if (_state.value.hdr != hdr) _state.update { it.copy(hdr = hdr) }
-                player.videoFormat?.let { f ->
-                    Logs.i(TAG, "Tracks: ${f.width}×${f.height}@${f.frameRate.toInt()} ${f.sampleMimeType} ${f.bitrate / 1000} kbit/s" +
-                        (player.audioFormat?.let { a -> ", audio ${a.sampleMimeType} ${a.channelCount}ch" } ?: "") +
-                        (if (hdr) ", HDR" else "") + (if (tunnelling) ", tunnelled" else ""))
-                }
+            }
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                val f = player.videoFormat ?: return
+                Logs.i(TAG, "Video ${f.width}×${f.height}@${f.frameRate.toInt()} ${f.sampleMimeType?.substringAfterLast('/')} ${f.bitrate / 1000} kbit/s" +
+                    (player.audioFormat?.let { a -> ", audio ${a.sampleMimeType?.substringAfterLast('/')} ${a.channelCount}ch" } ?: "") +
+                    (if (_state.value.hdr) ", HDR" else "") + (if (tunnelling) ", tunnelled" else ""))
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -331,14 +332,20 @@ class PlayerController(
                 if (!g.isTrackSupported(ti)) continue
                 val f = g.getTrackFormat(ti)
                 val lang = f.language?.takeIf { it != "und" }?.let { java.util.Locale.forLanguageTag(it).displayLanguage.ifBlank { it } }
+                val name = f.label ?: lang
                 val parts = listOfNotNull(
-                    f.label ?: lang,
+                    name,
                     if (type == androidx.media3.common.C.TRACK_TYPE_AUDIO) f.sampleMimeType?.substringAfterLast('/')?.let(::codecName) else null,
                     if (type == androidx.media3.common.C.TRACK_TYPE_AUDIO && f.channelCount > 0) "${f.channelCount}ch" else null,
-                    if ((f.roleFlags and androidx.media3.common.C.ROLE_FLAG_DESCRIBES_VIDEO) != 0) "audio description" else null,
+                    if ((f.roleFlags and androidx.media3.common.C.ROLE_FLAG_DESCRIBES_VIDEO) != 0 && name?.contains("descri", true) != true) "audio description" else null,
                     if ((f.roleFlags and androidx.media3.common.C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0) "hard of hearing" else null,
                 )
-                out += TrackOption(gi, ti, parts.ifEmpty { listOf("Track ${out.size + 1}") }.joinToString(" · "), g.isTrackSelected(ti))
+                val label = parts.ifEmpty { listOf("Track ${out.size + 1}") }.joinToString(" · ")
+                // DASH streams (BBC) list the same track at several bitrates: one entry per track,
+                // the selected one winning so the tick lands on it.
+                val dup = out.indexOfFirst { it.label == label }
+                val option = TrackOption(gi, ti, label, g.isTrackSelected(ti))
+                if (dup < 0) out += option else if (option.selected) out[dup] = option
             }
         }
         out

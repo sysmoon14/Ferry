@@ -226,7 +226,7 @@ fun GuideGrid(
             when (e.key) {
                 // A screenful at a time, like a set-top box's page keys.
                 Key.ChannelUp, Key.PageUp -> moveTo((focusedIndex - pageSize()).coerceAtLeast(0), scrollTo = (focusedIndex - pageSize()).coerceAtLeast(0))
-                Key.ChannelDown, Key.PageDown -> moveTo((focusedIndex + pageSize()).coerceAtMost(channels.lastIndex), scrollTo = focusedIndex + 1)
+                Key.ChannelDown, Key.PageDown -> (focusedIndex + pageSize()).coerceAtMost(channels.lastIndex).let { moveTo(it, scrollTo = it) }
                 // Jump back to what's on now, from wherever in time the grid has been scrolled to.
                 Key.MediaPlayPause, Key.MediaPlay -> {
                     windowStart = nowSlot
