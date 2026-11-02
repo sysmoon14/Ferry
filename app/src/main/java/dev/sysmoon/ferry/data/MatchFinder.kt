@@ -4,6 +4,7 @@ import dev.sysmoon.ferry.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.text.Normalizer
 import java.text.SimpleDateFormat
@@ -70,11 +71,13 @@ class MatchFinder(
         }
         fun snapshot() = found.values.sortedWith(compareByDescending<StreamCandidate> { it.score }.thenByDescending { it.channel.quality }).take(60)
 
-        // ---- 1. The channel list alone (milliseconds).
+        // ---- 1. The channel list alone (milliseconds). Names are normalised once: 20k channels
+        // through the regexes several times over was most of the old finder's time.
+        val norm = rows.map { TeamNames.normalise(it.name) }
         val koDate = java.time.Instant.ofEpochMilli(f.kickoff).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-        for (ch in rows) {
-            if (TeamNames.otherSport(ch.name)) continue
-            val text = TeamNames.normalise(ch.name)
+        for ((i, ch) in rows.withIndex()) {
+            val text = norm[i]
+            if (TeamNames.otherSportNorm(text)) continue
             val h = TeamNames.mentions(text, home)
             val a = TeamNames.mentions(text, away)
             if (!h && !a) continue
@@ -96,10 +99,10 @@ class MatchFinder(
         // Channels dedicated to the competition ("SuperSport Premier League", "Hub Premier 1",
         // "V Sport Premier League", "Optus Sport"): rights holders that show one match at a time,
         // so when this is the only game on they're almost certainly showing it, even with no guide.
-        for (ch in rows) {
+        for ((i, ch) in rows.withIndex()) {
             if (ch.id in found) continue
-            val name = TeamNames.normalise(ch.name)
-            if (TeamNames.otherSport(ch.name) || TeamNames.notFirstTeam(name) || TeamNames.otherLeague(name, f.competition)) continue
+            val name = norm[i]
+            if (TeamNames.otherSportNorm(name) || TeamNames.notFirstTeam(name) || TeamNames.otherLeague(name, f.competition)) continue
             if (f.competition.channelWords.none { name.contains(" $it ") }) continue
             if (name.contains(" premier sports ")) continue // a broadcaster, not the league
             if (TeamNames.isReplay(ch)) continue
@@ -117,19 +120,24 @@ class MatchFinder(
             val key = TeamNames.normalise(b).trim()
             if (key.length < 3) continue
             // The network itself ("USA Network", "NBC HD", "Peacock 1"), not everything with its name in.
-            rows.filter { TeamNames.isNetwork(it.name, key) }.take(4).forEach { add(it, 55, "Listed broadcaster: $b") }
-            // Streaming services as numbered event channels ("Peacock | Event 1"): the match is on
-            // one of the first few.
-            rows.filter { TeamNames.isEventChannelOf(it.name, key) }
-                .sortedBy { TeamNames.feedNumber(TeamNames.normalise(it.name)) ?: 99 }.take(3)
-                .forEach { add(it, 46, "Listed broadcaster: $b (event channel)") }
+            rows.indices.filter { norm[it].contains(" $key ") }.let { hits ->
+                hits.filter { TeamNames.isNetwork(rows[it].name, key) }.take(4).forEach { add(rows[it], 55, "Listed broadcaster: $b") }
+                // Streaming services as numbered event channels ("Peacock | Event 1"): the match is on
+                // one of the first few.
+                hits.filter { TeamNames.isEventChannelOfNorm(norm[it], key) }
+                    .sortedBy { TeamNames.feedNumber(norm[it]) ?: 99 }.take(3)
+                    .forEach { add(rows[it], 46, "Listed broadcaster: $b (event channel)") }
+            }
         }
+        val tNames = System.currentTimeMillis() - t0
         emit(snapshot())
 
         // ---- 2. Sky's guide for UK sports channels (a week ahead, with the match in the synopsis).
         val time = SimpleDateFormat("HH:mm", Locale.getDefault())
+        val tSky0 = System.currentTimeMillis()
         runCatching { skyPass(f, rows, home, away, time, ::add) }
             .onFailure { Logs.w(TAG, "Sky guide pass failed", it) }
+        val tSky = System.currentTimeMillis() - tSky0
         emit(snapshot())
 
         // ---- 3. The playlist guides around kick-off, for every channel with a guide (hidden ones included).
@@ -171,9 +179,9 @@ class MatchFinder(
         }
         val result = snapshot()
         synchronized(this) { cache[f.id] = Cached(System.currentTimeMillis(), result) }
-        Logs.i(TAG, "Finder: ${result.size} streams for ${f.title} in ${System.currentTimeMillis() - t0} ms")
+        Logs.i(TAG, "Finder: ${result.size} streams for ${f.title} in ${System.currentTimeMillis() - t0} ms (names $tNames ms, Sky $tSky ms, guide ${System.currentTimeMillis() - t0 - tNames - tSky} ms)")
         emit(result)
-    }
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Sky's schedule for the day, for the sports channels the Sky layout matched (Sky Sports,
@@ -184,13 +192,15 @@ class MatchFinder(
         f: Fixture, rows: List<ChannelEntity>, home: Set<String>, away: Set<String>,
         time: SimpleDateFormat, add: (ChannelEntity, Int, String) -> Unit,
     ) {
-        if (!settings.skyLayout()) return
+        if (!settings.skyLayout()) { Logs.i(TAG, "Sky pass: Sky layout off"); return }
         val lineup = withContext(Dispatchers.IO) { sky.channels(settings.skyRegion()) }
         val sportsSids = lineup.filter { it.genre == 7 && it.sid.isNotBlank() }.associate { it.number to it.sid }
         val bySid = rows.filter { it.skyNumber != null }.groupBy { sportsSids[it.skyNumber] }.filterKeys { it != null }
-        if (bySid.isEmpty()) return
+        if (bySid.isEmpty()) { Logs.i(TAG, "Sky pass: no Sky-matched sports channels"); return }
         val day = java.time.Instant.ofEpochMilli(f.kickoff).atZone(java.time.ZoneId.of("Europe/London")).toLocalDate()
         val schedules = withContext(Dispatchers.IO) { sky.schedules(bySid.keys.filterNotNull(), day) }
+        var hits = 0
+        val near = mutableListOf<String>()
         for ((sid, events) in schedules) {
             val channels = bySid[sid] ?: continue
             for (e in events) {
@@ -204,12 +214,14 @@ class MatchFinder(
                 val a = TeamNames.mentions(text, away)
                 val comp = f.competition.keywords.any { text.contains(" $it ") } && !TeamNames.otherLeague(text, f.competition)
                 val label = "Sky guide: ${e.title} (${time.format(Date(e.start))})"
+                if (near.size < 6) near += "${channels.first().name}: ${e.title}"
                 when {
-                    h && a -> channels.forEach { add(it, 96, label) }
-                    (h || a) && comp && !TeamNames.hasVersus(text) -> channels.forEach { add(it, 74, label) }
+                    h && a -> { hits++; channels.forEach { add(it, 96, label) } }
+                    (h || a) && comp && !TeamNames.hasVersus(text) -> { hits++; channels.forEach { add(it, 74, label) } }
                 }
             }
         }
+        Logs.i(TAG, "Sky pass: ${bySid.size} sports channels, ${schedules.values.sumOf { it.size }} listings on $day, $hits hits; around kick-off: ${near.joinToString(" | ")}")
     }
 
     private fun groupOf(ch: ChannelEntity, reason: String): StreamCandidate.Group = when {
@@ -312,6 +324,7 @@ object TeamNames {
 
     private val OTHER_SPORTS = Regex("""\b(rugby|super league|rhinos|nrl|nfl|nba|nhl|mlb|cricket|darts|pdc|snooker|tennis|golf|boxing|ufc|wwe|f1|motogp|nascar|hockey|basketball|baseball|netball|kabaddi)\b""")
     fun otherSport(name: String) = OTHER_SPORTS.containsMatchIn(normalise(name))
+    fun otherSportNorm(normalisedName: String) = OTHER_SPORTS.containsMatchIn(normalisedName)
 
     /** Other "Premier Leagues" and "premierships" that share a name with the English one. */
     private val OTHER_LEAGUE = Regex("""\b(canadian|scottish|irish|welsh|northern irish|indian|russian|ukrainian|hong kong|saudi|egyptian|nigerian|kenyan|ghana|south african|australian|malaysian|singapore|cypriot|israeli|belarus|kazakh|azerbaijan|armenian|georgian|icelandic|maltese) (premier|super|pro) ?(league|ship)?\b""")
@@ -351,10 +364,8 @@ object TeamNames {
         Regex(""" (\d{1,2}) (?:uhd |fhd |hd |sd |4k |1080p |720p |50fps )*$""").find(normalisedName)?.groupValues?.get(1)?.toIntOrNull()
 
     /** "Peacock | Event 3" / "Peacock Event 3" for broadcaster [key]. */
-    fun isEventChannelOf(name: String, key: String): Boolean {
-        val n = normalise(name)
-        return n.contains(" $key ") && n.contains(" event ") && feedNumber(n) != null
-    }
+    fun isEventChannelOf(name: String, key: String): Boolean = isEventChannelOfNorm(normalise(name), key)
+    fun isEventChannelOfNorm(n: String, key: String): Boolean = n.contains(" $key ") && n.contains(" event ") && feedNumber(n) != null
 
     /** A date like "31/10" or "31.10" in a channel name. */
     fun dateIn(name: String, year: Int): java.time.LocalDate? {
