@@ -22,8 +22,16 @@ data class Reminder(
     val stop: Long,
     val title: String,
     val channelName: String,
+    /** Set for a football fixture reminder: the ESPN event id. Pops up [FIXTURE_LEAD_MS] before kick-off. */
+    val fixtureId: String? = null,
 ) {
     val key: String get() = "$epgKey@$start"
+    val lead: Long get() = if (fixtureId != null) FIXTURE_LEAD_MS else LEAD_MS
+
+    companion object {
+        const val LEAD_MS = 120_000L
+        const val FIXTURE_LEAD_MS = 5 * 60_000L
+    }
 }
 
 /**
@@ -57,6 +65,21 @@ class ReminderManager(private val settings: Settings, scope: CoroutineScope) {
         return set
     }
 
+    fun hasFixture(f: Fixture): Boolean = reminders.value.any { it.fixtureId == f.id }
+
+    /** Adds or removes a reminder for a match (five minutes before kick-off); true if one is now set. */
+    suspend fun toggleFixture(f: Fixture): Boolean {
+        var set = false
+        settings.updateReminders { list ->
+            if (list.any { it.fixtureId == f.id }) list.filterNot { it.fixtureId == f.id }
+            else {
+                set = true
+                (list + Reminder("", "fixture:${f.id}", f.kickoff, f.kickoff + 2 * 3_600_000L, f.title, f.competition.label, f.id)).sortedBy { it.start }
+            }
+        }
+        return set
+    }
+
     fun dismiss() { _due.value = null }
 
     init {
@@ -71,7 +94,7 @@ class ReminderManager(private val settings: Settings, scope: CoroutineScope) {
     private suspend fun check() {
         val now = System.currentTimeMillis()
         _due.value?.let { if (it.stop <= now) _due.value = null }
-        val startingNow = reminders.value.filter { it.start <= now + LEAD_MS }
+        val startingNow = reminders.value.filter { it.start <= now + it.lead }
         if (startingNow.isEmpty()) return
         settings.updateReminders { list -> list.filterNot { r -> startingNow.any { it.key == r.key } } }
         // Only remind about programmes still on (Ferry may have been off when one started).
@@ -80,6 +103,4 @@ class ReminderManager(private val settings: Settings, scope: CoroutineScope) {
             _fired.tryEmit(r)
         }
     }
-
-    private companion object { const val LEAD_MS = 120_000L }
 }

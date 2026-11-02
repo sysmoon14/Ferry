@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -26,13 +27,36 @@ enum class Competition(
     /** Words in a channel's own name that make it a channel dedicated to this competition
      *  ("SuperSport Premier League", "Hub Premier 1", "V Sport Premier League"). */
     val channelWords: List<String>,
+    /** On unless the user turns it off on the web page. */
+    val default: Boolean = false,
 ) {
     PREMIER_LEAGUE("eng.1", "Premier League", "PL", listOf("premier league", "english premier", "epl"),
-        listOf("premier league", "premier football", "hub premier", "optus sport", "epl")),
+        listOf("premier league", "premier football", "hub premier", "optus sport", "epl"), default = true),
     CHAMPIONS_LEAGUE("uefa.champions", "Champions League", "UCL", listOf(
         "champions league", "uefa champions", "ucl", "liga de campeones", "ligue des champions",
         "liga dos campeoes", "champions league uefa", "lega dei campioni",
-    ), listOf("champions league", "uefa champions")),
+    ), listOf("champions league", "uefa champions"), default = true),
+    EUROPA_LEAGUE("uefa.europa", "Europa League", "UEL", listOf("europa league", "uefa europa", "uel"), listOf("europa league")),
+    CONFERENCE_LEAGUE("uefa.europa.conf", "Conference League", "UECL", listOf("conference league", "uefa conference", "uecl"), listOf("conference league")),
+    FA_CUP("eng.fa", "FA Cup", "FAC", listOf("fa cup", "emirates fa cup"), emptyList()),
+    EFL_CUP("eng.league_cup", "EFL Cup", "EFL", listOf("efl cup", "carabao cup", "league cup"), emptyList()),
+    CHAMPIONSHIP("eng.2", "Championship", "EFL", listOf("championship", "efl championship", "sky bet championship"), emptyList()),
+    SCOTTISH_PREM("sco.1", "Scottish Premiership", "SPFL", listOf("scottish premiership", "spfl", "scottish premier"), emptyList()),
+    LA_LIGA("esp.1", "La Liga", "LIGA", listOf("la liga", "laliga", "liga ea sports", "primera division"), listOf("laliga", "la liga")),
+    BUNDESLIGA("ger.1", "Bundesliga", "BUND", listOf("bundesliga"), listOf("bundesliga")),
+    SERIE_A("ita.1", "Serie A", "SA", listOf("serie a"), listOf("serie a")),
+    LIGUE_1("fra.1", "Ligue 1", "L1", listOf("ligue 1", "ligue1"), listOf("ligue 1")),
+    WC_QUALIFIERS("fifa.worldq.uefa", "World Cup qualifiers", "WCQ", listOf("world cup qualifier", "world cup qualifying", "wc qualifier", "fifa world cup qualif"), emptyList()),
+    NATIONS_LEAGUE("uefa.nations", "Nations League", "UNL", listOf("nations league", "uefa nations"), emptyList()),
+    ;
+
+    /** Cups and internationals have no "league" word of their own: a guide saying just "football" won't pin them. */
+    val international: Boolean get() = this == WC_QUALIFIERS || this == NATIONS_LEAGUE
+
+    companion object {
+        val DEFAULT: Set<String> = entries.filter { it.default }.map { it.name }.toSet()
+        fun enabled(names: Set<String>): List<Competition> = entries.filter { it.name in names }.ifEmpty { entries.filter { it.default } }
+    }
 }
 
 data class Team(val id: String, val name: String, val short: String, val abbr: String, val logo: String?) {
@@ -180,4 +204,41 @@ class FootballData(private val http: OkHttpClient, private val cacheDir: File) {
 
         fun today(): LocalDate = LocalDate.now(ZoneId.systemDefault())
     }
+}
+
+/**
+ * Which channels have actually shown a competition's matches before. A pick only counts once
+ * the same channel has played for [WATCH_MS] from the finder: trying a stream and moving on
+ * says nothing, ten minutes on it says it was the right match.
+ */
+class FootballPicks(
+    private val settings: Settings,
+    private val player: dev.sysmoon.ferry.player.PlayerController,
+    private val scope: kotlinx.coroutines.CoroutineScope,
+) {
+    private var job: kotlinx.coroutines.Job? = null
+
+    /** The user started [channelId] for [f] from the finder. */
+    fun started(f: Fixture, channelId: String) {
+        job?.cancel()
+        job = scope.launch {
+            kotlinx.coroutines.delay(WATCH_MS)
+            val s = player.state.value
+            val onIt = (s.channel?.id == channelId || s.stream?.id == channelId) && s.state == dev.sysmoon.ferry.player.PlaybackState.PLAYING
+            if (!onIt || !f.isOnNow()) return@launch
+            settings.recordFootballPick(f.competition.name, channelId)
+            dev.sysmoon.ferry.Logs.i("Football", "Remembered $channelId for ${f.competition.label} (${f.title})")
+        }
+    }
+
+    /** Channel ids that have shown this competition before, most recent first. */
+    suspend fun picks(c: Competition): List<String> = settings.footballPicks()[c.name].orEmpty()
+    suspend fun allPicks(): Set<String> = settings.footballPicks().values.flatten().toSet()
+
+    private fun Fixture.isOnNow(): Boolean {
+        val now = System.currentTimeMillis()
+        return now in (kickoff - 15 * 60_000L)..(kickoff + 150 * 60_000L)
+    }
+
+    companion object { const val WATCH_MS = 10 * 60_000L }
 }

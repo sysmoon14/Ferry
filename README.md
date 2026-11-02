@@ -23,7 +23,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Recently watched | A group in TV Guide / Channel List with the channels you've watched lately |
 | Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
 | Keep in sync | A box can follow another Ferry and pick up its setup changes automatically |
-| Football | Premier League and Champions League fixtures; finds every stream in your playlist that might show a match |
+| Football | Fixtures for the competitions you pick; finds every stream in your playlist that might show a match (Sky's guide, your guides, channel names), learns which channels work, reminds you before kick-off, tells HA about the next match |
 | Start-up | Optionally opens straight into the last watched channel; the guide reopens on the section and group you left. "Still watching?" after hours with the remote untouched |
 | Web config | Phone-friendly page with PIN/QR pairing at `http://<tv-ip>:8765`, including backup & sync between boxes |
 | Home Assistant | MQTT discovery, deep links, REST API, mDNS (`_ferry._tcp`) |
@@ -137,28 +137,44 @@ by hand; manual picks stick across refreshes.
 
 ### Football
 
-**⚽ Sports** (main menu) shows Premier League and Champions League fixtures from ESPN's
-public data, live scores first, with **Clubs** to pick your teams (they get a **★ My teams** tab).
-Choosing a match lists every stream that might show it, best first, with the reason:
+**⚽ Sports** (main menu) shows fixtures from ESPN's public data for the competitions you pick on the
+web page (Premier League and Champions League by default; also Europa/Conference League, FA Cup, EFL
+Cup, Championship, Scottish Premiership, La Liga, Bundesliga, Serie A, Ligue 1, World Cup qualifiers
+and the Nations League). Tabs: **★ My teams** (pick clubs under **Clubs**), **Today** (live and
+today's games), one per competition. Choosing a match shows **Watch** (the best stream, one press),
+**Remind me** (a pop-up five minutes before kick-off that opens this list), then every stream that
+might show it, grouped as *Your UK channels* / *Other countries* / *Club & event channels*, best
+first, with the reason, quality and country. The quick checks show at once and the list grows as the
+slower ones finish:
 
 1. **Channel name** with both teams (providers rename event channels on match day, e.g.
    "EPL02: Bournemouth 15:00 Leeds 31/10"); dated channels for another day are ignored.
-2. **Guide data** around kick-off naming both teams, in any language/spelling, on any channel
+2. **Sky's own guide** (with the Sky layout on) for the Sky Sports / TNT Sports / Premier Sports
+   channels it matched: Sky lists "Live UEFA Champions League: Fenerbahce v Liverpool" a week out,
+   long before most providers' guides reach the day.
+3. **Guide data** around kick-off naming both teams, in any language/spelling, on any channel
    (hidden groups included, so foreign sports channels count).
-3. One team plus the competition in the guide, the club's own channel, or a broadcaster ESPN lists
+4. One team plus the competition in the guide, the club's own channel, or a broadcaster ESPN lists
    (including its numbered event channels, e.g. "Peacock | Event 1").
-4. **Channels dedicated to the competition** ("SuperSport Premier League", "Optus Sport 1", "Hub Premier 1",
+5. **Channels dedicated to the competition** ("SuperSport Premier League", "Optus Sport 1", "Hub Premier 1",
    "True Premier Football 1") when it's the only game on at that time — even with no guide. Only the first
-   two of a numbered family count; replay/24-7 loops don't.
-5. Just the competition at kick-off on a sports channel (weakest).
+   two of a numbered family count; replay/24-7 loops don't; multi-view feeds are labelled as such.
+6. Just the competition at kick-off on a sports channel (weakest).
 
 "Around kick-off" means a listing starting up to 75 minutes before (build-up shows that run into the
 game, e.g. Viaplay's 15:30 "Premier League" for a 16:30 kick-off) and lasting no more than 4 hours.
 
-Other sports (incl. darts' "Premier League"), youth/women's games, magazine shows ("Preview", "Highlights")
-and look-alike names are filtered out; UK streams
-rank first. Playing one makes that list the channel up/down list, so if a stream dies, ▲ tries the next;
-Back returns to the list.
+Other sports (incl. darts' "Premier League"), other countries' "Premier Leagues", youth/women's games,
+magazine shows ("Preview", "Highlights", "Jej Wysokość Premier League"), other clubs' own channels
+(MUTV, LFC TV) and look-alike names are filtered out; UK streams rank first. **Ferry learns which
+channels show a competition**: a stream played from this list that is still playing ten minutes later
+(so it was the right match, not one you tried and left) is remembered and boosted next time. Playing a
+stream makes the list the channel up/down list — ▲ ▼ move through the candidates, nothing switches
+on its own; Back returns to the list.
+
+Home Assistant gets `sensor.<name>_next_match` (kick-off of the next My teams match, with title,
+competition, score and a `deep_link` attribute such as `ferry://football/401915382`), so an automation
+can turn the TV on and open the finder at kick-off. `ferry://football` opens the Sports screen.
 
 For diagnosing results: `GET /api/football/fixtures` lists upcoming fixtures with their ids, and
 `GET /api/football/candidates?event=<id>` returns the finder's results with reasons (it works in the
@@ -254,6 +270,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | `image.<name>_channel_logo` | Logo of the channel playing |
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
+| `sensor.<name>_next_match` | Kick-off of the next match for My teams (timestamp), with title, competition, score and `deep_link` attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting), `sleep` (timer stopped playback), `failover` (fell back to another stream: `channel`, `reason`, `from_stream`, `to_stream`) and `backstop` (retuned a frozen stream) |
 | `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
 | `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel, and the last 25 lines of Ferry's log |
@@ -288,6 +305,8 @@ ferry://name/<url-encoded name>
 ferry://channel/<channel-id>
 ferry://last
 ferry://guide
+ferry://football               the Sports screen
+ferry://football/<event-id>    one match's streams (id from the next match sensor or /api/football/fixtures)
 ```
 
 ```yaml
@@ -348,7 +367,7 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | GET/PUT | `/groups/detail`, `/groups/visible` | group list with hidden state / set the groups to use |
 | GET/PUT | `/sky` | Sky layout status / `{enabled, region, extraGroups}` |
 | PUT | `/sky/override` | `{number, channelId?}` manual Sky match (null clears) |
-| GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?, sportsGuides?, idleStopHours?}` |
+| GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?, sportsGuides?, idleStopHours?, competitions?}` (GET lists `allCompetitions`) |
 | POST | `/guide/fill` | fill guide gaps now |
 | GET | `/export` | settings export (includes playlist passwords) |
 | POST | `/import` | apply an export to this box |

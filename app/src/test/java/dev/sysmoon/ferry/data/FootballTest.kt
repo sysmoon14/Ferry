@@ -101,4 +101,26 @@ class FootballTest {
         assertTrue(TeamNames.isEventChannelOf("Peacock | Event 3", "peacock"))
         assertFalse(TeamNames.isEventChannelOf("Peacock | Event 3", "nbc"))
     }
+
+    // Seen on 2 Nov 2026 for Newcastle v Everton: other "Premier Leagues", a Polish magazine
+    // show, other clubs' own channels, and Paramount Network mistaken for Paramount+.
+    @Test fun lookalikesSeenInNovember() {
+        assertTrue(TeamNames.otherLeague(TeamNames.normalise("Canadian Premier League Soccer")))
+        assertTrue(TeamNames.otherLeague(TeamNames.normalise("Scottish Premiership: Celtic v Rangers")))
+        assertFalse(TeamNames.otherLeague(TeamNames.normalise("Scottish Premiership: Celtic v Rangers"), Competition.SCOTTISH_PREM))
+        assertFalse(TeamNames.otherLeague(TeamNames.normalise("Live Premier League: Newcastle v Everton")))
+        assertTrue(TeamNames.isMagazineShow(TeamNames.normalise("Jej Wysokość Premier League")))
+        val ch = { name: String, group: String -> ChannelEntity(id = name, sourceId = 1, name = name, tvgId = null, logo = null, groupTitle = group, streamUrl = "http://x", position = 0, number = null) }
+        val newcastle = TeamNames.aliases(team("Newcastle United", "Newcastle"))
+        val everton = TeamNames.aliases(team("Everton"))
+        assertTrue(TeamNames.isOtherClubChannel(ch("MUTV FHD (1080p)", "UK | Sports*"), newcastle, everton))
+        assertTrue(TeamNames.isOtherClubChannel(ch("LFC FHD (1080p)", "UK | Sports*"), newcastle, everton))
+        assertFalse(TeamNames.isOtherClubChannel(ch("Everton", "⚽️ | EPL Teams"), newcastle, everton))
+        assertFalse(TeamNames.isOtherClubChannel(ch("Sky Sports Main Event UHD", "UK | Sports*"), newcastle, everton))
+        assertTrue(TeamNames.isMultiView(TeamNames.normalise("EPL Goal Rush: Multi View")))
+        val paramount = TeamNames.normalise("Paramount+").trim()
+        assertEquals("paramount plus", paramount)
+        assertFalse(TeamNames.isNetwork("Paramount Network FHD", paramount))
+        assertTrue(TeamNames.isEventChannelOf("US | Paramount+ Event 01", paramount))
+    }
 }

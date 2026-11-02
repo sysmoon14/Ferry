@@ -54,18 +54,20 @@ fun ReminderPopup(reminder: Reminder, onWatch: () -> Unit, onDismiss: () -> Unit
     FerryDialog(
         onDismiss = onDismiss,
         eyebrow = when {
-            secondsLeft > 90 -> "Starts in ${(secondsLeft + 30) / 60} min"
-            secondsLeft > 5 -> "Starts in ${secondsLeft} s"
+            secondsLeft > 90 -> "${if (reminder.fixtureId != null) "Kicks off" else "Starts"} in ${(secondsLeft + 30) / 60} min"
+            secondsLeft > 5 -> "${if (reminder.fixtureId != null) "Kicks off" else "Starts"} in ${secondsLeft} s"
+            reminder.fixtureId != null -> "Kicking off now"
             else -> "Starting now"
         },
         eyebrowIcon = FerryIcons.Bell,
         title = reminder.title,
-        subtitle = "${time.format(Date(reminder.start))} – ${time.format(Date(reminder.stop))}  ·  ${reminder.channelName}",
+        subtitle = if (reminder.fixtureId != null) "Kick-off ${time.format(Date(reminder.start))}  ·  ${reminder.channelName}"
+            else "${time.format(Date(reminder.start))} – ${time.format(Date(reminder.stop))}  ·  ${reminder.channelName}",
         width = 560.dp,
     ) {
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onWatch, colors = ferryButtonColors(), modifier = Modifier.focusRequester(watch)) { Text("Watch now") }
+            Button(onClick = onWatch, colors = ferryButtonColors(), modifier = Modifier.focusRequester(watch)) { Text(if (reminder.fixtureId != null) "Find a stream" else "Watch now") }
             Button(onClick = onDismiss, colors = ferryOutlinedButtonColorsAsButton()) { Text("Dismiss") }
         }
     }

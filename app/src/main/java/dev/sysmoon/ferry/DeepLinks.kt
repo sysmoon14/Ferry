@@ -7,6 +7,8 @@ import dev.sysmoon.ferry.player.PlayTarget
 sealed interface LaunchAction {
     data class Play(val target: PlayTarget) : LaunchAction
     data object Guide : LaunchAction
+    /** The Sports screen, on one match's streams when [fixtureId] is set. */
+    data class Football(val fixtureId: String?) : LaunchAction
 }
 
 /**
@@ -16,6 +18,8 @@ sealed interface LaunchAction {
  * ferry://name/<channel name>
  * ferry://last
  * ferry://guide
+ * ferry://football                 the Sports screen
+ * ferry://football/<espn event id>  a match's streams (ids from /api/football/fixtures or HA's next match sensor)
  *
  * am start -a dev.sysmoon.ferry.action.PLAY --es tvg_id BBCOne.uk
  */
@@ -62,6 +66,7 @@ object DeepLinks {
                     "name" -> arg?.let { LaunchAction.Play(PlayTarget.Name(it)) }
                     "last" -> LaunchAction.Play(PlayTarget.Last)
                     "guide" -> LaunchAction.Guide
+                    "football", "sports" -> LaunchAction.Football(arg)
                     else -> null
                 }
             }

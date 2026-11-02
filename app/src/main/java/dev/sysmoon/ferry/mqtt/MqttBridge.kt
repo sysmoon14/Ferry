@@ -36,6 +36,7 @@ import java.time.Instant
  *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (+ JSON attributes)
  *  - button.<name>_channel_up / _channel_down / _stop / _pause / _previous_channel / _live
  *  - image.<name>_channel_logo, number.<name>_sleep_timer, sensor.<name>_next_reminder
+ *  - sensor.<name>_next_match  kick-off of the next match for My teams, with title/deep link attributes
  *  - event.<name>_events       "reminder" (a reminded programme is starting), "sleep" (timer stopped
  *                              playback), "failover" (fell back to another stream), "backstop" (retuned a frozen stream)
  *
@@ -143,6 +144,13 @@ class MqttBridge(private val g: AppGraph) {
                 g.sleep.slept.collect {
                     client.publish("$base/event", buildJsonObject { put("event_type", "sleep") }.toString(), retain = false)
                 }
+            }
+            launch {
+                // Next match for the user's clubs (My teams on the Sports screen), so an automation can
+                // turn the TV on and open the finder at kick-off: ferry://football/<id>.
+                val tick = kotlinx.coroutines.flow.flow { while (true) { emit(Unit); delay(15 * 60_000L) } }
+                kotlinx.coroutines.flow.combine(g.settings.myTeams, g.settings.competitions, tick) { teams, comps, _ -> teams to comps }
+                    .collect { (teams, comps) -> client.publish("$base/next_match", nextMatchJson(teams, comps).toString()) }
             }
             launch {
                 // Stream trouble as it happens: a fallback to another stream, or the backstop retuning.
@@ -258,6 +266,14 @@ class MqttBridge(private val g: AppGraph) {
             "json_attributes_topic" to "$base/reminders",
             "icon" to "mdi:bell-ring-outline",
         )))
+        c.publish("$p/sensor/ferry_$id/next_match/config", json(common(id, name, base, "next_match", "Next match") + mapOf(
+            "state_topic" to "$base/next_match",
+            "value_template" to "{{ value_json.kickoff if value_json.kickoff else None }}",
+            "device_class" to "timestamp",
+            "json_attributes_topic" to "$base/next_match",
+            "json_attributes_template" to "{{ value_json.attributes | tojson }}",
+            "icon" to "mdi:soccer",
+        )))
         c.publish("$p/update/ferry_$id/ferry/config", json(common(id, name, base, "ferry_update", "Ferry") + mapOf(
             "state_topic" to "$base/update",
             "command_topic" to "$base/cmd/update",
@@ -297,6 +313,30 @@ class MqttBridge(private val g: AppGraph) {
             is dev.sysmoon.ferry.update.UpdateState.Installing -> put("in_progress", true)
             else -> put("in_progress", false)
         }
+    }
+
+    private suspend fun nextMatchJson(teams: Set<String>, comps: Set<String>): JsonObject = buildJsonObject {
+        val now = System.currentTimeMillis()
+        val next = if (teams.isEmpty()) null else runCatching {
+            dev.sysmoon.ferry.data.Competition.enabled(comps).flatMap { c ->
+                runCatching { g.football.fixtures(c, dev.sysmoon.ferry.data.FootballData.today(), 7) }.getOrDefault(emptyList())
+            }.filter { (it.home.id in teams || it.away.id in teams) && it.kickoff + 2 * 3_600_000L > now }
+                .minByOrNull { it.kickoff }
+        }.getOrNull()
+        put("kickoff", next?.let { Instant.ofEpochMilli(it.kickoff).toString() })
+        put("attributes", buildJsonObject {
+            if (next == null) { put("my_teams", teams.size); return@buildJsonObject }
+            put("title", next.title)
+            put("competition", next.competition.label)
+            put("home", next.home.name)
+            put("away", next.away.name)
+            put("home_logo", next.home.logo)
+            put("away_logo", next.away.logo)
+            put("state", next.state.name.lowercase())
+            put("score", if (next.homeScore != null) "${next.homeScore}–${next.awayScore}" else null)
+            put("deep_link", "ferry://football/${next.id}")
+            put("event_id", next.id)
+        })
     }
 
     private fun crashJson(r: dev.sysmoon.ferry.CrashReport?): JsonObject = buildJsonObject {

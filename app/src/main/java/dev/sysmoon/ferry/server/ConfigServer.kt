@@ -60,7 +60,7 @@ class ConfigServer(private val g: AppGraph) {
 
     private suspend fun guideSearchJson(q: String, from: Long, to: Long): kotlinx.serialization.json.JsonElement {
         val rows = g.db.channels().allPrimaries().groupBy { it.epgKey }
-        val hits = g.db.programmes().spanning(to, from)
+        val hits = g.db.programmes().spanning(to, from, to + 12 * 3_600_000L)
             .filter { q.isEmpty() || it.title.lowercase().contains(q) || it.description.orEmpty().lowercase().contains(q) }
             .take(300)
         return kotlinx.serialization.json.buildJsonArray {
@@ -76,12 +76,12 @@ class ConfigServer(private val g: AppGraph) {
     }
 
     private suspend fun candidatesJson(id: String): kotlinx.serialization.json.JsonElement {
-        val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
-            runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 3) }.getOrDefault(emptyList())
+        val all = dev.sysmoon.ferry.data.Competition.enabled(g.settings.competitions()).flatMap {
+            runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 7) }.getOrDefault(emptyList())
         }
         val f = all.firstOrNull { it.id == id } ?: return kotlinx.serialization.json.JsonPrimitive("no such fixture")
         val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
-        val found = g.matchFinder.find(f, sameSlot)
+        val found = kotlinx.coroutines.flow.last(g.matchFinder.find(f, sameSlot))
         return kotlinx.serialization.json.buildJsonArray {
             found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
                 put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
@@ -270,6 +270,7 @@ class ConfigServer(private val g: AppGraph) {
                     val o = call.receive<OptionsInput>()
                     o.resumeLastChannel?.let { g.settings.setResumeLastChannel(it) }
                     o.idleStopHours?.let { g.settings.setIdleStopHours(it) }
+                    o.competitions?.let { names -> g.settings.setCompetitions(names.filter { n -> dev.sysmoon.ferry.data.Competition.entries.any { it.name == n } }.toSet()) }
                     o.mergeDuplicates?.let { merge ->
                         val changed = merge != g.settings.mergeDuplicates()
                         g.settings.setMergeDuplicates(merge)
@@ -342,7 +343,7 @@ class ConfigServer(private val g: AppGraph) {
                 // ---- Football finder diagnostics (also handy from the web page)
                 get("/football/fixtures") {
                     val days = (call.request.queryParameters["days"]?.toIntOrNull() ?: 2).coerceIn(1, 7)
-                    val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
+                    val all = dev.sysmoon.ferry.data.Competition.enabled(g.settings.competitions()).flatMap {
                         runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), days) }.getOrDefault(emptyList())
                     }.sortedBy { it.kickoff }
                     call.respond(kotlinx.serialization.json.buildJsonArray {
@@ -396,13 +397,13 @@ class ConfigServer(private val g: AppGraph) {
                 }
                 get("/football/candidates/now") {
                     val id = call.request.queryParameters["event"].orEmpty()
-                    val all = dev.sysmoon.ferry.data.Competition.entries.flatMap {
-                        runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 3) }.getOrDefault(emptyList())
+                    val all = dev.sysmoon.ferry.data.Competition.enabled(g.settings.competitions()).flatMap {
+                        runCatching { g.football.fixtures(it, dev.sysmoon.ferry.data.FootballData.today(), 7) }.getOrDefault(emptyList())
                     }
                     val f = all.firstOrNull { it.id == id }
                     if (f == null) { call.respond(HttpStatusCode.NotFound, ErrorDto("No such fixture")); return@get }
                     val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
-                    val found = g.matchFinder.find(f, sameSlot)
+                    val found = kotlinx.coroutines.flow.last(g.matchFinder.find(f, sameSlot))
                     call.respond(kotlinx.serialization.json.buildJsonArray {
                         found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
                             put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
@@ -433,7 +434,7 @@ class ConfigServer(private val g: AppGraph) {
                     val from = call.request.queryParameters["from"]?.toLongOrNull() ?: now
                     val to = call.request.queryParameters["to"]?.toLongOrNull() ?: (now + 12 * 3_600_000L)
                     val rows = g.db.channels().allPrimaries().groupBy { it.epgKey }
-                    val hits = g.db.programmes().spanning(to, from) // start <= to AND stop >= from
+                    val hits = g.db.programmes().spanning(to, from, to + 12 * 3_600_000L) // start <= to AND stop >= from
                         .filter { q.isEmpty() || it.title.lowercase().contains(q) || it.description.orEmpty().lowercase().contains(q) }
                         .take(300)
                     call.respond(kotlinx.serialization.json.buildJsonArray {
@@ -579,6 +580,8 @@ class ConfigServer(private val g: AppGraph) {
         backupEpgUrls = g.settings.backupEpgUrls(),
         sportsGuides = g.settings.sportsGuides(),
         idleStopHours = g.settings.idleStopHours(),
+        competitions = g.settings.competitions().toList(),
+        allCompetitions = dev.sysmoon.ferry.data.Competition.entries.map { CompetitionDto(it.name, it.label) },
         guideGaps = g.repository.gapReport?.let { GuideGapsDto(it.missing, it.fromSky, it.fromBackup, it.errors, it.at, it.fromSportsGuides) },
     )
 

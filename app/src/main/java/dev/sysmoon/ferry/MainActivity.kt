@@ -123,6 +123,13 @@ class MainActivity : ComponentActivity() {
         returnSignal++
     }
 
+    /** The Sports screen, on [fixtureId]'s streams when given (deep link, fixture reminder). */
+    private fun openFootball(fixtureId: String?) {
+        football.pendingFixtureId = fixtureId
+        if (fixtureId != null) { football.fixture = null; football.candidates = null }
+        nav.open(Screen.FOOTBALL)
+    }
+
     private fun savePlace() {
         lifecycleScope.launch { graph.settings.setLastPlace(section.name, guideGroup) }
     }
@@ -259,9 +266,12 @@ class MainActivity : ComponentActivity() {
                             r,
                             onWatch = {
                                 graph.reminders.dismiss()
-                                nav.reset(); openPlayer()
-                                lifecycleScope.launch {
-                                    if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
+                                if (r.fixtureId != null) openFootball(r.fixtureId)
+                                else {
+                                    nav.reset(); openPlayer()
+                                    lifecycleScope.launch {
+                                        if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
+                                    }
                                 }
                             },
                             onDismiss = { graph.reminders.dismiss() },
@@ -319,6 +329,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             LaunchAction.Guide -> { covered = false; backToGuide(rail = true) }
+            is LaunchAction.Football -> { covered = false; openFootball(action.fixtureId) }
             null -> Unit
         }
     }

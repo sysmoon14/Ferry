@@ -71,7 +71,11 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val guideGaps: GuideGapsDto? = null,
     /** Hours of playback with the remote untouched before "Still watching?" (0 = never). */
     val idleStopHours: Int = 4,
+    /** Competitions on the Sports screen (names from [allCompetitions]). */
+    val competitions: List<String> = emptyList(),
+    val allCompetitions: List<CompetitionDto> = emptyList(),
 )
+@Serializable data class CompetitionDto(val name: String, val label: String)
 @Serializable data class GuideGapsDto(val missing: Int, val fromSky: Int, val fromBackup: Int, val errors: List<String>, val at: Long, val fromSportsGuides: Int = 0)
 /** Partial update: only the fields sent are changed. */
 @Serializable data class OptionsInput(
@@ -80,6 +84,7 @@ fun ChannelEntity.toDto() = ChannelDto(id, displayName, tvgId, logo, groupTitle,
     val backupEpgUrls: List<String>? = null,
     val sportsGuides: Boolean? = null,
     val idleStopHours: Int? = null,
+    val competitions: List<String>? = null,
 )
 
 @Serializable data class SkyRegionDto(val id: Int, val name: String)

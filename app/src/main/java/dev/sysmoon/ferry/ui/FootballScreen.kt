@@ -42,6 +42,9 @@ import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
+import androidx.compose.foundation.lazy.LazyRow
+import dev.sysmoon.ferry.data.SportsGuides
+import dev.sysmoon.ferry.data.StreamQuality
 import dev.sysmoon.ferry.data.Competition
 import dev.sysmoon.ferry.data.Fixture
 import dev.sysmoon.ferry.data.FootballData
@@ -56,16 +59,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class FootballTab(val label: String) { MY_TEAMS("My teams"), PL("Premier League"), UCL("Champions League"), CLUBS("Clubs") }
+/** A tab on the Sports screen: My teams, Today, one per enabled competition, Clubs. */
+sealed interface FootballTab {
+    val label: String
+    data object MyTeams : FootballTab { override val label = "My teams" }
+    data object Today : FootballTab { override val label = "Today" }
+    data class Comp(val c: Competition) : FootballTab { override val label get() = c.label }
+    data object Clubs : FootballTab { override val label = "Clubs" }
+}
 
 /** Kept by MainActivity so a trip to the player comes back to the same list. */
 class FootballState {
-    var tab by mutableStateOf(FootballTab.PL)
+    var tab by mutableStateOf<FootballTab>(FootballTab.Today)
     var club by mutableStateOf<Team?>(null)
     var fixture by mutableStateOf<Fixture?>(null)
     var candidates by mutableStateOf<List<StreamCandidate>?>(null)
+    /** True while the finder is still looking (the list grows as passes finish). */
+    var searching by mutableStateOf(false)
     /** Last stream played from the list, refocused on return. */
     var lastPlayed by mutableStateOf<String?>(null)
+    /** A fixture to open as soon as fixtures load (deep link, reminder). */
+    var pendingFixtureId by mutableStateOf<String?>(null)
 }
 
 /**
@@ -78,27 +92,48 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
     val graph = LocalContext.current.graph
     val scope = rememberCoroutineScope()
     val myTeams by remember { graph.settings.myTeams }.collectAsState(initial = emptySet())
+    val enabledNames by remember { graph.settings.competitions }.collectAsState(initial = Competition.DEFAULT)
+    val competitions = remember(enabledNames) { Competition.enabled(enabledNames) }
     val playing by graph.player.state.collectAsState()
+    val reminderList by graph.reminders.reminders.collectAsState()
 
     var fixtures by remember { mutableStateOf<List<Fixture>?>(null) }
     var teams by remember { mutableStateOf<List<Team>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var loadToken by remember { mutableStateOf(0) }
-    LaunchedEffect(loadToken) {
+    LaunchedEffect(competitions) {
         error = null
         val from = FootballData.today().minusDays(1)
-        val results = Competition.entries.map { c -> runCatching { graph.football.fixtures(c, from, 14) } }
+        val results = competitions.map { c -> runCatching { graph.football.fixtures(c, from, 14) } }
         fixtures = results.flatMap { it.getOrDefault(emptyList()) }.sortedBy { it.kickoff }
         if (results.all { it.isFailure }) error = "Couldn't load fixtures (${results.first().exceptionOrNull()?.message})"
-        teams = Competition.entries.flatMap { c -> runCatching { graph.football.teams(c) }.getOrDefault(emptyList()) }
+        teams = competitions.flatMap { c -> runCatching { graph.football.teams(c) }.getOrDefault(emptyList()) }
             .distinctBy { it.id }.sortedBy { it.name }
     }
     // Default to My teams once the user has some.
-    LaunchedEffect(myTeams.isNotEmpty()) { if (myTeams.isNotEmpty() && state.tab == FootballTab.PL && state.fixture == null) state.tab = FootballTab.MY_TEAMS }
+    LaunchedEffect(myTeams.isNotEmpty()) { if (myTeams.isNotEmpty() && state.tab == FootballTab.Today && state.fixture == null) state.tab = FootballTab.MyTeams }
+
+    fun open(f: Fixture, all: List<Fixture>) {
+        state.fixture = f
+        state.candidates = graph.matchFinder.cached(f)
+        state.searching = state.candidates == null
+        if (!state.searching) return
+        val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
+        scope.launch {
+            runCatching { graph.matchFinder.find(f, sameSlot).collect { if (state.fixture?.id == f.id) state.candidates = it } }
+            if (state.fixture?.id == f.id) { state.searching = false; if (state.candidates == null) state.candidates = emptyList() }
+        }
+    }
+    // A deep link or reminder named a match: open it once fixtures are in.
+    LaunchedEffect(fixtures, state.pendingFixtureId) {
+        val id = state.pendingFixtureId ?: return@LaunchedEffect
+        val all = fixtures ?: return@LaunchedEffect
+        state.pendingFixtureId = null
+        all.firstOrNull { it.id == id }?.let { open(it, all) }
+    }
 
     BackHandler(enabled = active) {
         when {
-            state.fixture != null -> { state.fixture = null; state.candidates = null }
+            state.fixture != null -> { state.fixture = null; state.candidates = null; state.searching = false }
             state.club != null -> state.club = null
             else -> onBack()
         }
@@ -131,18 +166,24 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
 
         val fixture = state.fixture
         when {
-            fixture != null -> Candidates(state, fixture, active, onPlay = { c, all ->
-                state.lastPlayed = c.channel.id
-                graph.player.start(c.channel, ZapScope.Ids(fixture.title, all.map { it.channel.id }))
-                onOpenPlayer()
-            })
-            state.tab == FootballTab.CLUBS && state.club == null -> {
-                Tabs(state, myTeams.isNotEmpty(), entryFocus)
+            fixture != null -> Candidates(
+                state, fixture, active,
+                hasReminder = reminderList.any { it.fixtureId == fixture.id },
+                onRemind = { scope.launch { graph.reminders.toggleFixture(fixture) } },
+                onPlay = { c, all ->
+                    state.lastPlayed = c.channel.id
+                    graph.footballPicks.started(fixture, c.channel.id)
+                    graph.player.start(c.channel, ZapScope.Ids(fixture.title, all.map { it.channel.id }))
+                    onOpenPlayer()
+                },
+            )
+            state.tab == FootballTab.Clubs && state.club == null -> {
+                Tabs(state, competitions, myTeams.isNotEmpty(), entryFocus)
                 Spacer(Modifier.height(10.dp))
                 ClubList(teams, myTeams, onPick = { state.club = it })
             }
             else -> {
-                if (state.club == null) Tabs(state, myTeams.isNotEmpty(), entryFocus)
+                if (state.club == null) Tabs(state, competitions, myTeams.isNotEmpty(), entryFocus)
                 else {
                     val club = state.club!!
                     Button(onClick = { scope.launch { graph.settings.toggleMyTeam(club.id) } }, colors = ferryButtonColors(),
@@ -154,39 +195,53 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                 }
                 Spacer(Modifier.height(10.dp))
                 val all = fixtures
+                val tab = state.tab
+                val now = System.currentTimeMillis()
                 val shown = when {
                     all == null -> null
                     state.club != null -> all.filter { it.home.id == state.club!!.id || it.away.id == state.club!!.id }
-                    state.tab == FootballTab.MY_TEAMS -> all.filter { it.home.id in myTeams || it.away.id in myTeams }
-                    state.tab == FootballTab.UCL -> all.filter { it.competition == Competition.CHAMPIONS_LEAGUE }
-                    else -> all.filter { it.competition == Competition.PREMIER_LEAGUE }
+                    tab == FootballTab.MyTeams -> all.filter { it.home.id in myTeams || it.away.id in myTeams }
+                    tab == FootballTab.Today -> all.filter { it.state == MatchState.LIVE || sameDay(it.kickoff, now) }
+                    tab is FootballTab.Comp -> all.filter { it.competition == tab.c }
+                    else -> all
                 }
                 when {
                     shown == null -> Text(error ?: "Loading fixtures…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
                     shown.isEmpty() -> EmptyMessage(
                         FerryIcons.Football,
                         if (error != null) "Couldn't load fixtures" else "No matches",
-                        error ?: if (state.tab == FootballTab.MY_TEAMS && state.club == null && myTeams.isEmpty())
-                            "Pick your clubs under Clubs and their matches appear here."
-                        else "Nothing in the next two weeks.",
+                        error ?: when {
+                            tab == FootballTab.MyTeams && state.club == null && myTeams.isEmpty() -> "Pick your clubs under Clubs and their matches appear here."
+                            tab == FootballTab.Today -> "Nothing on today in your competitions."
+                            else -> "Nothing in the next two weeks."
+                        },
                         Modifier.fillMaxSize(),
                     )
-                    else -> FixtureList(shown, myTeams, time, day, showCompetition = state.tab == FootballTab.MY_TEAMS || state.club != null) { f ->
-                        state.fixture = f
-                        state.candidates = null
-                        val sameSlot = (all ?: emptyList()).count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
-                        scope.launch { state.candidates = runCatching { graph.matchFinder.find(f, sameSlot) }.getOrDefault(emptyList()) }
-                    }
+                    else -> FixtureList(
+                        shown, myTeams, reminderList.mapNotNull { it.fixtureId }.toSet(), time, day,
+                        showCompetition = tab == FootballTab.MyTeams || tab == FootballTab.Today || state.club != null,
+                    ) { f -> open(f, all ?: emptyList()) }
                 }
             }
         }
     }
 }
 
+private fun sameDay(a: Long, b: Long): Boolean {
+    val z = java.time.ZoneId.systemDefault()
+    return java.time.Instant.ofEpochMilli(a).atZone(z).toLocalDate() == java.time.Instant.ofEpochMilli(b).atZone(z).toLocalDate()
+}
+
 @Composable
-private fun Tabs(state: FootballState, haveMyTeams: Boolean, focus: FocusRequester) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FootballTab.entries.filter { it != FootballTab.MY_TEAMS || haveMyTeams }.forEach { t ->
+private fun Tabs(state: FootballState, competitions: List<Competition>, haveMyTeams: Boolean, focus: FocusRequester) {
+    val tabs = buildList {
+        if (haveMyTeams) add(FootballTab.MyTeams)
+        add(FootballTab.Today)
+        competitions.forEach { add(FootballTab.Comp(it)) }
+        add(FootballTab.Clubs)
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(tabs, key = { it.label }) { t ->
             val selected = state.tab == t
             Button(
                 onClick = { state.tab = t; state.club = null },
@@ -200,11 +255,12 @@ private fun Tabs(state: FootballState, haveMyTeams: Boolean, focus: FocusRequest
                 ),
                 modifier = if (selected) Modifier.focusRequester(focus) else Modifier,
             ) {
-                if (t == FootballTab.MY_TEAMS) {
+                if (t == FootballTab.MyTeams) {
                     androidx.tv.material3.Icon(FerryIcons.Star, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                 }
-                Text(t.label, style = MaterialTheme.typography.labelLarge)
+                // Long competition names get their short form so the row fits.
+                Text(if (t is FootballTab.Comp && competitions.size > 4) t.c.short else t.label, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -214,6 +270,7 @@ private fun Tabs(state: FootballState, haveMyTeams: Boolean, focus: FocusRequest
 private fun FixtureList(
     fixtures: List<Fixture>,
     myTeams: Set<String>,
+    reminded: Set<String>,
     time: SimpleDateFormat,
     day: SimpleDateFormat,
     showCompetition: Boolean,
@@ -269,7 +326,15 @@ private fun FixtureList(
                             TeamName(f.away, f.away.id in myTeams, Modifier.weight(1f), alignEnd = false)
                         }
                     },
-                    trailingContent = { if (showCompetition) Text(f.competition.short, color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium) },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (f.id in reminded) {
+                                androidx.tv.material3.Icon(FerryIcons.Bell, null, tint = FerryColors.Sea, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            if (showCompetition) Text(f.competition.short, color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium)
+                        }
+                    },
                 )
             }
         }
@@ -317,14 +382,24 @@ private fun ClubList(teams: List<Team>, myTeams: Set<String>, onPick: (Team) -> 
 }
 
 @Composable
-private fun Candidates(state: FootballState, f: Fixture, active: Boolean, onPlay: (StreamCandidate, List<StreamCandidate>) -> Unit) {
+private fun Candidates(
+    state: FootballState,
+    f: Fixture,
+    active: Boolean,
+    hasReminder: Boolean,
+    onRemind: () -> Unit,
+    onPlay: (StreamCandidate, List<StreamCandidate>) -> Unit,
+) {
     val time = remember { SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()) }
     val list = state.candidates
     val returnFocus = remember { FocusRequester() }
-    LaunchedEffect(list, active) {
-        if (list.isNullOrEmpty() || !active) return@LaunchedEffect
+    val watchFocus = remember { FocusRequester() }
+    // Focus the stream played last time (back from the player), else the Watch button.
+    LaunchedEffect(list.isNullOrEmpty(), active) {
+        if (!active) return@LaunchedEffect
         withFrameNanos { }
-        runCatching { returnFocus.requestFocus() }
+        if (list.isNullOrEmpty() || state.lastPlayed == null) runCatching { watchFocus.requestFocus() }
+        else runCatching { returnFocus.requestFocus() }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (f.state == MatchState.LIVE) { Tag("Live ${f.detail}", FerryColors.Live, dot = true); Spacer(Modifier.width(12.dp)) }
@@ -340,6 +415,28 @@ private fun Candidates(state: FootballState, f: Fixture, active: Boolean, onPlay
             color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR),
         )
     }
+    Spacer(Modifier.height(12.dp))
+    // Watch the best stream in one press; remind me before kick-off.
+    val best = list?.firstOrNull()
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(
+            onClick = { best?.let { onPlay(it, list) } },
+            enabled = best != null,
+            colors = ferryButtonColors(),
+            modifier = Modifier.focusRequester(watchFocus),
+        ) {
+            androidx.tv.material3.Icon(FerryIcons.Play, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(best?.let { "Watch  ·  ${it.channel.displayName}" } ?: if (state.searching) "Looking for streams…" else "No stream found")
+        }
+        if (f.state == MatchState.UPCOMING) {
+            Button(onClick = onRemind, colors = ferryOutlinedButtonColorsAsButton()) {
+                androidx.tv.material3.Icon(FerryIcons.Bell, null, tint = if (hasReminder) FerryColors.Sea else FerryColors.Text, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (hasReminder) "Reminder set  ·  5 min before" else "Remind me")
+            }
+        }
+    }
     Spacer(Modifier.height(10.dp))
     when {
         list == null -> Text("Looking through your playlist and guides…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
@@ -349,29 +446,49 @@ private fun Candidates(state: FootballState, f: Fixture, active: Boolean, onPlay
             Modifier.fillMaxSize(),
         )
         else -> {
-            Hint("${list.size} possible streams, best first   ·   while watching, ▲ ▼ moves through this list   ·   Back returns here", color = FerryColors.Muted)
+            Hint(
+                (if (state.searching) "${list.size} so far, still looking…" else "${list.size} possible streams, best first") +
+                    "   ·   while watching, ▲ ▼ moves through this list   ·   Back returns here",
+                color = FerryColors.Muted,
+            )
             Spacer(Modifier.height(8.dp))
+            val focusId = state.lastPlayed?.takeIf { id -> list.any { it.channel.id == id } }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
-                items(list, key = { it.channel.id }) { c ->
-                    val focusHere = c.channel.id == (state.lastPlayed?.takeIf { id -> list.any { it.channel.id == id } } ?: list.first().channel.id)
-                    ListItem(
-                        selected = false,
-                        onClick = { onPlay(c, list) },
-                        modifier = if (focusHere) Modifier.focusRequester(returnFocus) else Modifier,
-                        colors = ferryListItemColors(),
-                        border = ferryListItemBorder(),
-                        shape = ferryListItemShape(),
-                        scale = ferryListItemScale(),
-                        leadingContent = { LogoChip(c.channel.logo, c.channel.name, width = 58.dp, height = 36.dp) },
-                        headlineContent = { Text(c.channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall) },
-                        supportingContent = {
-                            Text(listOfNotNull(c.reason, c.channel.groupTitle).joinToString("  ·  "),
-                                color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        },
-                        trailingContent = {
-                            Tag(c.strength, when { c.score >= 85 -> FerryColors.Gold; c.score >= 60 -> FerryColors.Sea; else -> FerryColors.Muted }, filled = c.score >= 85)
-                        },
-                    )
+                for (group in StreamCandidate.Group.entries) {
+                    val members = list.filter { it.group == group }
+                    if (members.isEmpty()) continue
+                    item(key = "h${group.name}") {
+                        Text(group.label.uppercase(), color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 12.dp))
+                    }
+                    items(members, key = { it.channel.id }) { c ->
+                        val quality = StreamQuality.parse(c.channel.name).label
+                        val country = SportsGuides.country(c.channel.name, c.channel.groupTitle, c.channel.tvgId)
+                        ListItem(
+                            selected = false,
+                            onClick = { onPlay(c, list) },
+                            modifier = if (c.channel.id == focusId) Modifier.focusRequester(returnFocus) else Modifier,
+                            colors = ferryListItemColors(),
+                            border = ferryListItemBorder(),
+                            shape = ferryListItemShape(),
+                            scale = ferryListItemScale(),
+                            leadingContent = { LogoChip(c.channel.logo, c.channel.name, width = 58.dp, height = 36.dp) },
+                            headlineContent = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(c.channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f, fill = false))
+                                    quality?.let { Spacer(Modifier.width(8.dp)); Tag(it, FerryColors.Muted, filled = false, upper = false) }
+                                    if (country != null && group != StreamCandidate.Group.UK) { Spacer(Modifier.width(6.dp)); Tag(country, FerryColors.Faint, filled = false) }
+                                }
+                            },
+                            supportingContent = {
+                                Text(listOfNotNull(c.reason, c.channel.groupTitle).joinToString("  ·  "),
+                                    color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                            trailingContent = {
+                                Tag(c.strength, when { c.score >= 85 -> FerryColors.Gold; c.score >= 60 -> FerryColors.Sea; else -> FerryColors.Muted }, filled = c.score >= 85)
+                            },
+                        )
+                    }
                 }
             }
         }

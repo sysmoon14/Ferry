@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import kotlinx.serialization.builtins.serializer
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -37,6 +38,8 @@ class Settings(private val context: Context) {
         val owner = stringPreferencesKey("owner_android_id")
         val recents = stringPreferencesKey("recent_channels")
         val myTeams = stringSetPreferencesKey("my_teams")
+        val competitions = stringSetPreferencesKey("competitions")
+        val footballPicks = stringPreferencesKey("football_picks")
         val sportsGuides = booleanPreferencesKey("sports_guides")
         val reminders = stringPreferencesKey("reminders")
         val syncUrl = stringPreferencesKey("sync_url")
@@ -122,6 +125,20 @@ class Settings(private val context: Context) {
     suspend fun toggleMyTeam(id: String) = store.edit { p ->
         val old = p[Keys.myTeams] ?: emptySet()
         p[Keys.myTeams] = if (id in old) old - id else old + id
+    }
+
+    /** Competitions shown on the Sports screen (Competition names); the defaults until set. */
+    val competitions: Flow<Set<String>> = store.data.map { it[Keys.competitions] ?: Competition.DEFAULT }
+    suspend fun competitions(): Set<String> = competitions.first()
+    suspend fun setCompetitions(names: Set<String>) = store.edit { it[Keys.competitions] = names }
+
+    /** Channels that showed each competition before (competition name → channel ids, newest first). */
+    suspend fun footballPicks(): Map<String, List<String>> =
+        store.data.first()[Keys.footballPicks]?.let { runCatching { json.decodeFromString(picksSerializer, it) }.getOrNull() } ?: emptyMap()
+    suspend fun recordFootballPick(competition: String, channelId: String) = store.edit { p ->
+        val old = p[Keys.footballPicks]?.let { runCatching { json.decodeFromString(picksSerializer, it) }.getOrNull() } ?: emptyMap()
+        val list = (listOf(channelId) + old[competition].orEmpty().filterNot { it == channelId }).take(12)
+        p[Keys.footballPicks] = json.encodeToString(picksSerializer, old + (competition to list))
     }
 
     /** Recently watched channel ids, newest first. */
@@ -245,6 +262,10 @@ class Settings(private val context: Context) {
         private const val RECENTS_MAX = 20
         private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         private val reminderList = kotlinx.serialization.builtins.ListSerializer(Reminder.serializer())
+        private val picksSerializer = kotlinx.serialization.builtins.MapSerializer(
+            String.serializer(),
+            kotlinx.serialization.builtins.ListSerializer(String.serializer()),
+        )
     }
 
     private suspend fun getOrCreate(key: Preferences.Key<String>, create: () -> String): String {

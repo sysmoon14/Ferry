@@ -252,9 +252,13 @@ interface ProgrammeDao {
     @Query("SELECT * FROM programmes WHERE channelKey IN (:keys) AND stop > :from AND start < :until ORDER BY channelKey, start")
     suspend fun window(keys: List<String>, from: Long, until: Long): List<ProgrammeEntity>
 
-    /** Programmes on air across [from]…[until] (started by [from], still on at [until]). */
-    @Query("SELECT * FROM programmes WHERE start <= :from AND stop >= :until")
-    suspend fun spanning(from: Long, until: Long): List<ProgrammeEntity>
+    /**
+     * Programmes on air across [from]…[until] (started by [from], still on at [until]). Bounded
+     * by [stopBefore] so the stop index does the work: without it this read every future
+     * programme in the guide (a 20k-channel playlist took a minute).
+     */
+    @Query("SELECT * FROM programmes WHERE stop >= :until AND stop < :stopBefore AND start <= :from")
+    suspend fun spanning(from: Long, until: Long, stopBefore: Long): List<ProgrammeEntity>
 
     @Query("SELECT * FROM programmes WHERE title LIKE '%' || :q || '%' AND stop > :from ORDER BY start LIMIT :limit")
     suspend fun search(q: String, from: Long, limit: Int): List<ProgrammeEntity>

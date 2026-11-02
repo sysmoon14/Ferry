@@ -157,6 +157,11 @@
           <button class="btn ghost" id="bkFill">Fill gaps now</button>
         </div>
       </div>
+      <div class="card">
+        <h2>⚽ Football</h2>
+        <p class="muted small">Competitions shown on the Sports screen (fixtures from ESPN, free). Each one is a tab; My teams covers all of them.</p>
+        <div id="compList" class="row" style="flex-wrap:wrap;gap:8px 18px"></div>
+      </div>
     </section>
 
     <!-- Groups -->
@@ -480,6 +485,18 @@
     const o = await api("/options");
     $("bkUrls").value = o.backupEpgUrls.join("\n");
     $("bkSports").checked = o.sportsGuides;
+    $("compList").innerHTML = "";
+    for (const c of (o.allCompetitions || [])) {
+      const l = document.createElement("label"); l.className = "row"; l.style.cssText = "gap:8px;align-items:center;width:auto";
+      const i = document.createElement("input"); i.type = "checkbox"; i.style.cssText = "width:auto;flex:none"; i.checked = o.competitions.includes(c.name);
+      i.onchange = () => {
+        const names = [...$("compList").querySelectorAll("input")].filter(x => x.checked).map(x => x.dataset.name);
+        api("/options", { method: "PUT", body: { competitions: names } }).then(() => toast("Saved")).catch(e => toast(e.message));
+      };
+      i.dataset.name = c.name;
+      l.append(i, document.createTextNode(c.label));
+      $("compList").append(l);
+    }
     const g = o.guideGaps;
     $("bkStatus").textContent = !g ? "" :
       `Last fill: ${g.missing.toLocaleString()} channels had no listings · Sky filled ${g.fromSky} · backup feeds filled ${g.fromBackup} · sports guides filled ${g.fromSportsGuides || 0} sports channels` +
