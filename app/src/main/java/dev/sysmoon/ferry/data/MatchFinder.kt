@@ -170,6 +170,7 @@ class MatchFinder(
                 // Another club's own channel (MUTV, LFC TV) shows its own club, whatever its guide says.
                 if (!(h && a) && TeamNames.isOtherClubChannel(ch, home, away)) continue
                 when {
+                    h && a && show -> add(ch, 50, label)
                     h && a -> add(ch, 90, label)
                     (h || a) && comp && !show && !otherMatch && matchShaped -> add(ch, 72, label)
                     comp && !show && !h && !a && matchShaped && sameSlot <= 1 && TeamNames.isSportsChannel(ch) && competitionOnly < 25 ->
@@ -215,7 +216,10 @@ class MatchFinder(
                 val comp = f.competition.keywords.any { text.contains(" $it ") } && !TeamNames.otherLeague(text, f.competition)
                 val label = "Sky guide: ${e.title} (${time.format(Date(e.start))})"
                 if (near.size < 6) near += "${channels.first().name}: ${e.title}"
+                // "Matchday Live" on a club channel names both teams but is the studio show.
+                val show = TeamNames.isMagazineShow(TeamNames.normalise(e.title))
                 when {
+                    h && a && show -> { hits++; channels.forEach { add(it, 50, label) } }
                     h && a -> { hits++; channels.forEach { add(it, 96, label) } }
                     (h || a) && comp && !TeamNames.hasVersus(text) -> { hits++; channels.forEach { add(it, 74, label) } }
                 }

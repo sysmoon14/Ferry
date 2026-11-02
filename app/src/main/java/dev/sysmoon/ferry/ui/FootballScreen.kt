@@ -43,6 +43,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import dev.sysmoon.ferry.data.SportsGuides
 import dev.sysmoon.ferry.data.StreamQuality
 import dev.sysmoon.ferry.data.Competition
@@ -453,7 +454,10 @@ private fun Candidates(
             )
             Spacer(Modifier.height(8.dp))
             val focusId = state.lastPlayed?.takeIf { id -> list.any { it.channel.id == id } }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+            // Rows arriving above the first visible one would otherwise push the list down.
+            val listState = rememberLazyListState()
+            LaunchedEffect(list.size, state.searching) { if (state.searching) listState.scrollToItem(0) }
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
                 for (group in StreamCandidate.Group.entries) {
                     val members = list.filter { it.group == group }
                     if (members.isEmpty()) continue
