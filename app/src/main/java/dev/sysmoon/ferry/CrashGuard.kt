@@ -132,7 +132,7 @@ object CrashGuard {
             error = "${e.javaClass.simpleName}: ${e.message.orEmpty()}".take(300),
             thread = thread,
             version = BuildConfig.VERSION_NAME,
-            stack = Log.getStackTraceString(e).take(4_000),
+            stack = android.util.Log.getStackTraceString(e).take(4_000),
             count = prefs.getInt("count", 0) + 1,
         )
         prefs.edit()

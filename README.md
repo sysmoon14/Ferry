@@ -15,16 +15,16 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
 | Guide gaps | Channels the provider has no guide for are filled from Sky's schedules, then from any backup XMLTV feeds you add |
 | Catch-up | Xtream archive: play past programmes from the guide or the player card, with seeking |
-| Player | Info card that rises from the bottom of the picture, icon controls (restart, ±30s, pause, live, previous, sleep, streams), number entry, channel up/down. HDR streams play as HDR (the TV switches mode; the card shows **HDR**), and falling back to an SDR backup switches back cleanly. Resuming the last channel at launch goes straight into the stream |
+| Player | Info card that rises from the bottom of the picture, icon controls (restart, ±30s, pause, live, last channel, sleep, options), number entry, channel up/down. Options: audio track, subtitles, picture zoom, streams, hide channel. Long-press Info for playback stats. HDR streams play as HDR (the TV switches mode; the card shows **HDR**), and falling back to an SDR backup switches back cleanly. Resuming the last channel at launch goes straight into the stream |
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
-| Reminders | OK on a programme that hasn't started sets a reminder; a pop-up offers to switch when it starts |
+| Reminders | OK on a programme that hasn't started sets a reminder; a pop-up two minutes before offers to switch |
 | Search | Programmes (catch-up, on now, coming up) and channels, from the main menu |
 | Previous channel | Flip between the last two channels (remote's last-channel key, or the controls row) |
 | Recently watched | A group in TV Guide / Channel List with the channels you've watched lately |
 | Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
 | Keep in sync | A box can follow another Ferry and pick up its setup changes automatically |
 | Football | Premier League and Champions League fixtures; finds every stream in your playlist that might show a match |
-| Start-up | Optionally opens straight into the last watched channel |
+| Start-up | Optionally opens straight into the last watched channel; the guide reopens on the section and group you left. "Still watching?" after hours with the remote untouched |
 | Web config | Phone-friendly page with PIN/QR pairing at `http://<tv-ip>:8765`, including backup & sync between boxes |
 | Home Assistant | MQTT discovery, deep links, REST API, mDNS (`_ferry._tcp`) |
 
@@ -95,9 +95,11 @@ Everything is in `ui/Theme.kt` (colours, type, shapes, focus, tags, dialogs, ico
 
 - The grid is compact and fills the screen (about ten and a half channels on a 1080p TV).
 - Up/down in the grid keeps you lined up with the time you were on, whatever the programme lengths.
+  **CH+/CH−** page a screenful of channels; **Play/Pause** jumps the grid back to now.
+- Programmes are loaded for the rows on screen (plus a margin) as you scroll, so long lists stay quick.
 - **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
   hasn't started it sets (or clears) a reminder, shown with 🔔.
-- **Long-press OK** on a channel: favourite it, or pick which of its streams to play.
+- **Long-press OK** on a channel: favourite it, hide it, or pick which of its streams to play.
 - **🔍 Search** (main menu) finds programmes and channels as you type. OK plays, plays catch-up,
   or sets a reminder, depending on when the programme is on.
 - **🕘 Recently watched** (top of the group list) lists the channels you've watched lately, newest first.
@@ -109,8 +111,13 @@ Everything is in `ui/Theme.kt` (colours, type, shapes, focus, tags, dialogs, ico
     **OK** switches to the one shown.
   - **Left/right** steps through earlier and later programmes; **OK** on an earlier one plays it from catch-up.
   - **OK** on the channel you're watching opens the controls: Restart (from the programme start, via
-    catch-up), back/forward 30 s, pause, Live, Previous (channel), Sleep (cycles 15 / 30 / 60 / 90 / 120 min /
-    off) and Streams.
+    catch-up), back/forward 30 s, pause, Live, Last channel, Sleep (cycles 15 / 30 / 60 / 90 / 120 min /
+    off) and Options.
+  - **Options** (also the Menu key, or long-press OK): favourite, **Audio** track (where the stream has
+    more than one), **Subtitles** (off / the stream's tracks), **Picture** (Fit / Stretch / Zoom, remembered),
+    **Hide channel**, and the channel's streams.
+- **Long-press Info** shows playback stats: resolution, frame rate, codecs, bitrate, buffer, dropped frames,
+  decoder and whether tunnelling is on. Press Info (short) for the card as usual.
   - **OK** on a programme that hasn't started sets a reminder.
 - **Last-channel key** (where the remote has one) flips to the previous channel.
 - **Number keys** tune by channel number (Sky numbers when the Sky layout is on).
@@ -160,8 +167,8 @@ which guides mention something in a time window.
 
 ### Reminders
 
-Set from the guide, the info card or search. When the programme starts (or Ferry is opened while it's on),
-a pop-up offers **Watch now**. Home Assistant gets an `event.<name>_events` event (`reminder`) and a
+Set from the guide, the info card or search. Two minutes before the programme starts (or when Ferry is
+opened while it's on) a pop-up counts down and offers **Watch now**. Home Assistant gets an `event.<name>_events` event (`reminder`) and a
 `sensor.<name>_next_reminder`, so an automation can, for example, turn the TV on or send a notification.
 
 ### Sleep timer
@@ -169,6 +176,12 @@ a pop-up offers **Watch now**. Home Assistant gets an `event.<name>_events` even
 From the controls row (**☾ Sleep**) or Home Assistant's `number.<name>_sleep_timer`. In the last minute
 Ferry shows a warning; any button keeps watching. When it runs out playback stops, Ferry returns to the
 guide, and HA gets a `sleep` event (handy for turning the TV off).
+
+### Still watching?
+
+After a stream has played for hours with the remote untouched (4 by default; set it on the web page's
+Device card, 0 = never) Ferry asks **Still watching?** and waits a minute for any button. If nobody answers,
+playback stops and the guide shows, so a TV left on overnight isn't streaming to nobody.
 
 ### Refreshes
 
@@ -234,16 +247,16 @@ Each TV's device page has a **Visit** link to its web setup page.
 | Entity | What it does |
 |---|---|
 | `select.<name>_channel` | Favourites; choosing one tunes the TV |
-| `sensor.<name>_state` | idle / buffering / playing / paused / error |
+| `sensor.<name>_state` | idle / buffering / playing / paused / error. Attributes include the stream playing, `resolution`, `frame_rate`, `bitrate_kbps`, `video_codec`, `audio_codec`, `dropped_frames`, `buffer_seconds`, `hdr`, `tunnelled` |
 | `sensor.<name>_channel_name`, `_programme`, `_next_programme` | With full JSON attributes (logo, tvg_id, times, description, deep link) |
 | `sensor.<name>_progress` | Programme progress % |
 | `button.<name>_channel_up` / `_channel_down` / `_stop` / `_pause` / `_previous_channel` / `_live` | Remote keys |
 | `image.<name>_channel_logo` | Logo of the channel playing |
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
-| `event.<name>_events` | `reminder` (a reminded programme is starting) and `sleep` (timer stopped playback) |
+| `event.<name>_events` | `reminder` (a reminded programme is starting), `sleep` (timer stopped playback), `failover` (fell back to another stream: `channel`, `reason`, `from_stream`, `to_stream`) and `backstop` (retuned a frozen stream) |
 | `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** updates that box (confirm on the TV) |
-| `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel |
+| `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel, and the last 25 lines of Ferry's log |
 
 Topics (`base = ferry/<device-id>`):
 
@@ -256,7 +269,7 @@ base/cmd/key        up | down | stop | pause | previous_channel | live
 base/cmd/sleep      minutes (0 = off)
 base/logo           logo URL of the channel playing
 base/reminders      next reminder + list (JSON)
-base/event          {"event_type": "reminder" | "sleep", ...} (not retained)
+base/event          {"event_type": "reminder" | "sleep" | "failover" | "backstop", ...} (not retained)
 ```
 
 ```yaml
@@ -316,7 +329,7 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | Method | Path | |
 |---|---|---|
 | POST | `/pair` | `{pin}` → `{token}` (no auth; 5 wrong PINs = 60s lockout) |
-| GET | `/status` | now playing |
+| GET | `/status` | now playing, with `playback` stats (resolution, fps, bitrate, codecs, decoder, dropped frames, buffer) |
 | WS | `/ws` | status pushes |
 | GET/POST | `/sources` | list / add (triggers import) |
 | PUT/DELETE | `/sources/{id}` | edit (`password: null` keeps it) / delete |
@@ -335,7 +348,7 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | GET/PUT | `/groups/detail`, `/groups/visible` | group list with hidden state / set the groups to use |
 | GET/PUT | `/sky` | Sky layout status / `{enabled, region, extraGroups}` |
 | PUT | `/sky/override` | `{number, channelId?}` manual Sky match (null clears) |
-| GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?}` |
+| GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?, sportsGuides?, idleStopHours?}` |
 | POST | `/guide/fill` | fill guide gaps now |
 | GET | `/export` | settings export (includes playlist passwords) |
 | POST | `/import` | apply an export to this box |
@@ -343,6 +356,7 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | GET | `/sync/peers` | other Ferry boxes found on the network |
 | POST | `/sync/now` | check the followed box now |
 | GET | `/debug/crash` | the last crash / caught error with its stack trace (plain text) |
+| GET | `/debug/log?n=` | Ferry's own log: the last 600 lines (plain text), whatever the TV's logcat buffer has done. Linked from the web page's Device card |
 
 ## Layout
 
@@ -388,7 +402,9 @@ app/src/main/assets/web/index.html   config page (no build step)
 - **Crash protection:** an error in background work (guide refresh, timers, MQTT) is recorded and Ferry
   carries on. If Ferry does crash while a live channel is on, Android restarts it and Ferry reopens on
   that channel within a few seconds (at most twice in 10 minutes, so a crash loop can't keep it cycling).
-  Either way it shows up in HA as **Last crash**. Ferry's player only ever runs on the main thread.
+  Either way it shows up in HA as **Last crash**, with the tail of Ferry's own log (`/api/debug/log` has
+  all of it). Ferry's player only ever runs on the main thread. In tunnelled mode the backstop judges
+  "frozen" by the playback position alone, since the decoder's frame counters don't tick there.
 - Leaving the app (Home) stops playback; the service keeps running for HA control.
 - Most providers allow one stream per account at a time; a second box (or another app) on the same
   account gets "provider refused the stream (HTTP 407)".
