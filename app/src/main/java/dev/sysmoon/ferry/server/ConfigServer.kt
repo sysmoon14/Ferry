@@ -1,5 +1,6 @@
 package dev.sysmoon.ferry.server
 
+import kotlinx.coroutines.flow.last
 import io.ktor.server.response.respondText
 import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.AppGraph
@@ -81,7 +82,7 @@ class ConfigServer(private val g: AppGraph) {
         }
         val f = all.firstOrNull { it.id == id } ?: return kotlinx.serialization.json.JsonPrimitive("no such fixture")
         val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
-        val found = kotlinx.coroutines.flow.last(g.matchFinder.find(f, sameSlot))
+        val found = g.matchFinder.find(f, sameSlot).last()
         return kotlinx.serialization.json.buildJsonArray {
             found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
                 put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
@@ -403,7 +404,7 @@ class ConfigServer(private val g: AppGraph) {
                     val f = all.firstOrNull { it.id == id }
                     if (f == null) { call.respond(HttpStatusCode.NotFound, ErrorDto("No such fixture")); return@get }
                     val sameSlot = all.count { it.competition == f.competition && kotlin.math.abs(it.kickoff - f.kickoff) <= 30 * 60_000L }
-                    val found = kotlinx.coroutines.flow.last(g.matchFinder.find(f, sameSlot))
+                    val found = g.matchFinder.find(f, sameSlot).last()
                     call.respond(kotlinx.serialization.json.buildJsonArray {
                         found.forEach { c -> add(kotlinx.serialization.json.buildJsonObject {
                             put("score", kotlinx.serialization.json.JsonPrimitive(c.score))
