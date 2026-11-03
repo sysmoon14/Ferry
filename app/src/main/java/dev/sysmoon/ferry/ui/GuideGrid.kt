@@ -215,7 +215,8 @@ fun GuideGrid(
             GuideFocus.Top -> 0
             is GuideFocus.Channel -> channels.indexOfFirst { it.id == t.id }
         }
-        if (index < 0) { onFocusFailed(r); return@LaunchedEffect }
+        // Back from the player with the channel not in this list: the group list is the place.
+        if (index < 0) { if (r.target is GuideFocus.Channel) onBackToGroups(); return@LaunchedEffect }
         windowStart = nowSlot
         cursorTime = System.currentTimeMillis()
         listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
@@ -231,7 +232,7 @@ fun GuideGrid(
             if (runCatching { req.requestFocus() }.isSuccess) { focused = true; break }
             verticalNav = false
         }
-        if (!focused) onFocusFailed(r)
+        if (!focused && r.target is GuideFocus.Channel) onBackToGroups()
     }
     // Programmes arrive after focus landed on a row's "No guide data" cell: that cell is replaced
     // and focus would be lost, so put it back on the same row.

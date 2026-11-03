@@ -260,17 +260,25 @@ fun GuideScreen(
             runCatching { railFocus.requestFocus() }
         }
     }
-    /** Moves into the channels at [target]; [toMenu]: where to go if nothing can take focus. */
+    /**
+     * Moves into the channels at [target]. The group list stays as it is until a channel has
+     * actually taken focus (then [channelsFocused] flips the level and the list slides away), so a
+     * row that takes a few frames to compose never shows as a flicker. [toMenu]: whether the move
+     * came from the main menu (Favourites), for the one case where there's nothing to focus.
+     */
     val focusContent: (target: GuideFocus, toMenu: Boolean) -> Unit = { target, toMenu ->
-        level = Level.CONTENT
         focusRequest = FocusRequest(++focusCounter, target, toMenu)
     }
     /** Back (or Left at the edge) from the channels. */
     val backFromContent: () -> Unit = { if (hasRail) focusRail() else focusMenu() }
     // A hidden channel's row vanishes under the focus: put it back on the list (or the group list).
     LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(GuideFocus.Top, !hasRail) }
-    /** A focus request found nothing to land on (empty list, channel gone): go back a level. */
-    val focusFailed: (FocusRequest) -> Unit = { r -> if (r.toMenu || !hasRail) focusMenu() else focusRail() }
+    /**
+     * A focus request found nothing to land on. Focus hasn't moved, so there's nothing to undo:
+     * from the group list you simply stay on the group (the empty message shows beside it); from
+     * the main menu (Favourites, with none yet) the menu stays open.
+     */
+    val focusFailed: (FocusRequest) -> Unit = { _ -> }
     fun enter(item: MenuItem) {
         when (item) {
             MenuItem.SEARCH -> onOpenSearch()
@@ -292,8 +300,10 @@ fun GuideScreen(
         if (returnSignal == 0) return@LaunchedEffect
         if (returnToRail) { focusMenu(); return@LaunchedEffect }
         val id = playingId
-        if (id == null) { backFromContent(); return@LaunchedEffect }
-        focusContent(GuideFocus.Channel(id), false)
+        val inList = id != null && (gridView || shown.any { it.id == id })
+        if (!inList) { backFromContent(); return@LaunchedEffect }
+        level = Level.CONTENT
+        focusContent(GuideFocus.Channel(id!!), false)
     }
     // List view: carry out a focus request — scroll the row on screen, let it compose, focus it.
     var doneRequest by remember { mutableIntStateOf(0) }
@@ -307,7 +317,7 @@ fun GuideScreen(
             GuideFocus.Top -> 0
             is GuideFocus.Channel -> shown.indexOfFirst { it.id == t.id }
         }
-        if (index < 0) { focusFailed(r); return@LaunchedEffect }
+        if (index < 0) { if (r.target is GuideFocus.Channel) backFromContent(); return@LaunchedEffect }
         listTargetId = shown[index].id
         listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
         // The row composes over the next frame or two: keep trying before giving up.
@@ -316,7 +326,7 @@ fun GuideScreen(
             withFrameNanos { }
             if (runCatching { listTargetFocus.requestFocus() }.isSuccess) { focused = true; break }
         }
-        if (!focused) focusFailed(r)
+        if (!focused && r.target is GuideFocus.Channel) backFromContent()
     }
 
     ModalNavigationDrawer(
