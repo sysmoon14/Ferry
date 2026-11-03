@@ -310,8 +310,13 @@ fun GuideScreen(
         if (index < 0) { focusFailed(r); return@LaunchedEffect }
         listTargetId = shown[index].id
         listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
-        withFrameNanos { }
-        if (runCatching { listTargetFocus.requestFocus() }.isFailure) focusFailed(r)
+        // The row composes over the next frame or two: keep trying before giving up.
+        var focused = false
+        for (attempt in 0 until 20) {
+            withFrameNanos { }
+            if (runCatching { listTargetFocus.requestFocus() }.isSuccess) { focused = true; break }
+        }
+        if (!focused) focusFailed(r)
     }
 
     ModalNavigationDrawer(

@@ -219,11 +219,19 @@ fun GuideGrid(
         windowStart = nowSlot
         cursorTime = System.currentTimeMillis()
         listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
-        withFrameNanos { }
         val ch = channels[index]
-        val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
-        verticalNav = true
-        if (runCatching { req.requestFocus() }.isFailure) { verticalNav = false; onFocusFailed(r) }
+        // The row and its cells compose over the next frame or two (longer on a slow TV, or while
+        // the row's programmes are still arriving): keep trying rather than bouncing back to the
+        // group list after one miss.
+        var focused = false
+        for (attempt in 0 until 20) {
+            withFrameNanos { }
+            val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
+            verticalNav = true
+            if (runCatching { req.requestFocus() }.isSuccess) { focused = true; break }
+            verticalNav = false
+        }
+        if (!focused) onFocusFailed(r)
     }
     // Programmes arrive after focus landed on a row's "No guide data" cell: that cell is replaced
     // and focus would be lost, so put it back on the same row.
