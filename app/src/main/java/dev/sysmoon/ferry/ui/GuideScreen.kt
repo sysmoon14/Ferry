@@ -195,9 +195,13 @@ fun GuideScreen(
             effective == ALL -> dao.observeFirst(GUIDE_LIMIT)
             effective.startsWith(SKY_PREFIX) -> dao.observeSkySection(effective.removePrefix(SKY_PREFIX))
             else -> dao.observeGroup(effective, GUIDE_LIMIT)
-        }.catch { emit(emptyList()) }
+        }.catch { emit(emptyList()) }.map { effective to it }
     }
-    val shown by shownFlow.collectAsState(initial = emptyList())
+    // Tagged with the group it belongs to: collectAsState keeps the previous group's rows until the
+    // new query emits, and showing (or focusing) those for a frame is the "opens at 121" jump.
+    val loaded by shownFlow.collectAsState(initial = effective to emptyList())
+    val loading = loaded.first != effective
+    val shown = if (loading) emptyList() else loaded.second
     val zapScope = when {
         effective == FAVOURITES -> ZapScope.Favourites
         effective == RECENT -> ZapScope.Recent
@@ -418,7 +422,9 @@ fun GuideScreen(
                     Spacer(Modifier.weight(1f))
                     Clock()
                 }
-                if (shown.isEmpty()) {
+                if (loading) {
+                    Spacer(Modifier.weight(1f))
+                } else if (shown.isEmpty()) {
                     if (effective == FAVOURITES && total > 0) {
                         EmptyMessage(
                             FerryIcons.StarOutline, "No favourites yet",
