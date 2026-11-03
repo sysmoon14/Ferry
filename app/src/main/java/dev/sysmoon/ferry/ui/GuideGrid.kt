@@ -103,6 +103,8 @@ fun GuideGrid(
     active: Boolean,
     /** Where to put focus when it moves into the grid (top, or a channel); each request is distinct. */
     focusRequest: FocusRequest?,
+    /** The group this grid shows: requests for another group are not ours. */
+    groupKey: String,
     /** The request couldn't be met (empty list, channel not in it). */
     onFocusFailed: (FocusRequest) -> Unit,
     /** The channels are meant to have focus: if a row loses it (its cells were replaced), take it back. */
@@ -207,10 +209,11 @@ fun GuideGrid(
     var doneRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(focusRequest, channels.isEmpty()) {
         val r = focusRequest ?: return@LaunchedEffect
-        if (r.n == doneRequest) return@LaunchedEffect
+        if (r.n == doneRequest || r.group != groupKey) return@LaunchedEffect
         // The list may still be loading: wait for it (the effect runs again when rows arrive).
         if (channels.isEmpty()) { delay(1_500); if (channels.isEmpty()) { doneRequest = r.n; onFocusFailed(r) }; return@LaunchedEffect }
         doneRequest = r.n
+        dev.sysmoon.ferry.Logs.d("Guide", "Focus request ${r.n} ${r.target} in $groupKey: ${channels.size} rows, first ${channels.first().name}")
         val index = when (val t = r.target) {
             GuideFocus.Top -> 0
             is GuideFocus.Channel -> channels.indexOfFirst { it.id == t.id }
@@ -229,9 +232,10 @@ fun GuideGrid(
             withFrameNanos { }
             val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
             verticalNav = true
-            if (runCatching { req.requestFocus() }.isSuccess) { focused = true; break }
+            if (runCatching { req.requestFocus() }.isSuccess) { focused = true; dev.sysmoon.ferry.Logs.d("Guide", "Focus request ${r.n}: ${ch.name} focused on attempt ${attempt + 1}"); break }
             verticalNav = false
         }
+        if (!focused) dev.sysmoon.ferry.Logs.w("Guide", "Focus request ${r.n}: couldn't focus ${ch.name} after 20 frames")
         if (!focused && r.target is GuideFocus.Channel) onBackToGroups()
     }
     // Programmes arrive after focus landed on a row's "No guide data" cell: that cell is replaced

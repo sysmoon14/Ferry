@@ -104,8 +104,12 @@ sealed interface GuideFocus {
     data class Channel(val id: String) : GuideFocus
 }
 
-/** One request to focus the channels; [n] makes each one distinct. [toMenu]: fallback when it can't be met. */
-data class FocusRequest(val n: Int, val target: GuideFocus, val toMenu: Boolean)
+/**
+ * One request to focus the channels; [n] makes each one distinct. [group] is the list it is for:
+ * only that group's grid/list acts on it (the outgoing group's grid was answering requests for
+ * the next one, taking focus for a frame and then vanishing under it). [toMenu]: it came from the main menu.
+ */
+data class FocusRequest(val n: Int, val target: GuideFocus, val toMenu: Boolean, val group: String)
 
 private enum class MenuItem(val label: String, val icon: ImageVector) {
     SEARCH("Search", FerryIcons.Search),
@@ -266,13 +270,13 @@ fun GuideScreen(
      * row that takes a few frames to compose never shows as a flicker. [toMenu]: whether the move
      * came from the main menu (Favourites), for the one case where there's nothing to focus.
      */
-    val focusContent: (target: GuideFocus, toMenu: Boolean) -> Unit = { target, toMenu ->
-        focusRequest = FocusRequest(++focusCounter, target, toMenu)
+    val focusContent: (target: GuideFocus, toMenu: Boolean, group: String) -> Unit = { target, toMenu, group ->
+        focusRequest = FocusRequest(++focusCounter, target, toMenu, group)
     }
     /** Back (or Left at the edge) from the channels. */
     val backFromContent: () -> Unit = { if (hasRail) focusRail() else focusMenu() }
     // A hidden channel's row vanishes under the focus: put it back on the list (or the group list).
-    LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(GuideFocus.Top, !hasRail) }
+    LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(GuideFocus.Top, !hasRail, effective) }
     /**
      * A focus request found nothing to land on. Focus hasn't moved, so there's nothing to undo:
      * from the group list you simply stay on the group (the empty message shows beside it); from
@@ -287,7 +291,7 @@ fun GuideScreen(
             else -> {
                 val s = item.section()!!
                 onSection(s)
-                if (s == Section.FAVOURITES) focusContent(GuideFocus.Top, true) else focusRail()
+                if (s == Section.FAVOURITES) focusContent(GuideFocus.Top, true, FAVOURITES) else focusRail()
             }
         }
     }
@@ -303,13 +307,13 @@ fun GuideScreen(
         val inList = id != null && (gridView || shown.any { it.id == id })
         if (!inList) { backFromContent(); return@LaunchedEffect }
         level = Level.CONTENT
-        focusContent(GuideFocus.Channel(id!!), false)
+        focusContent(GuideFocus.Channel(id!!), false, effective)
     }
     // List view: carry out a focus request — scroll the row on screen, let it compose, focus it.
     var doneRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(focusRequest, gridView, shown.isEmpty()) {
         val r = focusRequest ?: return@LaunchedEffect
-        if (gridView || r.n == doneRequest) return@LaunchedEffect // the grid handles its own
+        if (gridView || r.n == doneRequest || r.group != effective) return@LaunchedEffect // the grid handles its own
         // The list may still be loading: wait for it (the effect runs again when rows arrive).
         if (shown.isEmpty()) { delay(1_500); if (shown.isEmpty()) { doneRequest = r.n; focusFailed(r) }; return@LaunchedEffect }
         doneRequest = r.n
@@ -367,7 +371,7 @@ fun GuideScreen(
                                 ListItem(
                                     modifier = if (isSelected) Modifier.focusRequester(railFocus) else Modifier,
                                     selected = isSelected,
-                                    onClick = { onSelect(entry.key); focusContent(GuideFocus.Top, false) },
+                                    onClick = { onSelect(entry.key); focusContent(GuideFocus.Top, false, entry.key) },
                                     leadingContent = if (entry.icon != null) ({ Icon(entry.icon, null, modifier = Modifier.size(20.dp)) }) else null,
                                     headlineContent = {
                                         Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -435,6 +439,7 @@ fun GuideScreen(
                         playingId = playingId,
                         active = active,
                         focusRequest = focusRequest,
+                        groupKey = effective,
                         onFocusFailed = focusFailed,
                         wantsFocus = active && level == Level.CONTENT,
                         onOpenPlayer = onOpenPlayer,
