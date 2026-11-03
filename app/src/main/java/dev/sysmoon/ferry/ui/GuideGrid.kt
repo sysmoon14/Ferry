@@ -98,14 +98,15 @@ private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
 fun GuideGrid(
     channels: List<ChannelEntity>,
     zap: ZapScope,
-    /** The channel playing: kept in view behind the player and focused when the guide returns. */
+    /** The channel playing (marked in the grid). */
     playingId: String?,
     active: Boolean,
-    playerShowing: Boolean,
-    /** Bumped when the guide comes back from the player (0 = never / not for this grid). */
-    returnSignal: Int,
-    /** Bumped when this group was just picked from the group list: start at the top, at now. */
-    enterSignal: Int = 0,
+    /** Where to put focus when it moves into the grid (top, or a channel); each request is distinct. */
+    focusRequest: FocusRequest?,
+    /** The request couldn't be met (empty list, channel not in it). */
+    onFocusFailed: (FocusRequest) -> Unit,
+    /** The channels are meant to have focus: if a row loses it (its cells were replaced), take it back. */
+    wantsFocus: Boolean,
     onOpenPlayer: () -> Unit,
     /** Long press: open the channel menu (favourite, stream picker). */
     onMenu: (ChannelEntity) -> Unit,
@@ -183,33 +184,6 @@ fun GuideGrid(
         return (visible.firstOrNull { it.start <= t && it.stop > t } ?: visible.minBy { kotlin.math.abs(it.start - t) }).start
     }
 
-    // While the player covers the guide, keep the playing channel in view at "now", so the guide
-    // is already in place when the player shrinks away; then focus what's on now.
-    val returnFocus = remember { FocusRequester() }
-    LaunchedEffect(playingId, channels, playerShowing) {
-        if (!playerShowing) return@LaunchedEffect
-        windowStart = floorSlot(System.currentTimeMillis())
-        cursorTime = System.currentTimeMillis()
-        val index = channels.indexOfFirst { it.id == playingId }
-        if (index >= 0) listState.scrollToItem((index - 2).coerceAtLeast(0))
-    }
-    LaunchedEffect(enterSignal) {
-        if (enterSignal == 0) return@LaunchedEffect
-        windowStart = nowSlot
-        cursorTime = System.currentTimeMillis()
-        listState.scrollToItem(0)
-    }
-    LaunchedEffect(returnSignal) {
-        if (returnSignal == 0) return@LaunchedEffect
-        val index = channels.indexOfFirst { it.id == playingId }
-        if (index < 0) { onBackToGroups(); return@LaunchedEffect }
-        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-            listState.scrollToItem((index - 2).coerceAtLeast(0))
-        }
-        withFrameNanos { }
-        if (runCatching { returnFocus.requestFocus() }.isFailure) onBackToGroups()
-    }
-
     var focusedIndex by remember { mutableIntStateOf(-1) }
     /** Focus row [target] at the time cursor, scrolling it on screen first if needed. */
     fun moveTo(target: Int, scrollTo: Int? = null): Boolean {
@@ -227,6 +201,37 @@ fun GuideGrid(
     }
     /** Rows that fit on screen: a page for Channel +/−. */
     fun pageSize() = listState.layoutInfo.visibleItemsInfo.size.coerceAtLeast(1)
+
+    // A focus request: scroll the row on screen (top rows for Top), let it compose, focus the cell
+    // at the time cursor. Nothing else scrolls the grid or moves focus on its own.
+    var doneRequest by remember { mutableIntStateOf(0) }
+    LaunchedEffect(focusRequest, channels.isEmpty()) {
+        val r = focusRequest ?: return@LaunchedEffect
+        if (r.n == doneRequest) return@LaunchedEffect
+        // The list may still be loading: wait for it (the effect runs again when rows arrive).
+        if (channels.isEmpty()) { delay(1_500); if (channels.isEmpty()) { doneRequest = r.n; onFocusFailed(r) }; return@LaunchedEffect }
+        doneRequest = r.n
+        val index = when (val t = r.target) {
+            GuideFocus.Top -> 0
+            is GuideFocus.Channel -> channels.indexOfFirst { it.id == t.id }
+        }
+        if (index < 0) { onFocusFailed(r); return@LaunchedEffect }
+        windowStart = nowSlot
+        cursorTime = System.currentTimeMillis()
+        listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
+        withFrameNanos { }
+        val ch = channels[index]
+        val req = requester(ch.id, cellAt(ch, cursorTime.coerceIn(windowStart, windowEnd - 1)))
+        verticalNav = true
+        if (runCatching { req.requestFocus() }.isFailure) { verticalNav = false; onFocusFailed(r) }
+    }
+    // Programmes arrive after focus landed on a row's "No guide data" cell: that cell is replaced
+    // and focus would be lost, so put it back on the same row.
+    LaunchedEffect(programmes) {
+        if (!wantsFocus || focusedIndex < 0) return@LaunchedEffect
+        withFrameNanos { }
+        if (!gridFocused) moveTo(focusedIndex)
+    }
 
     Column(
         modifier.onFocusChanged { gridFocused = it.hasFocus }.onPreviewKeyEvent { e ->
@@ -260,7 +265,6 @@ fun GuideGrid(
                     windowStart = windowStart,
                     windowEnd = windowEnd,
                     now = now,
-                    focusRequester = if (channel.id == playingId) returnFocus else null,
                     canGoBack = { target ->
                         val limit = if (channel.archiveDays > 0) nowSlot - channel.archiveDays.coerceAtMost(7) * DAY_MS
                             else nowSlot - NO_ARCHIVE_BACK_MS
@@ -402,7 +406,6 @@ private fun GridRow(
     windowStart: Long,
     windowEnd: Long,
     now: Long,
-    focusRequester: FocusRequester?,
     canGoBack: (Long) -> Boolean,
     onShift: (Long, ProgrammeEntity?) -> Unit,
     onFocus: (ProgrammeEntity?) -> Unit,
@@ -439,8 +442,6 @@ private fun GridRow(
             val perMs = maxWidth / WINDOW_MS.toFloat()
             val visible = programmes.filter { it.stop > windowStart && it.start < windowEnd }
             val cells: List<ProgrammeEntity?> = visible.ifEmpty { listOf(null) }
-            // The cell to focus when returning from the player: what's on now, else the first.
-            val returnIndex = cells.indexOfFirst { it != null && it.start <= now && it.stop > now }.coerceAtLeast(0)
 
             cells.forEachIndexed { i, p ->
                 key(p?.start ?: -1L) {
@@ -450,8 +451,7 @@ private fun GridRow(
                     val w = (perMs * (right - left).toFloat() - 3.dp).coerceAtLeast(6.dp)
                     val past = p != null && p.stop <= now
                     val live = p == null || (p.start <= now && p.stop > now)
-                    var mod = Modifier.offset(x = x).width(w).fillMaxHeight().focusRequester(requesterFor(p?.start ?: -1L))
-                    if (focusRequester != null && i == returnIndex) mod = mod.focusRequester(focusRequester)
+                    val mod = Modifier.offset(x = x).width(w).fillMaxHeight().focusRequester(requesterFor(p?.start ?: -1L))
                     Surface(
                         onClick = { onSelect(p) },
                         onLongClick = onLongPress,

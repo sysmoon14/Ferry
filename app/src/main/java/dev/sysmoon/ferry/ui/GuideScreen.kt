@@ -96,6 +96,17 @@ enum class Section(val label: String) {
 /** Where focus is on the guide screen: the main menu, the group list, or the channels. */
 private enum class Level { MENU, RAIL, CONTENT }
 
+/** What a move into the channels should land on. */
+sealed interface GuideFocus {
+    /** The first channel, at the current time. */
+    data object Top : GuideFocus
+    /** A particular channel (the one playing, coming back from the player). */
+    data class Channel(val id: String) : GuideFocus
+}
+
+/** One request to focus the channels; [n] makes each one distinct. [toMenu]: fallback when it can't be met. */
+data class FocusRequest(val n: Int, val target: GuideFocus, val toMenu: Boolean)
+
 private enum class MenuItem(val label: String, val icon: ImageVector) {
     SEARCH("Search", FerryIcons.Search),
     FAVOURITES("Favourites", FerryIcons.Star),
@@ -194,14 +205,17 @@ fun GuideScreen(
     // Long-press menu (favourite + stream picker) for this channel, if open.
     var menuFor by remember { mutableStateOf<ChannelEntity?>(null) }
     var hiddenSignal by remember { mutableIntStateOf(0) }
-    // Bumped when a group is picked from the group list: the channels start from the top, not
-    // wherever the list was left (the grid follows the playing channel while a stream is on).
-    var enterSignal by remember { mutableIntStateOf(0) }
     menuFor?.let { ChannelMenu(it, zapScope, onDismiss = { menuFor = null }, onPlayed = onOpenPlayer, onHidden = { hiddenSignal++ }) }
 
+    // Where focus goes when it moves into the channels. Every way in names its target: picking a
+    // group starts at the top; coming back from the player lands on the playing channel. Nothing
+    // else moves the list or the focus (no restoring, no following the stream in the background).
+    var focusRequest by remember { mutableStateOf<FocusRequest?>(null) }
+    var focusCounter by remember { mutableIntStateOf(0) }
     val listState = remember(effective) { androidx.compose.foundation.lazy.LazyListState() }
-    LaunchedEffect(enterSignal) { if (enterSignal > 0 && !gridView) listState.scrollToItem(0) }
-    val returnFocus = remember { FocusRequester() }
+    /** The list row that a focus request should land on. */
+    var listTargetId by remember { mutableStateOf<String?>(null) }
+    val listTargetFocus = remember { FocusRequester() }
 
     data class RailEntry(val key: String, val label: String, val icon: ImageVector? = null)
     val rail = buildList {
@@ -222,7 +236,6 @@ fun GuideScreen(
     val railState = rememberLazyListState()
     val railFocus = remember { FocusRequester() }
     val menuFocus = remember { FocusRequester() }
-    val contentFocus = remember { FocusRequester() }
     var level by remember { mutableStateOf(if (playerShowing) Level.CONTENT else Level.MENU) }
     var channelsFocused by remember { mutableStateOf(false) }
     var railFocused by remember { mutableStateOf(false) }
@@ -247,22 +260,17 @@ fun GuideScreen(
             runCatching { railFocus.requestFocus() }
         }
     }
-    /** [toMenu]: where to fall back to if nothing in the channels can take focus. */
-    val focusContent: (toMenu: Boolean) -> Unit = { toMenu ->
-        scope.launch {
-            level = Level.CONTENT
-            withFrameNanos { }
-            runCatching { contentFocus.requestFocus() }
-            withFrameNanos { }
-            // Nothing to focus (no favourites yet, list still loading): stay where we were
-            // rather than leaving focus nowhere.
-            if (!channelsFocused) { if (toMenu) focusMenu() else focusRail() }
-        }
+    /** Moves into the channels at [target]; [toMenu]: where to go if nothing can take focus. */
+    val focusContent: (target: GuideFocus, toMenu: Boolean) -> Unit = { target, toMenu ->
+        level = Level.CONTENT
+        focusRequest = FocusRequest(++focusCounter, target, toMenu)
     }
     /** Back (or Left at the edge) from the channels. */
     val backFromContent: () -> Unit = { if (hasRail) focusRail() else focusMenu() }
     // A hidden channel's row vanishes under the focus: put it back on the list (or the group list).
-    LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(!hasRail) }
+    LaunchedEffect(hiddenSignal) { if (hiddenSignal > 0) focusContent(GuideFocus.Top, !hasRail) }
+    /** A focus request found nothing to land on (empty list, channel gone): go back a level. */
+    val focusFailed: (FocusRequest) -> Unit = { r -> if (r.toMenu || !hasRail) focusMenu() else focusRail() }
     fun enter(item: MenuItem) {
         when (item) {
             MenuItem.SEARCH -> onOpenSearch()
@@ -271,7 +279,7 @@ fun GuideScreen(
             else -> {
                 val s = item.section()!!
                 onSection(s)
-                if (s == Section.FAVOURITES) focusContent(true) else focusRail()
+                if (s == Section.FAVOURITES) focusContent(GuideFocus.Top, true) else focusRail()
             }
         }
     }
@@ -279,24 +287,31 @@ fun GuideScreen(
     BackHandler(enabled = active && railFocused) { focusMenu() }
 
     LaunchedEffect(Unit) { if (!playerShowing) { withFrameNanos { }; runCatching { menuFocus.requestFocus() } } }
-    // List view: while the player covers the guide, keep the playing channel in view; when the
-    // guide comes back, focus it (or the main menu, after search/settings/sports).
-    LaunchedEffect(playingId, shown, playerShowing) {
-        if (gridView || !playerShowing) return@LaunchedEffect
-        val index = shown.indexOfFirst { it.id == playingId }
-        if (index >= 0) listState.scrollToItem((index - 2).coerceAtLeast(0))
-    }
+    // Back from the player (or search/settings/sports, which go to the main menu).
     LaunchedEffect(returnSignal) {
         if (returnSignal == 0) return@LaunchedEffect
         if (returnToRail) { focusMenu(); return@LaunchedEffect }
-        if (gridView) return@LaunchedEffect // the grid handles its own
-        val index = shown.indexOfFirst { it.id == playingId }
-        if (index < 0) { backFromContent(); return@LaunchedEffect }
-        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-            listState.scrollToItem((index - 2).coerceAtLeast(0))
+        val id = playingId
+        if (id == null) { backFromContent(); return@LaunchedEffect }
+        focusContent(GuideFocus.Channel(id), false)
+    }
+    // List view: carry out a focus request — scroll the row on screen, let it compose, focus it.
+    var doneRequest by remember { mutableIntStateOf(0) }
+    LaunchedEffect(focusRequest, gridView, shown.isEmpty()) {
+        val r = focusRequest ?: return@LaunchedEffect
+        if (gridView || r.n == doneRequest) return@LaunchedEffect // the grid handles its own
+        // The list may still be loading: wait for it (the effect runs again when rows arrive).
+        if (shown.isEmpty()) { delay(1_500); if (shown.isEmpty()) { doneRequest = r.n; focusFailed(r) }; return@LaunchedEffect }
+        doneRequest = r.n
+        val index = when (val t = r.target) {
+            GuideFocus.Top -> 0
+            is GuideFocus.Channel -> shown.indexOfFirst { it.id == t.id }
         }
-        withFrameNanos { } // let the row compose before focusing it
-        runCatching { returnFocus.requestFocus() }
+        if (index < 0) { focusFailed(r); return@LaunchedEffect }
+        listTargetId = shown[index].id
+        listState.scrollToItem(if (r.target == GuideFocus.Top) 0 else (index - 2).coerceAtLeast(0))
+        withFrameNanos { }
+        if (runCatching { listTargetFocus.requestFocus() }.isFailure) focusFailed(r)
     }
 
     ModalNavigationDrawer(
@@ -337,7 +352,7 @@ fun GuideScreen(
                                 ListItem(
                                     modifier = if (isSelected) Modifier.focusRequester(railFocus) else Modifier,
                                     selected = isSelected,
-                                    onClick = { onSelect(entry.key); enterSignal++; focusContent(false) },
+                                    onClick = { onSelect(entry.key); focusContent(GuideFocus.Top, false) },
                                     leadingContent = if (entry.icon != null) ({ Icon(entry.icon, null, modifier = Modifier.size(20.dp)) }) else null,
                                     headlineContent = {
                                         Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -359,7 +374,6 @@ fun GuideScreen(
             Column(
                 Modifier.weight(1f).fillMaxHeight()
                     .onFocusChanged { channelsFocused = it.hasFocus }
-                    .focusRequester(contentFocus)
                     .focusGroup()
             ) {
                 // Leave room on the right for the corner mini player when a stream is playing.
@@ -405,9 +419,9 @@ fun GuideScreen(
                         zap = zapScope,
                         playingId = playingId,
                         active = active,
-                        playerShowing = playerShowing,
-                        returnSignal = if (returnToRail) 0 else returnSignal,
-                        enterSignal = enterSignal,
+                        focusRequest = focusRequest,
+                        onFocusFailed = focusFailed,
+                        wantsFocus = active && level == Level.CONTENT,
                         onOpenPlayer = onOpenPlayer,
                         onMenu = { menuFor = it },
                         onBackToGroups = backFromContent,
@@ -415,7 +429,7 @@ fun GuideScreen(
                     )
                 } else {
                     LazyColumn(
-                        Modifier.weight(1f).focusRestorer(),
+                        Modifier.weight(1f),
                         state = listState,
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),
@@ -424,7 +438,7 @@ fun GuideScreen(
                             ChannelRow(
                                 channel = channel,
                                 playing = nowPlaying.channel?.id == channel.id,
-                                modifier = if (channel.id == playingId) Modifier.focusRequester(returnFocus) else Modifier,
+                                modifier = if (channel.id == listTargetId) Modifier.focusRequester(listTargetFocus) else Modifier,
                                 onLongClick = { menuFor = channel },
                                 onClick = {
                                     // Zapping follows the list you started from, not the provider's group.
