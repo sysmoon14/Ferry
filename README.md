@@ -197,7 +197,8 @@ guide, and HA gets a `sleep` event (handy for turning the TV off).
 
 After a stream has played for hours with the remote untouched (4 by default; set it on the web page's
 Device card, 0 = never) Ferry asks **Still watching?** and waits a minute for any button. If nobody answers,
-playback stops and the guide shows, so a TV left on overnight isn't streaming to nobody.
+playback stops and the guide shows, so a TV left on overnight isn't streaming to nobody. Turning the TV off
+and on again counts as a button press, and the clock doesn't run while the screen is off.
 
 ### Refreshes
 
