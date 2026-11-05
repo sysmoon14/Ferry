@@ -98,6 +98,29 @@ class MainActivity : ComponentActivity() {
     private var lastKeyAt by mutableStateOf(System.currentTimeMillis())
     private var stillWatching by mutableStateOf(false)
 
+    /**
+     * Turning the TV off and on is as good as a key press: nobody's asleep in front of a TV that
+     * was just switched on. Without this the clock kept running from the last key before standby,
+     * so a resumed stream got "Still watching?" within a minute.
+     */
+    private fun resetIdle(why: String) {
+        lastKeyAt = System.currentTimeMillis()
+        if (stillWatching) Logs.i("Ferry", "Still watching? dismissed: $why")
+        stillWatching = false
+    }
+
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> { Logs.i("Ferry", "Screen off"); resetIdle("screen off") }
+                Intent.ACTION_SCREEN_ON -> { Logs.i("Ferry", "Screen on"); resetIdle("screen on") }
+            }
+        }
+    }
+
+    private fun screenOn(): Boolean =
+        (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+
     private fun openPlayerInstantly() {
         snapVideo = true
         nav.reset(); openPlayer()
@@ -139,6 +162,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FerryService.start(this)
+        registerReceiver(screenReceiver, android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        })
         pendingResume = savedInstanceState == null
         covered = pendingResume
         lifecycleScope.launch {
@@ -160,6 +187,9 @@ class MainActivity : ComponentActivity() {
                     if (idleHours <= 0 || playing.channel == null) return@LaunchedEffect
                     while (true) {
                         kotlinx.coroutines.delay(60_000)
+                        // Screen off (standby, or a TV that keeps the app running with the panel
+                        // dark): don't count, and start afresh when it comes back on.
+                        if (!screenOn()) { lastKeyAt = System.currentTimeMillis(); continue }
                         if (!stillWatching && graph.player.state.value.state == dev.sysmoon.ferry.player.PlaybackState.PLAYING &&
                             System.currentTimeMillis() - lastKeyAt >= idleHours * 3_600_000L) stillWatching = true
                     }
@@ -290,6 +320,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         graph.uiVisible.value = true
+        Logs.i("Ferry", "App shown")
+        resetIdle("app shown")
         updateHidden = false
         graph.updater.resumePendingInstall()
         graph.updater.checkIfDue()
@@ -309,12 +341,18 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         graph.uiVisible.value = false
+        Logs.i("Ferry", "App hidden")
         if (!isChangingConfigurations) pendingResume = true
         // Leaving the app (Home, another app launched) stops playback, like a normal TV app.
         // HA can still start it again via deep link / MQTT.
         // App scope, not lifecycleScope: Back out of the app destroys the activity straight after
         // onStop, which would cancel the stop half-way and leave the audio playing.
         if (!isChangingConfigurations) graph.scope.launch { graph.player.stop() }
+    }
+
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(screenReceiver) }
+        super.onDestroy()
     }
 
     private fun handle(intent: Intent?) {
