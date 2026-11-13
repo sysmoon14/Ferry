@@ -66,16 +66,24 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
 
-      - name: Print Room schema (temporary)
-        if: always()
+      # A database change must come with its schema (app/schemas) committed and a Migration, or
+      # an update would wipe or crash on existing installs. The build regenerates the schema; this
+      # compares it with what's committed.
+      - name: Room schema is committed
         run: |
           python3 - <<'PY'
-          import glob
+          import glob, json, subprocess, sys
+          bad = []
           for f in glob.glob('app/schemas/*/*.json'):
-              t = open(f).read()
-              for i in range(0, len(t), 3000):
-                  part = t[i:i+3000].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
-                  print(f"::notice title=schema-{i//3000:02d} {f}::{part}")
+              new = json.load(open(f))
+              old = subprocess.run(['git', 'show', f'HEAD:{f}'], capture_output=True, text=True)
+              if old.returncode != 0 or json.loads(old.stdout) != new:
+                  bad.append(f)
+          if bad:
+              print('::error title=Room schema not committed::' + ', '.join(bad) +
+                    ' is new or changed. Commit app/schemas (attached to this run as the room-schemas artifact),'
+                    ' bump FerryDatabase.VERSION and add a Migration.')
+              sys.exit(1)
           PY
 
       # Release (not debuggable) starts noticeably faster on TV boxes; debug is kept for diagnostics.
