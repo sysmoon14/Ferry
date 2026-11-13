@@ -66,9 +66,51 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
 
+      # A database change must come with its schema (app/schemas) committed and a Migration, or
+      # an update would wipe or crash on existing installs. The build regenerates the schema; this
+      # compares it with what's committed.
+      - name: Room schema is committed
+        run: |
+          python3 - <<'PY'
+          import glob, json, subprocess, sys
+          bad = []
+          for f in glob.glob('app/schemas/*/*.json'):
+              new = json.load(open(f))
+              old = subprocess.run(['git', 'show', f'HEAD:{f}'], capture_output=True, text=True)
+              if old.returncode != 0 or json.loads(old.stdout) != new:
+                  bad.append(f)
+          if bad:
+              print('::error title=Room schema not committed::' + ', '.join(bad) +
+                    ' is new or changed. Commit app/schemas (attached to this run as the room-schemas artifact),'
+                    ' bump FerryDatabase.VERSION and add a Migration.')
+              sys.exit(1)
+          PY
+
       # Release (not debuggable) starts noticeably faster on TV boxes; debug is kept for diagnostics.
       - name: Assemble APKs
         run: ./gradlew assembleDebug assembleRelease --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
+
+      # Static analysis: reported, not enforced (yet). The reports are attached to the run.
+      - name: Lint and detekt
+        continue-on-error: true
+        run: ./gradlew lintDebug detekt --continue --console=plain
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-reports
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/detekt/
+          if-no-files-found: ignore
+
+      # The Room schema the build generated, so it can be committed alongside a database change.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: room-schemas
+          path: app/schemas/
+          if-no-files-found: ignore
 
       # Surface compiler / Gradle errors as a single annotation so they're readable from the API
       # (and on the run summary page) without downloading logs.

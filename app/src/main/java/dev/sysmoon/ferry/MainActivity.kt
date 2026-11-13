@@ -46,6 +46,8 @@ import dev.sysmoon.ferry.ui.PlayerScreen
 import dev.sysmoon.ferry.ui.SettingsScreen
 import dev.sysmoon.ferry.player.PlayTarget
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
 
 enum class Screen { GUIDE, PLAYER, SETTINGS, SEARCH, FOOTBALL }
 
@@ -172,6 +174,11 @@ class MainActivity : ComponentActivity() {
             val (sec, grp) = graph.settings.lastPlace()
             sec?.let { name -> Section.entries.firstOrNull { it.name == name }?.let { section = it } }
             grp?.let { guideGroup = it }
+            // First run (no playlists yet): open on the pairing card rather than an empty guide
+            // that says to go to Settings.
+            if (DeepLinks.parse(intent) == null && runCatching { graph.db.sources().all().isEmpty() }.getOrDefault(false)) {
+                nav.open(Screen.SETTINGS)
+            }
         }
         handle(intent)
         setContent {
@@ -198,9 +205,27 @@ class MainActivity : ComponentActivity() {
                     Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
                         lastKeyAt = System.currentTimeMillis()
                         // Sleep timer's last minute: any key keeps watching.
-                        if (!sleepWarning) return@onPreviewKeyEvent false
-                        if (e.type == KeyEventType.KeyUp) graph.sleep.cancel()
-                        true
+                        if (sleepWarning) {
+                            if (e.type == KeyEventType.KeyUp) graph.sleep.cancel()
+                            return@onPreviewKeyEvent true
+                        }
+                        // A reminder over full-screen playback is a corner banner, not a dialog:
+                        // OK switches to it, Back dismisses it, every other key is the player's.
+                        val banner = due.takeIf { screen == Screen.PLAYER }
+                        if (banner != null) {
+                            val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                            val back = e.key == Key.Back || e.key == Key.Escape
+                            if (ok || back) {
+                                if (e.type == KeyEventType.KeyUp) { if (ok) watchReminder(banner) else graph.reminders.dismiss() }
+                                return@onPreviewKeyEvent true
+                            }
+                        }
+                        // The remote's search key opens Search from any of the browsing screens.
+                        if (e.key == Key.Search && screen != Screen.SEARCH && screen != Screen.PLAYER) {
+                            if (e.type == KeyEventType.KeyUp) nav.open(Screen.SEARCH)
+                            return@onPreviewKeyEvent true
+                        }
+                        false
                     }
                 ) {
                     val guideActive = screen == Screen.GUIDE
@@ -292,22 +317,29 @@ class MainActivity : ComponentActivity() {
                     if (covered) Box(Modifier.fillMaxSize().background(Color.Black))
                     if (sleepWarning) SleepWarning(Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
                     due?.let { r ->
-                        ReminderPopup(
-                            r,
-                            onWatch = {
-                                graph.reminders.dismiss()
-                                if (r.fixtureId != null) openFootball(r.fixtureId)
-                                else {
-                                    nav.reset(); openPlayer()
-                                    lifecycleScope.launch {
-                                        if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
-                                    }
-                                }
-                            },
-                            onDismiss = { graph.reminders.dismiss() },
-                        )
+                        if (screen == Screen.PLAYER) {
+                            dev.sysmoon.ferry.ui.ReminderBanner(
+                                r,
+                                onExpired = { graph.reminders.dismiss() },
+                                modifier = Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 32.dp),
+                            )
+                        } else {
+                            ReminderPopup(r, onWatch = { watchReminder(r) }, onDismiss = { graph.reminders.dismiss() })
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    /** "Watch" on a reminder: the programme's channel, or the match's stream list. */
+    private fun watchReminder(r: dev.sysmoon.ferry.data.Reminder) {
+        graph.reminders.dismiss()
+        if (r.fixtureId != null) openFootball(r.fixtureId)
+        else {
+            nav.reset(); openPlayer()
+            lifecycleScope.launch {
+                if (!graph.player.play(PlayTarget.Id(r.channelId))) backToGuide(rail = true)
             }
         }
     }
@@ -342,6 +374,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         graph.uiVisible.value = false
         Logs.i("Ferry", "App hidden")
+        // Voice input for Search covers Ferry for a moment: that isn't leaving the app.
+        if (graph.awaitingResult) return
         if (!isChangingConfigurations) pendingResume = true
         // Leaving the app (Home, another app launched) stops playback, like a normal TV app.
         // HA can still start it again via deep link / MQTT.

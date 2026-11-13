@@ -48,8 +48,10 @@ import dev.sysmoon.ferry.graph
 import dev.sysmoon.ferry.player.TrackOption
 import dev.sysmoon.ferry.player.ZapScope
 import kotlinx.coroutines.launch
+import androidx.tv.material3.Button
+import dev.sysmoon.ferry.player.Zoom
 
-private enum class Picker { AUDIO, SUBTITLES }
+private enum class Picker { AUDIO, SUBTITLES, PICTURE, HIDE }
 
 /**
  * Long-press / Options menu for a channel: favourite and hide, then — while it's the channel
@@ -150,24 +152,17 @@ fun ChannelMenu(
                         MenuRow(FerryIcons.Subtitles, "Subtitles", subs.firstOrNull { it.selected }?.label ?: "Off") { picker = Picker.SUBTITLES }
                     }
                     item("zoom") {
-                        MenuRow(FerryIcons.AspectRatio, "Picture", zoom.label + "  ·  OK to change") { graph.player.cycleZoom() }
+                        MenuRow(FerryIcons.AspectRatio, "Picture", zoom.label) { picker = Picker.PICTURE }
                     }
                 }
                 item("hide") {
-                    MenuRow(FerryIcons.Hide, "Hide channel", "Removed from every list; bring it back from the web page") {
-                        scope.launch {
-                            graph.db.channels().setHidden(primaryId, true)
-                            if (isPlaying) graph.player.stop()
-                            onDismiss()
-                            onHidden()
-                        }
-                    }
+                    MenuRow(FerryIcons.Hide, "Hide channel", "Bring it back from Settings › Hidden channels") { picker = Picker.HIDE }
                 }
                 item("streams-head") {
                     Spacer(Modifier.height(10.dp))
                     Text(
                         if (streams.size > 1) "STREAMS  ·  best first, Ferry falls back down this list" else "STREAM",
-                        color = FerryColors.Faint,
+                        color = FerryColors.Muted,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
@@ -198,13 +193,63 @@ fun ChannelMenu(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         },
-                        trailingContent = if (playing) ({ Tag("Playing", FerryColors.Gold) }) else null,
+                        trailingContent = if (playing) ({ Tag("Playing", FerryColors.Text) }) else null,
                     )
+                }
+            }
+            Picker.PICTURE -> {
+                Text("PICTURE", color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.height(6.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Zoom.entries.forEach { z ->
+                        ListItem(
+                            selected = z == zoom,
+                            onClick = { graph.player.setZoom(z); picker = null },
+                            colors = ferryListItemColors(), border = ferryListItemBorder(), shape = ferryListItemShape(), scale = ferryListItemScale(),
+                            headlineContent = { Text(z.label, style = MaterialTheme.typography.titleSmall) },
+                            supportingContent = {
+                                Text(
+                                    when (z) {
+                                        Zoom.FIT -> "The whole picture, with bars if it isn't widescreen"
+                                        Zoom.FILL -> "Stretched to fill the screen"
+                                        Zoom.ZOOM -> "Enlarged to fill the screen; the edges are cropped"
+                                    },
+                                    color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall,
+                                )
+                            },
+                            trailingContent = if (z == zoom) ({ Icon(FerryIcons.Check, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                            modifier = if (z == zoom) Modifier.focusRequester(first) else Modifier,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Hint("Back  menu")
+            }
+            Picker.HIDE -> {
+                // Asked first: it used to hide on one press, with the web page the only way back.
+                Text("Hide ${primary.displayName}?", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text("It leaves every list on this TV. You can bring it back from Settings › Hidden channels.",
+                    color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = { picker = null }, colors = ferryButtonColors(), modifier = Modifier.focusRequester(first)) { Text("Keep it") }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                graph.db.channels().setHidden(primaryId, true)
+                                if (isPlaying) graph.player.stop()
+                                onDismiss()
+                                onHidden()
+                            }
+                        },
+                        colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder(),
+                    ) { Text("Hide channel") }
                 }
             }
             else -> {
                 val options = if (p == Picker.AUDIO) audio else subs
-                Text(if (p == Picker.AUDIO) "AUDIO TRACK" else "SUBTITLES", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                Text(if (p == Picker.AUDIO) "AUDIO TRACK" else "SUBTITLES", color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
                 Spacer(Modifier.height(6.dp))
                 LazyColumn(
                     Modifier.heightIn(max = 480.dp),

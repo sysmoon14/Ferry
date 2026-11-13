@@ -88,4 +88,45 @@ class RecoveryTest {
         assertEquals(Action.RestartSame, r.onBackstop())
         assertEquals(Action.RestartSame, r.onBackstop())
     }
+
+    @Test
+    fun everyStreamFailingRetriesThreeRoundsThenGivesUp() {
+        r.tuned(2, 0)
+        repeat(Recovery.MAX_ROUNDS) {
+            assertEquals(Action.Switch(1), r.onFailure(hadStarted = false))
+            assertEquals(Action.RetryRound, r.onFailure(hadStarted = false))
+            assertEquals("a new round starts from the best stream", 0, r.index)
+        }
+        assertEquals(Action.Switch(1), r.onFailure(hadStarted = false))
+        assertEquals(Action.GiveUp, r.onFailure(hadStarted = false))
+    }
+
+    @Test
+    fun restartAllowanceComesBackAfterAMinute() {
+        r.tuned(2, 0)
+        repeat(Recovery.MAX_SAME_RESTARTS) { assertEquals(Action.RestartSame, r.onFailure(hadStarted = true)) }
+        assertEquals(Action.Switch(1), r.onFailure(hadStarted = true))
+        now += 61_000
+        assertEquals("a drop a minute later restarts the stream it's on", Action.RestartSame, r.onFailure(hadStarted = true))
+        assertEquals(1, r.index)
+    }
+
+    @Test
+    fun backstopAllowanceComesBackAfterTenMinutes() {
+        r.tuned(1, 0)
+        repeat(Recovery.MAX_BACKSTOPS) { assertEquals(Action.RestartSame, r.onBackstop()) }
+        assertNull(r.onBackstop())
+        now += 10 * 60_000 + 1
+        assertEquals(Action.RestartSame, r.onBackstop())
+    }
+
+    @Test
+    fun tuningAnotherChannelForgetsTheLastOnesFailures() {
+        r.tuned(3, 0)
+        r.onFailure(hadStarted = false)
+        r.onFailure(hadStarted = false)
+        r.tuned(3, 2)
+        assertEquals(2, r.index)
+        assertEquals("starts from the stream after the one picked, wrapping", Action.Switch(0), r.onFailure(hadStarted = false))
+    }
 }

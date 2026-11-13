@@ -6,12 +6,17 @@
 <title>Ferry setup</title>
 <style>
   :root {
-    --bg: #08111d; --panel: #0e1a2b; --line: #1d2c42; --text: #e8edf3; --muted: #8a99ad;
-    --gold: #f2c14e; --sea: #3fa7d6; --bad: #ef6b6b; --radius: 12px;
+    /* The same palette as the TV app (ui/Theme.kt). */
+    --bg: #0a1322; --panel: #142034; --line: #26395a; --text: #f3f6fa; --muted: #a6b2c4;
+    --gold: #f2c14e; --sea: #4fb3e0; --bad: #ff5a5f; --radius: 12px;
   }
+  /* Inter, served by the TV from the copy bundled in the app. */
+  @font-face { font-family: "Inter"; src: url("/inter.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { position: sticky; top: 0; z-index: 2; background: rgba(8,17,29,.92); backdrop-filter: blur(8px);
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
+  .pin { position: sticky; top: 48px; z-index: 1; background: var(--panel); padding: 8px 0; }
+  header { position: sticky; top: 0; z-index: 2; background: rgba(10,19,34,.92); backdrop-filter: blur(8px);
            border-bottom: 1px solid var(--line); padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
   header h1 { margin: 0; font-size: 18px; color: var(--gold); letter-spacing: .02em; }
   header .dev { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -27,7 +32,7 @@
   input:focus, select:focus { outline: 2px solid var(--sea); border-color: transparent; }
   .row { display: flex; gap: 8px; align-items: center; }
   .row > * { flex: 1; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--gold); color: #08111d; border: 0;
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: var(--gold); color: #0a1322; border: 0;
          border-radius: 8px; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
   .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
   .btn.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
@@ -39,7 +44,8 @@
   ul.list li:first-child { border-top: 0; }
   .grow { flex: 1; min-width: 0; } .grow > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .logo { width: 44px; height: 28px; border-radius: 4px; background: var(--bg); object-fit: contain; flex: none; }
-  .icon { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 38px; height: 38px; cursor: pointer; font-size: 16px; flex: none; }
+  .icon { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 38px; height: 38px; cursor: pointer; font-size: 16px; flex: none;
+          display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .icon.on { color: var(--gold); border-color: var(--gold); }
   .now { display: flex; gap: 14px; align-items: center; }
   .now img { width: 72px; height: 44px; object-fit: contain; background: var(--bg); border-radius: 6px; }
@@ -54,21 +60,21 @@
   code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
   .chip { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
-  .chip.on { background: var(--gold); border-color: var(--gold); color: #08111d; font-weight: 600; }
+  .chip.on { background: var(--gold); border-color: var(--gold); color: #0a1322; font-weight: 600; }
   .chip.part { border-color: var(--gold); }
   label.grp, div.grp { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); margin: 0; color: var(--text); font-size: 15px; cursor: pointer; }
   label.grp input, div.grp input { width: 20px; height: 20px; flex: none; accent-color: var(--gold); }
   .sticky { position: sticky; bottom: 0; background: var(--panel); padding: 12px 0 4px; border-top: 1px solid var(--line); }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px; font: inherit; cursor: pointer; }
-  .seg button.on { background: var(--sea); color: #08111d; font-weight: 600; }
+  .seg button.on { background: var(--sea); color: #0a1322; font-weight: 600; }
 </style>
 </head>
 <body>
 
 <div id="pair" hidden>
   <h1 style="color:var(--gold)">Ferry</h1>
-  <p class="muted">Enter the PIN shown on the TV under <b>Settings &amp; pairing</b>.</p>
+  <p class="muted">Enter the PIN shown on the TV under <b>Settings</b>.</p>
   <input id="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000">
   <div class="actions" style="justify-content:center"><button class="btn" id="pairBtn">Pair</button></div>
   <p id="pairErr" class="bad"></p>
@@ -79,9 +85,9 @@
   <nav id="tabs">
     <button data-tab="now" class="on">Now</button>
     <button data-tab="sources">Sources</button>
-    <button data-tab="groups">Groups</button>
     <button data-tab="channels">Channels</button>
-    <button data-tab="favs">Favourites</button>
+    <button data-tab="guide">Guide</button>
+    <button data-tab="sports">Sports</button>
     <button data-tab="ha">Home Assistant</button>
     <button data-tab="device">Device</button>
   </nav>
@@ -100,15 +106,16 @@
           </div>
         </div>
         <div class="actions">
-          <button class="btn ghost" data-key="up">▲ Ch</button>
-          <button class="btn ghost" data-key="down">▼ Ch</button>
-          <button class="btn ghost" data-key="pause">⏯</button>
-          <button class="btn ghost" data-key="stop">■ Stop</button>
-          <button class="btn ghost" data-key="last">↺ Last</button>
+          <button class="btn ghost" data-key="up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg> Channel up</button>
+          <button class="btn ghost" data-key="down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg> Channel down</button>
+          <button class="btn ghost" data-key="pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Pause / play</button>
+          <button class="btn ghost" data-key="stop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12v12H6z"/></svg> Stop</button>
+          <button class="btn ghost" data-key="last"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg> Last channel</button>
         </div>
       </div>
     </section>
 
+    <!-- Sources -->
     <!-- Sources -->
     <section id="sources">
       <div class="card">
@@ -145,36 +152,22 @@
           <button class="btn ghost" id="srcCancel" hidden>Cancel</button>
         </div>
       </div>
-      <div class="card">
-        <h2>Backup guide data</h2>
-        <p class="muted small">Used only for channels your provider's guide leaves empty. With the Sky layout on, Ferry first fills Sky-matched channels from Sky's own schedule. Add XMLTV feed URLs below (one per line, .xml or .xml.gz) for anything still missing; channels are matched by guide ID or name.</p>
-        <textarea id="bkUrls" rows="3" placeholder="https://example.com/guide_uk.xml.gz" style="width:100%"></textarea>
-        <label class="row" style="gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="bkSports" style="width:auto;flex:none"> Sports guides from other countries</label>
-        <p class="muted small">Fills listings for foreign sports channels (beIN, Canal+, DAZN, ESPN…), hidden groups included, from free per-country guides (epgshare01), so ⚽ Football can find matches on them. Downloads a few guide files every 6 hours.</p>
-        <p class="small" id="bkStatus"></p>
-        <div class="actions">
-          <button class="btn" id="bkSave">Save feeds</button>
-          <button class="btn ghost" id="bkFill">Fill gaps now</button>
-        </div>
-      </div>
-      <div class="card">
-        <h2>⚽ Football</h2>
-        <p class="muted small">Competitions shown on the Sports screen (fixtures from ESPN, free). Each one is a tab; My teams covers all of them.</p>
-        <div id="compList" class="row" style="flex-wrap:wrap;gap:8px 18px"></div>
-      </div>
     </section>
-
-    <!-- Groups -->
-    <section id="groups">
+    <!-- Channels: the list, groups, favourites order, duplicates -->
+    <section id="channels">
       <div class="card">
-        <h2>Sky layout</h2>
-        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="skyOn" style="width:auto;flex:none"> Number and group channels like Sky</label>
-        <p class="muted small">Ferry fetches Sky's channel list for your region and matches it to your playlist. Matched channels get their Sky number (101 BBC One, 401 Sky Sports Main Event) and appear in Sky's sections in Sky order; typing a number on the remote tunes it.</p>
-        <div class="row"><label class="small muted" style="flex:none">Sky region</label><select id="skyRegion"></select></div>
-        <p class="small" id="skyStatus"></p>
-        <div id="skyNotes" class="small" style="margin:6px 0"></div>
-        <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist — pick one by hand</summary><div id="skyMissing" class="small" style="margin-top:6px"></div></details>
-        <div class="actions"><button class="btn" id="skySave">Save Sky layout</button></div>
+        <h2>Channels</h2>
+        <div class="row pin">
+          <input id="chQ" placeholder="Search channels" type="search">
+          <select id="chGroup" style="flex:.8"><option value="">All groups</option></select>
+        </div>
+        <div class="actions" id="groupActions" hidden>
+          <button class="btn ghost" id="hideGroup">Hide this group</button>
+          <button class="btn ghost" id="showGroup">Show this group</button>
+        </div>
+        <ul class="list" id="chList" style="margin-top:8px"></ul>
+        <div class="pager"><span class="muted small" id="chInfo"></span></div>
+        <div id="chMore"></div>
       </div>
       <div class="card">
         <h2>Groups</h2>
@@ -199,42 +192,50 @@
         </div>
       </div>
       <div class="card">
-        <h2>Duplicate channels</h2>
-        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="mergeDup" style="width:auto;flex:none"> Merge duplicate channels</label>
-        <p class="muted small">Channels in the same group with the same guide ID and name (ignoring tags like FHD, 720p or backup) become one row. The TV plays the best stream — highest resolution, then frame rate — and falls back to the others if it fails. Hold OK on a channel to pick a stream yourself. Changing this refreshes your playlists.</p>
-      </div>
-    </section>
-
-    <!-- Channels -->
-    <section id="channels">
-      <div class="card">
-        <div class="row">
-          <input id="chQ" placeholder="Search channels" type="search">
-          <select id="chGroup" style="flex:.8"><option value="">All groups</option></select>
-        </div>
-        <div class="actions" id="groupActions" hidden>
-          <button class="btn ghost" id="hideGroup">Hide this group</button>
-          <button class="btn ghost" id="showGroup">Show this group</button>
-        </div>
-        <ul class="list" id="chList" style="margin-top:8px"></ul>
-        <div class="pager">
-          <button class="btn ghost" id="chPrev">‹ Prev</button>
-          <span class="muted small" id="chInfo"></span>
-          <button class="btn ghost" id="chNext">Next ›</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Favourites order -->
-    <section id="favs">
-      <div class="card">
         <h2>Favourites order</h2>
         <p class="muted small">This order is used on the TV and for the Home Assistant channel selector.</p>
         <ul class="list" id="favList"></ul>
         <div class="actions"><button class="btn" id="favSave" disabled>Save order</button></div>
       </div>
+      <div class="card">
+        <h2>Duplicate channels</h2>
+        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="mergeDup" style="width:auto;flex:none"> Merge duplicate channels</label>
+        <p class="muted small">Channels in the same group with the same guide ID and name (ignoring tags like FHD, 720p or backup) become one row. The TV plays the best stream — highest resolution, then frame rate — and falls back to the others if it fails. Hold OK on a channel to pick a stream yourself. Changing this refreshes your playlists.</p>
+      </div>
     </section>
-
+    <!-- Guide: Sky layout and backup listings -->
+    <section id="guide">
+      <div class="card">
+        <h2>Sky layout</h2>
+        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="skyOn" style="width:auto;flex:none"> Number and group channels like Sky</label>
+        <p class="muted small">Ferry fetches Sky's channel list for your region and matches it to your playlist. Matched channels get their Sky number (101 BBC One, 401 Sky Sports Main Event) and appear in Sky's sections in Sky order; typing a number on the remote tunes it.</p>
+        <div class="row"><label class="small muted" style="flex:none">Sky region</label><select id="skyRegion"></select></div>
+        <p class="small" id="skyStatus"></p>
+        <div id="skyNotes" class="small" style="margin:6px 0"></div>
+        <details id="skyMissingBox" hidden><summary class="small muted">Sky channels not found in your playlist — pick one by hand</summary><div id="skyMissing" class="small" style="margin-top:6px"></div></details>
+        <div class="actions"><button class="btn" id="skySave">Save Sky layout</button></div>
+      </div>
+      <div class="card">
+        <h2>Backup guide data</h2>
+        <p class="muted small">Used only for channels your provider's guide leaves empty. With the Sky layout on, Ferry first fills Sky-matched channels from Sky's own schedule. Add XMLTV feed URLs below (one per line, .xml or .xml.gz) for anything still missing; channels are matched by guide ID or name.</p>
+        <textarea id="bkUrls" rows="3" placeholder="https://example.com/guide_uk.xml.gz" style="width:100%"></textarea>
+        <label class="row" style="gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="bkSports" style="width:auto;flex:none"> Sports guides from other countries</label>
+        <p class="muted small">Fills listings for foreign sports channels (beIN, Canal+, DAZN, ESPN…), hidden groups included, from free per-country guides (epgshare01), so the football finder can find matches on them. Downloads a few guide files every 6 hours.</p>
+        <p class="small" id="bkStatus"></p>
+        <div class="actions">
+          <button class="btn" id="bkSave">Save feeds</button>
+          <button class="btn ghost" id="bkFill">Fill gaps now</button>
+        </div>
+      </div>
+    </section>
+    <!-- Sports -->
+    <section id="sports">
+      <div class="card">
+        <h2>Football competitions</h2>
+        <p class="muted small">Competitions shown on the Sports screen (fixtures from ESPN, free). Each one is a tab; My teams covers all of them.</p>
+        <div id="compList" class="row" style="flex-wrap:wrap;gap:8px 18px"></div>
+      </div>
+    </section>
     <!-- Home Assistant -->
     <section id="ha">
       <div class="card">
@@ -242,6 +243,7 @@
         <label class="row" style="color:var(--text)"><span>Enabled</span><input type="checkbox" id="mEnabled" style="width:auto;flex:none"></label>
         <label>Broker host</label><input id="mHost" placeholder="homeassistant.local">
         <label>Port</label><input id="mPort" type="number" value="1883">
+        <label class="row" style="color:var(--text)"><span>Use TLS <span class="muted">(encrypted; usually port 8883)</span></span><input type="checkbox" id="mTls" style="width:auto;flex:none"></label>
         <label>Username</label><input id="mUser" autocomplete="off">
         <label>Password</label><input id="mPass" type="password" autocomplete="new-password">
         <label>Discovery prefix</label><input id="mPrefix" value="homeassistant">
@@ -259,7 +261,6 @@
         <p class="muted small" id="npLink"></p>
       </div>
     </section>
-
     <!-- Device -->
     <section id="device">
       <div class="card">
@@ -290,7 +291,8 @@
         <h2>Backup &amp; sync</h2>
         <p class="muted small">Copy this Ferry's setup to another box: playlists and logins, options, Sky layout, groups, favourites and channel order.
           Export here, then open the other Ferry's web page and import the file. The other box keeps its own name, pairing and Home Assistant identity, and downloads its own guide.</p>
-        <p class="muted small">The file contains your playlist passwords, so keep it private.</p>
+        <label class="row" style="gap:10px;align-items:center"><input type="checkbox" id="bSecrets" style="width:auto;flex:none"> Include passwords (playlist logins and the MQTT password)</label>
+        <p class="muted small">Left out unless you tick the box. Without them, playlists the other box already has keep their logins; new ones need the password entered there. With them, keep the file private.</p>
         <div class="actions">
           <button class="btn" id="bExport">Export settings</button>
           <button class="btn" id="bImport">Import settings…</button>
@@ -311,7 +313,7 @@
           <div id="syncPeers"></div>
           <label>Or enter its address</label>
           <input id="syncUrl" placeholder="192.168.1.20 or http://192.168.1.20:8765">
-          <label>Its pairing PIN <span class="muted">(Settings &amp; pairing on that box)</span></label>
+          <label>Its pairing PIN <span class="muted">(Settings on that box)</span></label>
           <input id="syncPin" inputmode="numeric" maxlength="6" placeholder="123456">
           <div class="actions"><button class="btn" id="syncFollow">Follow</button></div>
         </div>
@@ -319,7 +321,8 @@
       </div>
       <div class="card">
         <h2>Paired devices</h2>
-        <p class="muted small">Unpairing signs out every phone and browser, including this one.</p>
+        <p class="muted small">Phones, Home Assistant and other Ferry boxes paired with this one. A device that hasn't connected for 90 days is unpaired by itself.</p>
+        <ul class="list" id="devList"></ul>
         <div class="actions"><button class="btn danger" id="unpair">Unpair all</button></div>
       </div>
     </section>
@@ -334,6 +337,14 @@
     const n = Object.assign(document.createElement(tag), props);
     kids.flat().forEach(k => n.append(k instanceof Node ? k : document.createTextNode(k ?? "")));
     return n;
+  };
+  // Icons as SVG (the same shapes as the TV app), so they look the same on every phone.
+  const ICONS = {"star": "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z", "starOutline": "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z", "hidden": "M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z", "visible": "M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z", "play": "M8 5v14l11-7z", "pause": "M6 19h4V5H6v14zm8-14v14h4V5h-4z", "stop": "M6 6h12v12H6z", "up": "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z", "down": "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z", "check": "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z", "refresh": "M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z", "edit": "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z", "close": "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z", "last": "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"};
+  const icon = (name) => {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    const p = document.createElementNS(NS, "path"); p.setAttribute("d", ICONS[name]); svg.append(p);
+    return svg;
   };
   const store = {
     get: () => { try { return localStorage.getItem("ferry.token"); } catch { return null; } },
@@ -432,7 +443,7 @@
       const res = await api(`/bbc/check?region=${encodeURIComponent(region)}`);
       const ok = res.filter(r => r.ok).length;
       alert(`${ok} of ${res.length} BBC channels available\n\n` +
-        res.map(r => `${r.ok ? "✓" : "✕"} ${r.channel}${r.ok ? ` (${r.service})` : ` — ${r.detail}`}`).join("\n"));
+        res.map(r => `${r.ok ? "OK" : "Failed"}: ${r.channel}${r.ok ? ` (${r.service})` : ` — ${r.detail}`}`).join("\n"));
     } catch (e) { toast(e.message); }
   }
 
@@ -464,12 +475,12 @@
       el("div", { className: "grow" },
         el("div", {}, s.name, " ", el("span", { className: "pill" }, { XTREAM: "Xtream", BBC: "BBC", M3U: "M3U" }[s.type] || s.type)),
         el("div", { className: "small " + (s.lastError ? "bad" : "muted") },
-          s.lastError ? `⚠ ${s.lastError}` :
+          s.lastError ? `Error: ${s.lastError}` :
           s.lastRefreshed ? `${s.channelCount} channels · updated ${new Date(s.lastRefreshed).toLocaleString()}` : "Importing…")),
-      el("button", { className: "icon", title: "Refresh", onclick: async () => { await api(`/sources/${s.id}/refresh`, { method: "POST" }); toast("Refreshing"); setTimeout(loadSources, 4000); } }, "↻"),
-      s.type === "BBC" ? el("button", { className: "icon", title: "Check BBC streams", onclick: () => checkBbc(s.url) }, "✓") : "",
-      el("button", { className: "icon", title: "Edit", onclick: () => edit(s) }, "✎"),
-      el("button", { className: "icon", title: "Delete", onclick: async () => { if (confirm(`Delete ${s.name} and its channels?`)) { await api(`/sources/${s.id}`, { method: "DELETE" }); loadSources(); } } }, "✕"),
+      el("button", { className: "icon", title: "Refresh", onclick: async () => { await api(`/sources/${s.id}/refresh`, { method: "POST" }); toast("Refreshing"); setTimeout(loadSources, 4000); } }, icon("refresh")),
+      s.type === "BBC" ? el("button", { className: "icon", title: "Check BBC streams", onclick: () => checkBbc(s.url) }, icon("check")) : "",
+      el("button", { className: "icon", title: "Edit", onclick: () => edit(s) }, icon("edit")),
+      el("button", { className: "icon", title: "Delete", onclick: async () => { if (confirm(`Delete ${s.name} and its channels?`)) { await api(`/sources/${s.id}`, { method: "DELETE" }); loadSources(); } } }, icon("close")),
     )));
   }
   function edit(s) {
@@ -513,41 +524,58 @@
     try { await api("/guide/fill", { method: "POST" }); await loadBackup(); toast("Done"); } catch (e) { toast(e.message); }
     $("bkFill").disabled = false;
   };
-  loaders.sources = () => { loadSources(); loadBackup().catch(() => {}); };
+  loaders.sources = () => { loadSources(); };
+  loaders.guide = () => { loadSky().catch(e => { $("skyStatus").textContent = e.message; }); loadBackup().catch(() => {}); };
+  loaders.sports = () => { loadBackup().catch(e => toast(e.message)); };
 
   // ---------- Channels
-  const PAGE = 100; let chOffset = 0, chTotal = 0, qTimer;
+  // The list loads as you scroll: the next 100 arrive when the end comes into view.
+  const PAGE = 100; let chOffset = 0, chTotal = 0, qTimer, chLoading = false, chGen = 0;
   async function loadGroups() {
     const groups = await api("/groups"), current = $("chGroup").value;
     $("chGroup").replaceChildren(el("option", { value: "" }, "All groups"), ...groups.map(g => el("option", { value: g }, g)));
     $("chGroup").value = current;
   }
-  async function loadChannels() {
-    const q = encodeURIComponent($("chQ").value), g = encodeURIComponent($("chGroup").value);
-    const page = await api(`/channels?q=${q}&group=${g}&limit=${PAGE}&offset=${chOffset}`);
-    chTotal = page.total;
-    $("chInfo").textContent = chTotal ? `${chOffset + 1}–${Math.min(chOffset + PAGE, chTotal)} of ${chTotal}` : "No channels";
-    $("chPrev").disabled = chOffset === 0; $("chNext").disabled = chOffset + PAGE >= chTotal;
-    $("groupActions").hidden = !$("chGroup").value;
-    $("chList").replaceChildren(...page.items.map(c => {
-      const fav = el("button", { className: "icon" + (c.favourite ? " on" : ""), title: "Favourite" }, c.favourite ? "★" : "☆");
-      const hide = el("button", { className: "icon" + (c.hidden ? " on" : ""), title: c.hidden ? "Hidden" : "Visible" }, c.hidden ? "⊘" : "◉");
-      fav.onclick = async () => { c.favourite = !c.favourite; await api(`/channels/${c.id}`, { method: "PATCH", body: { favourite: c.favourite } }); fav.className = "icon" + (c.favourite ? " on" : ""); fav.textContent = c.favourite ? "★" : "☆"; };
-      hide.onclick = async () => { c.hidden = !c.hidden; await api(`/channels/${c.id}`, { method: "PATCH", body: { hidden: c.hidden } }); hide.className = "icon" + (c.hidden ? " on" : ""); hide.textContent = c.hidden ? "⊘" : "◉"; };
-      const play = el("button", { className: "icon", title: "Play on TV", onclick: () => api("/play", { method: "POST", body: { channelId: c.id } }).then(() => toast(`Playing ${c.name}`)).catch(e => toast(e.message)) }, "▶");
-      const logo = c.logo ? el("img", { className: "logo", src: c.logo, loading: "lazy", alt: "" }) : el("span", { className: "logo" });
-      return el("li", {}, logo,
-        el("div", { className: "grow" }, el("div", {}, c.name), el("div", { className: "small muted" }, [c.group, c.tvgId, c.streams > 1 ? `${c.streams} streams` : null].filter(Boolean).join(" · "))),
-        play, fav, hide);
-    }));
+  function channelRow(c) {
+    const fav = el("button", { className: "icon" + (c.favourite ? " on" : ""), title: "Favourite", ariaLabel: "Favourite" }, icon(c.favourite ? "star" : "starOutline"));
+    const hide = el("button", { className: "icon" + (c.hidden ? " on" : ""), title: c.hidden ? "Hidden" : "Visible", ariaLabel: "Hide or show" }, icon(c.hidden ? "hidden" : "visible"));
+    fav.onclick = async () => {
+      c.favourite = !c.favourite; await api(`/channels/${c.id}`, { method: "PATCH", body: { favourite: c.favourite } });
+      fav.className = "icon" + (c.favourite ? " on" : ""); fav.replaceChildren(icon(c.favourite ? "star" : "starOutline"));
+    };
+    hide.onclick = async () => {
+      c.hidden = !c.hidden; await api(`/channels/${c.id}`, { method: "PATCH", body: { hidden: c.hidden } });
+      hide.className = "icon" + (c.hidden ? " on" : ""); hide.title = c.hidden ? "Hidden" : "Visible"; hide.replaceChildren(icon(c.hidden ? "hidden" : "visible"));
+    };
+    const play = el("button", { className: "icon", title: "Play on TV", ariaLabel: "Play on TV", onclick: () => api("/play", { method: "POST", body: { channelId: c.id } }).then(() => toast(`Playing ${c.name}`)).catch(e => toast(e.message)) }, icon("play"));
+    const logo = c.logo ? el("img", { className: "logo", src: c.logo, loading: "lazy", alt: "" }) : el("span", { className: "logo" });
+    return el("li", {}, logo,
+      el("div", { className: "grow" }, el("div", {}, c.name), el("div", { className: "small muted" }, [c.group, c.tvgId, c.streams > 1 ? `${c.streams} streams` : null].filter(Boolean).join(" · "))),
+      play, fav, hide);
   }
-  $("chQ").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { chOffset = 0; loadChannels(); }, 250); };
-  $("chGroup").onchange = () => { chOffset = 0; loadChannels(); };
-  $("chPrev").onclick = () => { chOffset = Math.max(0, chOffset - PAGE); loadChannels(); };
-  $("chNext").onclick = () => { chOffset += PAGE; loadChannels(); };
+  async function loadChannels(reset = true) {
+    if (reset) { chOffset = 0; chGen++; } else if (chLoading) return;
+    const gen = chGen; chLoading = true;
+    try {
+      const q = encodeURIComponent($("chQ").value), g = encodeURIComponent($("chGroup").value);
+      const page = await api(`/channels?q=${q}&group=${g}&limit=${PAGE}&offset=${chOffset}`);
+      if (gen !== chGen) return; // a newer search has started
+      chTotal = page.total;
+      const rows = page.items.map(channelRow);
+      if (reset) $("chList").replaceChildren(...rows); else $("chList").append(...rows);
+      chOffset += page.items.length;
+      $("chInfo").textContent = chTotal ? `Showing ${Math.min(chOffset, chTotal).toLocaleString()} of ${chTotal.toLocaleString()}` : "No channels";
+      $("groupActions").hidden = !$("chGroup").value;
+    } finally { if (gen === chGen) chLoading = false; }
+  }
+  new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && chOffset < chTotal) loadChannels(false).catch(e => toast(e.message));
+  }, { rootMargin: "600px" }).observe($("chMore"));
+  $("chQ").oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => loadChannels(), 250); };
+  $("chGroup").onchange = () => loadChannels();
   $("hideGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: true } }); loadChannels(); };
   $("showGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: false } }); loadChannels(); };
-  loaders.channels = () => { loadGroups(); loadChannels(); };
+  loaders.channels = () => { loadGroups(); loadChannels(); loaders.groups(); loaders.favs(); };
 
   // ---------- Duplicate merging
   async function loadOptions() {
@@ -688,8 +716,8 @@
     $("favList").replaceChildren(...favs.map((c, i) => el("li", {},
       el("span", { className: "muted small", style: "width:24px" }, String(i + 1)),
       el("div", { className: "grow" }, el("div", {}, c.name)),
-      el("button", { className: "icon", disabled: i === 0, onclick: () => move(i, -1) }, "↑"),
-      el("button", { className: "icon", disabled: i === favs.length - 1, onclick: () => move(i, 1) }, "↓"),
+      el("button", { className: "icon", disabled: i === 0, onclick: () => move(i, -1) }, icon("up")),
+      el("button", { className: "icon", disabled: i === favs.length - 1, onclick: () => move(i, 1) }, icon("down")),
     )));
     if (!favs.length) $("favList").append(el("li", { className: "muted small" }, "Star channels in the Channels tab first."));
   }
@@ -701,18 +729,18 @@
   const mqttBody = () => ({
     enabled: $("mEnabled").checked, host: $("mHost").value, port: +$("mPort").value || 1883,
     username: $("mUser").value, password: $("mPass").value || null,
-    discoveryPrefix: $("mPrefix").value, baseTopic: $("mBase").value,
+    discoveryPrefix: $("mPrefix").value, baseTopic: $("mBase").value, tls: $("mTls").checked,
   });
   loaders.ha = async () => {
     const m = await api("/mqtt");
     $("mEnabled").checked = m.enabled; $("mHost").value = m.host; $("mPort").value = m.port; $("mUser").value = m.username;
     $("mPass").value = ""; $("mPass").placeholder = m.hasPassword ? "•••••• (unchanged)" : "";
-    $("mPrefix").value = m.discoveryPrefix; $("mBase").value = m.baseTopic;
+    $("mPrefix").value = m.discoveryPrefix; $("mBase").value = m.baseTopic; $("mTls").checked = !!m.tls;
   };
   $("mSave").onclick = async () => { try { await api("/mqtt", { method: "PUT", body: mqttBody() }); toast("Saved"); loaders.ha(); } catch (e) { toast(e.message); } };
   $("mTest").onclick = async () => {
     $("mResult").textContent = "Connecting…"; $("mResult").className = "small muted";
-    try { const r = await api("/mqtt/test", { method: "POST", body: mqttBody() }); $("mResult").textContent = r.ok ? "✓ Connected" : `✕ ${r.message}`; $("mResult").className = "small " + (r.ok ? "" : "bad"); }
+    try { const r = await api("/mqtt/test", { method: "POST", body: mqttBody() }); $("mResult").textContent = r.ok ? "Connected" : `Couldn't connect: ${r.message}`; $("mResult").className = "small " + (r.ok ? "" : "bad"); }
     catch (e) { $("mResult").textContent = e.message; $("mResult").className = "small bad"; }
   };
 
@@ -725,12 +753,28 @@
     $("dLog").href = "/api/debug/log?token=" + encodeURIComponent(token);
     $("dCrash").href = "/api/debug/crash?token=" + encodeURIComponent(token);
     loadSync();
+    loadDevices().catch(e => toast(e.message));
   };
+  const fmtDay = (ms) => ms ? new Date(ms).toLocaleDateString() : "unknown";
+  async function loadDevices() {
+    const list = await api("/tokens");
+    $("devList").replaceChildren(...list.map(d => el("li", {},
+      el("div", { className: "grow" },
+        el("div", {}, d.label + (d.current ? " (this device)" : "")),
+        el("div", { className: "small muted" }, `Paired ${fmtDay(d.pairedAt)} · last used ${fmtDay(d.lastUsedAt)}`)),
+      el("button", { className: "btn ghost", onclick: async () => {
+        if (!confirm(d.current ? "Unpair this device? You'll need the PIN to get back in." : `Unpair "${d.label}"?`)) return;
+        try {
+          await api(`/tokens/${d.id}`, { method: "DELETE" });
+          if (d.current) { store.set(null); token = null; showPair(); } else loadDevices();
+        } catch (e) { toast(e.message); }
+      } }, "Unpair"))));
+  }
   $("dIdle").onchange = () => api("/options", { method: "PUT", body: { idleStopHours: Number($("dIdle").value) } })
     .then(() => toast("Saved")).catch(e => toast(e.message));
   $("dResume").onchange = () => api("/options", { method: "PUT", body: { resumeLastChannel: $("dResume").checked } })
     .then(() => toast("Saved")).catch(e => toast(e.message));
-  $("dSave").onclick = async () => { await api("/device", { method: "PUT", body: { name: $("dName").value } }); toast("Saved — restart Ferry to update HA device name"); };
+  $("dSave").onclick = async () => { await api("/device", { method: "PUT", body: { name: $("dName").value } }); toast("Saved — Home Assistant picks up the new name in a moment"); };
   function renderSync(st) {
     $("syncOn").hidden = !st.following; $("syncOff").hidden = st.following;
     $("syncErr").textContent = st.lastError || "";
@@ -762,13 +806,14 @@
 
   $("bExport").onclick = async () => {
     try {
-      const data = await api("/export");
+      const data = await api("/export" + ($("bSecrets").checked ? "?secrets=1" : ""));
       const name = (data.from || "ferry").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       const day = new Date().toISOString().slice(0, 10);
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
       const a = el("a", { href: url, download: `ferry-${name}-${day}.json` });
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      $("bResult").textContent = `Exported ${data.sources.length} playlist(s) and ${data.channels.length} channel choices.`;
+      $("bResult").textContent = `Exported ${data.sources.length} playlist(s) and ${data.channels.length} channel choices` +
+        (data.includesPasswords ? ", with passwords." : ", without passwords.");
     } catch (e) { toast(e.message); }
   };
   $("bImport").onclick = () => $("bFile").click();

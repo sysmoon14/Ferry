@@ -59,12 +59,12 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
 
 ## First run
 
-1. Launch Ferry, go to **Settings** in the main menu.
+1. Launch Ferry. With no playlists yet it opens on **Settings**, which shows the pairing code.
 2. Scan the QR code with your phone. It opens the config page and pairs automatically (the QR carries the PIN).
 3. **Sources → Add**: paste an M3U URL (+ optional EPG URL) or Xtream server/username/password.
-4. **Groups**: tick the provider groups to **Use**. With the Sky layout on, tick **Own section** for any group
+4. **Channels → Groups**: tick the provider groups to **Use**. With the Sky layout on, tick **Own section** for any group
    you want as its own entry in the guide alongside Sky's sections.
-5. **Home Assistant**: enter your MQTT broker, *Test connection*, *Save*.
+5. **Home Assistant**: enter your MQTT broker (tick **Use TLS** if it needs it), *Test connection*, *Save*.
 
 Setting up a second box? Use **Device → Backup & sync** instead (below).
 
@@ -98,7 +98,7 @@ Everything is in `ui/Theme.kt` (colours, type, shapes, focus, tags, dialogs, ico
   **CH+/CH−** page a screenful of channels; **Play/Pause** jumps the grid back to now.
 - Programmes are loaded for the rows on screen (plus a margin) as you scroll, so long lists stay quick.
 - **OK** on a live programme plays it; on a past programme with catch-up it plays from the start; on one that
-  hasn't started it sets (or clears) a reminder, shown with 🔔.
+  hasn't started it sets (or clears) a reminder, shown with a bell.
 - **Long-press OK** on a channel: favourite it, hide it, or pick which of its streams to play.
 - **🔍 Search** (main menu) finds programmes and channels as you type. OK plays, plays catch-up,
   or sets a reminder, depending on when the programme is on.
@@ -211,9 +211,9 @@ never goes blank mid-refresh.
 
 After each refresh Ferry looks for channels with nothing in the guide for the next few hours and fills them,
 first from Sky's own schedules (for Sky-matched channels), then from any **backup guide data** XMLTV URLs
-added under **Sources**.
+added under **Guide**.
 
-**Sports guides from other countries** (on by default, under **Sources**) then fills foreign sports channels
+**Sports guides from other countries** (on by default, under **Guide**) then fills foreign sports channels
 — hidden ones too — from the free [epgshare01](https://epgshare01.online/epgshare01/) guides, so the football
 finder can see what they're showing. beIN's own guide comes first (it also covers the Arabic "AR:" beIN
 channels), then up to 14 countries, football-rights markets first (UK, IE, ES, PT, FR, IT, DE, NL, Nordics,
@@ -227,7 +227,9 @@ ZA, AU, US…). A channel's country comes from its name or group ("NO: V Sport 1
 logins), options, Sky layout and picks, group choices, favourites and channel order. On the other box's web
 page, **Import settings…** makes it match: playlists already there (same server and login) are kept,
 others are added, and ones not in the file are removed. Each box keeps its own name, pairing and Home
-Assistant identity, and downloads its own guide. The file contains passwords, so keep it private.
+Assistant identity, and downloads its own guide. Passwords (playlist logins and the MQTT password) are left
+out unless you tick **Include passwords**; without them, playlists the other box already has keep their
+logins. With them, keep the file private.
 
 **Keep in sync** (same card) makes a box follow another Ferry: pick it from **Find Ferry boxes** (or enter
 its address), type the PIN shown on its **Settings** screen, and it copies the setup straight
@@ -264,11 +266,12 @@ Each TV's device page has a **Visit** link to its web setup page.
 | Entity | What it does |
 |---|---|
 | `select.<name>_channel` | Favourites; choosing one tunes the TV |
-| `sensor.<name>_state` | idle / buffering / playing / paused / error. Attributes include the stream playing, `resolution`, `frame_rate`, `bitrate_kbps`, `video_codec`, `audio_codec`, `dropped_frames`, `buffer_seconds`, `hdr`, `tunnelled` |
-| `sensor.<name>_channel_name`, `_programme`, `_next_programme` | With full JSON attributes (logo, tvg_id, times, description, deep link) |
+| `sensor.<name>_state` | idle / buffering / playing / paused / error. Its attributes carry the details: channel, logo, tvg_id, programme times and description, the stream playing, `hdr`, the deep link |
+| `sensor.<name>_channel_name`, `_programme`, `_next_programme` | The names only (the details are attributes of `_state`, so Home Assistant's recorder stores them once) |
+| `sensor.<name>_resolution`, `_bitrate`, `_dropped_frames`, `_buffer` | Picture quality (diagnostic). `_resolution` also has `frame_rate`, `video_codec`, `audio_codec` and `tunnelled` as attributes |
 | `sensor.<name>_progress` | Programme progress % |
 | `button.<name>_channel_up` / `_channel_down` / `_stop` / `_pause` / `_previous_channel` / `_live` | Remote keys |
-| `image.<name>_channel_logo` | Logo of the channel playing |
+| `image.<name>_channel_logo` | Logo of the channel playing; Ferry's icon when nothing is |
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `sensor.<name>_next_match` | Kick-off of the next match for My teams (timestamp), with title, competition, score and `deep_link` attributes |
@@ -285,7 +288,8 @@ base/cmd/play       tvg:BBCOne.uk | id:<channelId> | number:101 | 101 | <channel
 base/cmd/channel    favourite name (used by the select)
 base/cmd/key        up | down | stop | pause | previous_channel | live
 base/cmd/sleep      minutes (0 = off)
-base/logo           logo URL of the channel playing
+base/stats          picture quality (JSON, retained): resolution, bitrate_kbps, dropped_frames, buffer_seconds…
+base/logo           logo URL of the channel playing (Ferry's icon when idle)
 base/reminders      next reminder + list (JSON)
 base/event          {"event_type": "reminder" | "sleep" | "failover" | "backstop", ...} (not retained)
 ```
@@ -330,7 +334,9 @@ NFC tags can hold the `ferry://` URI directly.
 
 ### REST (for `rest_command`)
 
-Pair once to get a token (`POST /api/pair {"pin":"123456"}`), then:
+Pair once to get a token (`POST /api/pair {"pin":"123456","label":"Home Assistant"}`), then use it as below.
+The web page's **Device → Paired devices** lists everything paired and can unpair one at a time; a token that
+isn't used for 90 days stops working.
 
 ```yaml
 rest_command:
@@ -364,13 +370,15 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | GET/PUT | `/mqtt` | passwords are write-only |
 | POST | `/mqtt/test` | |
 | PUT | `/device` | `{name}` |
+| GET | `/tokens` | paired devices: `id`, `label`, `pairedAt`, `lastUsedAt`, `current` |
+| DELETE | `/tokens/{id}` | unpair one device |
 | POST | `/tokens/revoke` | unpair everything |
 | GET/PUT | `/groups/detail`, `/groups/visible` | group list with hidden state / set the groups to use |
 | GET/PUT | `/sky` | Sky layout status / `{enabled, region, extraGroups}` |
 | PUT | `/sky/override` | `{number, channelId?}` manual Sky match (null clears) |
 | GET/PUT | `/options` | `{mergeDuplicates?, resumeLastChannel?, backupEpgUrls?, sportsGuides?, idleStopHours?, competitions?}` (GET lists `allCompetitions`) |
 | POST | `/guide/fill` | fill guide gaps now |
-| GET | `/export` | settings export (includes playlist passwords) |
+| GET | `/export` | settings export; add `?secrets=1` to include playlist and MQTT passwords |
 | POST | `/import` | apply an export to this box |
 | GET/PUT/DELETE | `/sync` | follow status / follow `{url, pin}` / stop following |
 | GET | `/sync/peers` | other Ferry boxes found on the network |

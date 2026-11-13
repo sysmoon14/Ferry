@@ -43,6 +43,8 @@ import dev.sysmoon.ferry.R
 import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.data.shownNumber
 import dev.sysmoon.ferry.graph
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 val MINI_WIDTH: Dp = 208.dp
 val MINI_HEIGHT: Dp = 117.dp
@@ -107,16 +109,31 @@ fun VideoLayer(full: Boolean, show: Boolean, animate: Boolean = true) {
                     Text("Can't play this channel", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.align(Alignment.Center).padding(12.dp))
                 }
-                Column(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
-                        .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 4.dp)
+                // The caption says what this is when the tile appears or the channel/programme
+                // changes, then gets out of the way of a small picture.
+                var caption by remember { mutableStateOf(true) }
+                LaunchedEffect(channel.id, np.now?.start) {
+                    caption = true
+                    kotlinx.coroutines.delay(6_000)
+                    caption = false
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = caption,
+                    enter = androidx.compose.animation.fadeIn(tween(200)),
+                    exit = androidx.compose.animation.fadeOut(tween(600)),
+                    modifier = Modifier.align(Alignment.BottomStart),
                 ) {
-                    Text(channel.displayName.uppercase(), color = FerryColors.Gold,
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    np.now?.let {
-                        Text((if (np.catchup) "Catch-up · " else "") + it.title, color = FerryColors.Text,
-                            style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
+                            .padding(start = 8.dp, end = 8.dp, top = 14.dp, bottom = 4.dp)
+                    ) {
+                        Text(channel.displayName.uppercase(), color = FerryColors.Muted,
+                            style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        np.now?.let {
+                            Text((if (np.catchup) "Catch-up · " else "") + it.title, color = FerryColors.Text,
+                                style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }

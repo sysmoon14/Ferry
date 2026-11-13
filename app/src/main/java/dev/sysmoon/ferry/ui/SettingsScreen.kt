@@ -49,6 +49,10 @@ import dev.sysmoon.ferry.net.Network
 import dev.sysmoon.ferry.update.UpdateState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import kotlinx.coroutines.flow.catch
 
 /**
  * Settings: a short list of things you can do from the TV, and the pairing card for everything
@@ -74,6 +78,11 @@ fun SettingsScreen(onBack: () -> Unit) {
     var flash by remember { mutableStateOf<Pair<String, String>?>(null) }
     LaunchedEffect(flash) { if (flash != null) { delay(3_000); flash = null } }
     fun note(row: String, text: String) { flash = row to text }
+    val comfortable by remember { graph.settings.guideComfortable }.collectAsState(initial = false)
+    val hidden by remember { graph.db.channels().observeHiddenChannels().catch { emit(emptyList()) } }.collectAsState(initial = emptyList())
+    // "pin" / "unpair": asked before it happens (they used to fire on one press).
+    var confirm by remember { mutableStateOf<String?>(null) }
+    var showHidden by remember { mutableStateOf(false) }
 
     Row(
         Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 56.dp, vertical = 40.dp),
@@ -93,10 +102,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("${it.name}: ${it.lastError}", color = FerryColors.Gold, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Spacer(Modifier.height(22.dp))
+            if (sources.isEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "No playlists yet. Scan the code with your phone, then add one under Sources.",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
 
             val available = update as? UpdateState.Available
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SettingRow(
                     icon = FerryIcons.Download,
                     title = if (available != null) "Update to Ferry ${available.release.version}" else "Check for updates",
@@ -116,23 +132,31 @@ fun SettingsScreen(onBack: () -> Unit) {
                     note("refresh", "Refreshing — listings update as they arrive")
                 }
                 SettingRow(
+                    icon = FerryIcons.Grid,
+                    title = "Guide rows: ${if (comfortable) "Comfortable" else "Compact"}",
+                    detail = if (comfortable) "Bigger rows and text, for watching from further away" else "About ten channels on screen",
+                ) {
+                    scope.launch { graph.settings.setGuideComfortable(!comfortable) }
+                }
+                SettingRow(
+                    icon = FerryIcons.Hide,
+                    title = "Hidden channels",
+                    detail = if (hidden.isEmpty()) "None hidden one at a time" else "${hidden.size} hidden  ·  OK to bring one back",
+                ) {
+                    if (hidden.isNotEmpty()) showHidden = true
+                }
+                SettingRow(
                     icon = FerryIcons.Key,
                     title = "New pairing PIN",
                     detail = flash?.takeIf { it.first == "pin" }?.second ?: "Phones already paired stay paired",
-                ) {
-                    scope.launch { graph.settings.regeneratePin() }
-                    note("pin", "New PIN made — it's on the card")
-                }
+                ) { confirm = "pin" }
                 SettingRow(
                     icon = FerryIcons.LockOpen,
                     title = "Unpair everything",
                     detail = flash?.takeIf { it.first == "unpair" }?.second ?: "Phones and Home Assistant must pair again",
-                ) {
-                    scope.launch { graph.settings.revokeAllTokens() }
-                    note("unpair", "Done — nothing is paired with this TV now")
-                }
+                ) { confirm = "unpair" }
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
             Hint("Back  guide")
         }
 
@@ -159,15 +183,77 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("OR OPEN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                    Text("OR OPEN", color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
                     Text(base ?: "No network", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), maxLines = 1)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("PIN", color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                    Text("PIN", color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
                     Text(pin?.chunked(3)?.joinToString(" ") ?: "…", style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TABULAR), color = FerryColors.Gold)
                 }
             }
         }
+    }
+
+    when (confirm) {
+        "pin" -> ConfirmDialog(
+            title = "Make a new pairing PIN?",
+            body = "The PIN on this screen changes. Phones already paired stay paired.",
+            confirm = "New PIN",
+            onConfirm = {
+                confirm = null
+                scope.launch { graph.settings.regeneratePin() }
+                note("pin", "New PIN made — it's on the card")
+            },
+            onDismiss = { confirm = null },
+        )
+        "unpair" -> ConfirmDialog(
+            title = "Unpair everything?",
+            body = "Every phone, Home Assistant and any Ferry that follows this one must pair again with the PIN.",
+            confirm = "Unpair everything",
+            onConfirm = {
+                confirm = null
+                scope.launch { graph.settings.revokeAllTokens() }
+                note("unpair", "Done — nothing is paired with this TV now")
+            },
+            onDismiss = { confirm = null },
+        )
+    }
+    if (showHidden && hidden.isNotEmpty()) {
+        HiddenChannelsDialog(
+            hidden,
+            onShow = { ch -> scope.launch { graph.db.channels().setHidden(ch.id, false) } },
+            onDismiss = { showHidden = false },
+        )
+    }
+}
+
+/** Channels hidden one at a time: OK on one brings it back. */
+@Composable
+private fun HiddenChannelsDialog(channels: List<dev.sysmoon.ferry.data.ChannelEntity>, onShow: (dev.sysmoon.ferry.data.ChannelEntity) -> Unit, onDismiss: () -> Unit) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { withFrameNanos { }; runCatching { first.requestFocus() } }
+    FerryDialog(onDismiss = onDismiss, eyebrow = "Hidden channels", eyebrowIcon = FerryIcons.Hide, subtitle = "OK brings a channel back to the guide.", width = 640.dp) {
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.foundation.lazy.LazyColumn(
+            Modifier.heightIn(max = 360.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
+        ) {
+            items(channels.size, key = { channels[it].id }) { i ->
+                val ch = channels[i]
+                ListItem(
+                    selected = false,
+                    onClick = { onShow(ch) },
+                    modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
+                    colors = ferryListItemColors(), border = ferryListItemBorder(), shape = ferryListItemShape(), scale = ferryListItemScale(),
+                    leadingContent = { LogoChip(ch.logo, ch.name, width = 58.dp, height = 36.dp) },
+                    headlineContent = { Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = ch.groupTitle?.let { g -> { Text(g, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Hint("OK  show again   ·   Back  close")
     }
 }
 

@@ -78,6 +78,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+import androidx.tv.material3.rememberDrawerState
 
 const val FAVOURITES = "\u0000fav"
 const val ALL = "\u0000all"
@@ -161,6 +162,8 @@ fun GuideScreen(
     val groups by remember { dao.observeGroups().catch { emit(emptyList()) } }
         .collectAsState(initial = emptyList())
     val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
+    val groupCounts by remember { dao.observeGroupCounts().map { rows -> rows.associate { it.name to it.count } }.catch { emit(emptyMap()) } }
+        .collectAsState(initial = emptyMap())
     // Sky layout: Sky's sections replace provider groups; picked provider groups follow as extras.
     val skyLayout by remember { graph.settings.skyLayout }.collectAsState(initial = false)
     val skySections by remember { dao.observeSkySections().catch { emit(emptyList()) } }.collectAsState(initial = emptyList())
@@ -171,6 +174,8 @@ fun GuideScreen(
     val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
 
     val gridView = section != Section.LIST
+    // One clock for the channel list: now/next and the progress bars follow it.
+    val listNow = rememberMinute()
     val hasRail = section != Section.FAVOURITES
     val validKeys = buildSet {
         add(ALL); if (recents.isNotEmpty()) add(RECENT)
@@ -337,13 +342,23 @@ fun GuideScreen(
         if (!focused && r.target is GuideFocus.Channel) backFromContent()
     }
 
+    // The drawer opens itself when it sees focus arrive, but it ignores focus changes until its
+    // own first effect has run. Focus given by the system at launch could land in the menu before
+    // that, leaving the menu focused but collapsed. So the open state is set here, from focus.
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var menuFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(menuFocused) {
+        drawerState.setValue(if (menuFocused) DrawerValue.Open else DrawerValue.Closed)
+    }
     ModalNavigationDrawer(
         modifier = Modifier.fillMaxSize().background(FerryColors.Deep),
+        drawerState = drawerState,
         drawerContent = { drawerValue ->
             NavRail(
                 open = drawerValue == DrawerValue.Open,
                 current = currentMenuItem,
                 menuFocus = menuFocus,
+                onFocus = { menuFocused = it },
                 onEnter = ::enter,
             )
         },
@@ -380,7 +395,18 @@ fun GuideScreen(
                                     headlineContent = {
                                         Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                     },
-                                    trailingContent = if (isSelected) ({ Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                                    trailingContent = {
+                                        // How many channels the group holds, so a 4-channel group and a 400-channel one look different.
+                                        val count = when (entry.key) {
+                                            ALL -> total.takeIf { it > 0 }
+                                            RECENT -> null
+                                            else -> groupCounts[entry.key]
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (count != null) Text("%,d".format(count), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                                            if (isSelected) Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Gold, modifier = Modifier.padding(start = 6.dp).size(20.dp))
+                                        }
+                                    },
                                     colors = ferryListItemColors(),
                                     border = ferryListItemBorder(),
                                     shape = ferryListItemShape(),
@@ -418,6 +444,8 @@ fun GuideScreen(
                     if (effective == ALL && !sky && total > GUIDE_LIMIT) {
                         Spacer(Modifier.width(14.dp))
                         Tag("first $GUIDE_LIMIT of $total", FerryColors.Muted, filled = false)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Pick a group, or use Search, for the rest", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                     }
                     Spacer(Modifier.weight(1f))
                     Clock()
@@ -463,6 +491,7 @@ fun GuideScreen(
                         items(shown, key = { it.id }) { channel ->
                             ChannelRow(
                                 channel = channel,
+                                nowMs = listNow,
                                 playing = nowPlaying.channel?.id == channel.id,
                                 modifier = if (channel.id == listTargetId) Modifier.focusRequester(listTargetFocus) else Modifier,
                                 onLongClick = { menuFor = channel },
@@ -485,9 +514,10 @@ fun GuideScreen(
  * what's behind it), like the side menu of any streaming app.
  */
 @Composable
-private fun NavigationDrawerScope.NavRail(open: Boolean, current: MenuItem, menuFocus: FocusRequester, onEnter: (MenuItem) -> Unit) {
+private fun NavigationDrawerScope.NavRail(open: Boolean, current: MenuItem, menuFocus: FocusRequester, onFocus: (Boolean) -> Unit, onEnter: (MenuItem) -> Unit) {
     Column(
         Modifier
+            .onFocusChanged { onFocus(it.hasFocus) }
             .fillMaxHeight()
             .background(FerryColors.Deep)
             .padding(horizontal = 12.dp, vertical = 16.dp),
@@ -554,6 +584,7 @@ private fun Clock() {
 @Composable
 private fun ChannelRow(
     channel: ChannelEntity,
+    nowMs: Long,
     playing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -561,10 +592,10 @@ private fun ChannelRow(
 ) {
     val graph = LocalContext.current.graph
     // Per-row lookup is indexed and cheap; swap for a windowed query when the grid view lands.
-    val programmes by produceState(initialValue = emptyList(), channel.epgKey) {
-        value = graph.db.programmes().upcoming(channel.epgKey, System.currentTimeMillis(), 2)
+    // Reloaded every minute: a list left open across a programme change used to keep the old one.
+    val programmes by produceState<List<dev.sysmoon.ferry.data.ProgrammeEntity>>(emptyList(), channel.epgKey, nowMs / 60_000) {
+        value = runCatching { graph.db.programmes().upcoming(channel.epgKey, nowMs, 2) }.getOrDefault(value)
     }
-    val nowMs = System.currentTimeMillis()
     val now = programmes.firstOrNull()?.takeIf { it.start <= nowMs }
     val next = if (now != null) programmes.getOrNull(1) else programmes.firstOrNull()
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
@@ -583,7 +614,7 @@ private fun ChannelRow(
                 Text(
                     "${channel.shownNumber}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = FerryColors.Faint,
+                    color = FerryColors.Muted,
                     modifier = Modifier.width(44.dp),
                 )
                 LogoChip(channel.logo, channel.name, width = 64.dp, height = 40.dp)
@@ -592,18 +623,18 @@ private fun ChannelRow(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (channel.favourite) {
-                    Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(15.dp))
+                    Icon(FerryIcons.Star, null, tint = FerryColors.Text, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f, fill = false))
                 if (channel.streamCount > 1) {
                     Spacer(Modifier.width(10.dp))
-                    Text("${channel.streamCount} streams", color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium)
+                    Text("${channel.streamCount} streams", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium)
                 }
                 if (playing) {
                     Spacer(Modifier.width(10.dp))
-                    Tag("Watching", FerryColors.Gold)
+                    Tag("Watching", FerryColors.Text)
                 }
             }
         },
@@ -614,7 +645,7 @@ private fun ChannelRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (now != null) FerryColors.Muted else FerryColors.Faint,
+                    color = if (now != null) FerryColors.Muted else FerryColors.Muted,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 5.dp)) {
                     if (now != null) {
@@ -626,7 +657,7 @@ private fun ChannelRow(
                             "Next ${time.format(Date(it.start))}  ${it.title}",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            color = FerryColors.Faint,
+                            color = FerryColors.Muted,
                             style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR),
                         )
                     }

@@ -46,7 +46,8 @@ class SyncManager(private val g: AppGraph) {
         val base = normalise(url)
         val me = dev.sysmoon.ferry.net.Network.localIpv4()
         require(listOfNotNull(me, "127.0.0.1", "localhost").none { base.contains("://$it:") }) { "That's this box — open the web page of the box you're setting up instead" }
-        val pairBody = """{"pin":${json.encodeToString(kotlinx.serialization.serializer<String>(), pin.trim())}}"""
+        val text = kotlinx.serialization.serializer<String>()
+        val pairBody = """{"pin":${json.encodeToString(text, pin.trim())},"label":${json.encodeToString(text, "Ferry: " + g.settings.deviceName())}}"""
         val token = call(Request.Builder().url("$base/api/pair").post(pairBody.toRequestBody(JSON)).build())
             .let { json.parseToJsonElement(it).jsonObject["token"]?.jsonPrimitive?.content }
             ?: error("That Ferry didn't accept the PIN")
@@ -65,7 +66,7 @@ class SyncManager(private val g: AppGraph) {
         val s = g.settings.sync()
         val url = s.url ?: return status()
         try {
-            val body = withContext(Dispatchers.IO) { call(authed("$url/api/export", s.token.orEmpty())) }
+            val body = withContext(Dispatchers.IO) { call(authed("$url/api/export?secrets=1", s.token.orEmpty())) }
             val export = json.decodeFromString(FerryExport.serializer(), body)
             val hash = fingerprint(export)
             if (hash != s.hash) {
@@ -98,7 +99,8 @@ class SyncManager(private val g: AppGraph) {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    private fun authed(url: String, token: String) = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+    private fun authed(url: String, token: String) = Request.Builder().url(url)
+        .header("Authorization", "Bearer $token").header("User-Agent", "Ferry/${dev.sysmoon.ferry.BuildConfig.VERSION_NAME}").build()
 
     private fun call(request: Request): String = g.http.newCall(request).execute().use { r ->
         val text = r.body?.string().orEmpty()

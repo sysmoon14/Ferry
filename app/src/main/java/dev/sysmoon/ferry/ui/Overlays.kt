@@ -32,6 +32,7 @@ import dev.sysmoon.ferry.data.Reminder
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
+import androidx.compose.foundation.border
 
 /**
  * Reminder pop-up, two minutes before the programme: "Starts in 2 min" counting down to
@@ -68,7 +69,67 @@ fun ReminderPopup(reminder: Reminder, onWatch: () -> Unit, onDismiss: () -> Unit
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onWatch, colors = ferryButtonColors(), modifier = Modifier.focusRequester(watch)) { Text(if (reminder.fixtureId != null) "Find a stream" else "Watch now") }
-            Button(onClick = onDismiss, colors = ferryOutlinedButtonColorsAsButton()) { Text("Dismiss") }
+            Button(onClick = onDismiss, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) { Text("Dismiss") }
+        }
+    }
+}
+
+/**
+ * A reminder while something is on full screen: a banner in the corner instead of a dialog over
+ * the picture. It takes no focus; MainActivity gives it OK (switch) and Back (dismiss). It goes
+ * away by itself shortly after the programme starts.
+ */
+@Composable
+fun ReminderBanner(reminder: Reminder, onExpired: () -> Unit, modifier: Modifier = Modifier) {
+    var secondsLeft by remember(reminder.key) { mutableStateOf(((reminder.start - System.currentTimeMillis()) / 1000).toInt()) }
+    LaunchedEffect(reminder.key) {
+        while (secondsLeft > -45) {
+            delay(1_000)
+            secondsLeft = ((reminder.start - System.currentTimeMillis()) / 1000).toInt()
+        }
+        onExpired()
+    }
+    val match = reminder.fixtureId != null
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier.width(430.dp).clip(shape).background(FerryColors.Navy.copy(alpha = 0.96f))
+            .border(androidx.compose.foundation.BorderStroke(1.dp, FerryColors.Line), shape)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+    ) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            androidx.tv.material3.Icon(FerryIcons.Bell, null, tint = FerryColors.Gold, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when {
+                    secondsLeft > 90 -> "${if (match) "Kicks off" else "Starts"} in ${(secondsLeft + 30) / 60} min"
+                    secondsLeft > 5 -> "${if (match) "Kicks off" else "Starts"} in $secondsLeft s"
+                    match -> "Kicking off now"
+                    else -> "Starting now"
+                }.uppercase(),
+                color = FerryColors.Gold, style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(reminder.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(reminder.channelName, color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(10.dp))
+        Hint(if (match) "OK  find a stream   ·   Back  dismiss" else "OK  switch   ·   Back  dismiss")
+    }
+}
+
+/** Asks before something that can't be undone from the TV. Cancel has the focus. */
+@Composable
+fun ConfirmDialog(title: String, body: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val cancel = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { cancel.requestFocus() }
+    }
+    FerryDialog(onDismiss = onDismiss, eyebrow = "Are you sure?", eyebrowIcon = FerryIcons.Warning, title = title, subtitle = body, width = 560.dp) {
+        Spacer(Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = onDismiss, colors = ferryButtonColors(), modifier = Modifier.focusRequester(cancel)) { Text("Cancel") }
+            Button(onClick = onConfirm, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) { Text(confirm) }
         }
     }
 }
@@ -103,9 +164,11 @@ fun UpdatePrompt(state: dev.sysmoon.ferry.update.UpdateState, onUpdate: () -> Un
                 is dev.sysmoon.ferry.update.UpdateState.Available -> {
                     Text("Ferry ${state.release.version}", style = MaterialTheme.typography.headlineSmall)
                     Text("You have ${dev.sysmoon.ferry.BuildConfig.VERSION_NAME}. Your settings and channels are kept.", color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                    // The release's own summary: the first plain line of its notes. GitHub's generated
+                    // list of commits (headings and bullets) isn't shown: it isn't written for viewers.
                     val notes = state.release.notes.lines().map { it.trim() }
-                        .filter { (it.startsWith("* ") || it.startsWith("- ")) && "Full Changelog" !in it }.take(5)
-                        .joinToString("\n") { "•  " + it.trimStart('*', '-', ' ').substringBefore(" by @") }
+                        .firstOrNull { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("* ") && !it.startsWith("- ") && "Full Changelog" !in it }
+                        ?.take(220).orEmpty()
                     if (notes.isNotBlank()) {
                         Spacer(Modifier.height(10.dp))
                         Text(notes, style = MaterialTheme.typography.bodyMedium, color = FerryColors.Text, maxLines = 6, overflow = TextOverflow.Ellipsis)
@@ -113,7 +176,7 @@ fun UpdatePrompt(state: dev.sysmoon.ferry.update.UpdateState, onUpdate: () -> Un
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = onUpdate, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Update now") }
-                        Button(onClick = onLater, colors = ferryOutlinedButtonColorsAsButton()) { Text("Later") }
+                        Button(onClick = onLater, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) { Text("Later") }
                     }
                 }
                 is dev.sysmoon.ferry.update.UpdateState.Downloading -> {
@@ -135,7 +198,7 @@ fun UpdatePrompt(state: dev.sysmoon.ferry.update.UpdateState, onUpdate: () -> Un
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = onUpdate, colors = ferryButtonColors(), modifier = Modifier.focusRequester(primary)) { Text("Try again") }
-                        Button(onClick = onLater, colors = ferryOutlinedButtonColorsAsButton()) { Text("Later") }
+                        Button(onClick = onLater, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) { Text("Later") }
                     }
                 }
                 else -> Unit
@@ -168,7 +231,7 @@ fun StillWatching(hours: Int, onKeep: () -> Unit, onStop: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onKeep, colors = ferryButtonColors(), modifier = Modifier.focusRequester(keep)) { Text("Keep watching") }
-            Button(onClick = onStop, colors = ferryOutlinedButtonColorsAsButton()) { Text("Stop") }
+            Button(onClick = onStop, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) { Text("Stop") }
         }
     }
 }

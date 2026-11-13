@@ -72,6 +72,11 @@ import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.shape.CircleShape
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Surface
 
 /** Buttons in the player controls row, left to right. */
 private enum class Control(val label: String) {
@@ -119,8 +124,10 @@ fun PlayerScreen(onBack: () -> Unit) {
     val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
     val sleepEnds by graph.sleep.endsAt.collectAsState()
     val reminderList by graph.reminders.reminders.collectAsState()
-    val nowMs by produceState(System.currentTimeMillis()) {
-        while (true) { delay(1_000); value = System.currentTimeMillis() }
+    // Ticks only while the card is up: it used to redraw the whole player every second.
+    val nowMs by produceState(System.currentTimeMillis(), cardVisible) {
+        value = System.currentTimeMillis()
+        while (cardVisible) { delay(1_000); value = System.currentTimeMillis() }
     }
 
     fun openCard(offset: Int = 0) {
@@ -148,7 +155,7 @@ fun PlayerScreen(onBack: () -> Unit) {
     }
     LaunchedEffect(cardVisible, interaction, controlsVisible) {
         if (!cardVisible) return@LaunchedEffect
-        delay(if (controlsVisible) 12_000 else 7_000)
+        delay(if (controlsVisible) 15_000 else 10_000)
         closeCard()
     }
     // Catch-up: track the position inside the programme for the progress bar.
@@ -157,6 +164,17 @@ fun PlayerScreen(onBack: () -> Unit) {
         value = null
     }
     LaunchedEffect(Unit) { focus.requestFocus() }
+    // The controls are real buttons: focus moves onto them while they show and back to the
+    // screen when they go, so left/right and OK are the focus system's and TalkBack can read them.
+    val controlFocus = remember { FocusRequester() }
+    var controlsFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(controlsVisible) {
+        if (!controlsVisible) { runCatching { focus.requestFocus() }; return@LaunchedEffect }
+        repeat(6) {
+            withFrameNanos { }
+            if (runCatching { controlFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+        }
+    }
 
     // Typed channel number ("4", "40", "401"); tunes after a short pause, like a set-top box.
     var digits by remember { mutableStateOf("") }
@@ -213,7 +231,7 @@ fun PlayerScreen(onBack: () -> Unit) {
                 else { message = "No catch-up for this programme"; interaction++ }
             else -> scope.launch {
                 val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(p.start))
-                message = if (graph.reminders.toggle(ch, p)) "🔔 Reminder set — Ferry will let you know at $time" else "Reminder removed"
+                message = if (graph.reminders.toggle(ch, p)) "Reminder set — Ferry will let you know at $time" else "Reminder removed"
                 interaction++
             }
         }
@@ -235,7 +253,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                 }
                 if (ok && e.type == KeyEventType.KeyUp) {
                     if (!okLongPressed) when {
-                        controlsVisible -> if (enabled(control)) activate(control)
+                        // A focused control button takes OK itself; this is only for when focus isn't on one.
+                        controlsVisible -> if (!controlsFocused && enabled(control)) activate(control)
                         cardVisible -> confirm()
                         else -> openCard()
                     }
@@ -273,6 +292,8 @@ fun PlayerScreen(onBack: () -> Unit) {
                     }
                     Key.DirectionLeft, Key.DirectionRight -> {
                         val delta = if (e.key == Key.DirectionRight) 1 else -1
+                        // Focus is on the control buttons: let it move along the row.
+                        if (controlsVisible && controlsFocused) { interaction++; return@onKeyEvent false }
                         when {
                             controlsVisible -> {
                                 val all = Control.entries
@@ -383,6 +404,10 @@ fun PlayerScreen(onBack: () -> Unit) {
                 canCatchUp = { p -> player.canCatchUp(ch, p, nowMs) },
                 controls = if (controlsVisible) Control.entries.map { it to enabled(it) } else null,
                 focusedControl = control,
+                controlFocus = controlFocus,
+                onControl = { c -> activate(c) },
+                onControlFocused = { c -> control = c; interaction++ },
+                onControlsFocus = { controlsFocused = it },
                 hasReminder = { p -> reminderList.any { it.epgKey == ch.epgKey && it.start == p.start } },
                 sleepMinutes = sleepEnds?.let { ((it - nowMs + 59_999) / 60_000).toInt() },
             )
@@ -424,6 +449,10 @@ private fun InfoCard(
     canCatchUp: (ProgrammeEntity) -> Boolean,
     controls: List<Pair<Control, Boolean>>?,
     focusedControl: Control,
+    controlFocus: FocusRequester,
+    onControl: (Control) -> Unit,
+    onControlFocused: (Control) -> Unit,
+    onControlsFocus: (Boolean) -> Unit,
     hasReminder: (ProgrammeEntity) -> Boolean,
     sleepMinutes: Int?,
 ) {
@@ -452,7 +481,7 @@ private fun InfoCard(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             LogoChip(channel.logo, channel.displayName, width = 58.dp, height = 36.dp)
             Spacer(Modifier.width(12.dp))
-            Text("${channel.shownNumber}", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), color = FerryColors.Faint)
+            Text("${channel.shownNumber}", style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TABULAR), color = FerryColors.Muted)
             Spacer(Modifier.width(10.dp))
             Text(channel.displayName, style = MaterialTheme.typography.titleMedium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 360.dp))
@@ -460,7 +489,7 @@ private fun InfoCard(
             when {
                 !isCurrent -> Tag("Preview", FerryColors.Sea)
                 catchup -> Tag("Catch-up", FerryColors.Sea)
-                else -> Tag("Watching", FerryColors.Gold)
+                else -> Tag("Watching", FerryColors.Text)
             }
             if (paused) { Spacer(Modifier.width(8.dp)); Tag("Paused", FerryColors.Muted, filled = false) }
             sleepMinutes?.let { Spacer(Modifier.width(8.dp)); Tag("Sleep ${it}m", FerryColors.Muted, filled = false) }
@@ -486,12 +515,12 @@ private fun InfoCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (prev != null) {
                     androidx.tv.material3.Icon(FerryIcons.ChevronLeft, null, tint = FerryColors.Faint, modifier = Modifier.size(16.dp))
-                    Text("${time.format(Date(prev.start))}  ${prev.title}", color = FerryColors.Faint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text("${time.format(Date(prev.start))}  ${prev.title}", color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = tabular.copy(fontSize = 13.sp), modifier = Modifier.weight(1f))
                 } else Spacer(Modifier.weight(1f))
                 Spacer(Modifier.width(24.dp))
                 if (next != null) {
-                    Text("${time.format(Date(next.start))}  ${next.title}", color = FerryColors.Faint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text("${time.format(Date(next.start))}  ${next.title}", color = FerryColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = tabular.copy(fontSize = 13.sp), modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
                     androidx.tv.material3.Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Faint, modifier = Modifier.size(16.dp))
                 } else Spacer(Modifier.weight(1f))
@@ -537,9 +566,8 @@ private fun InfoCard(
 
         if (controls != null) {
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().onFocusChanged { onControlsFocus(it.hasFocus) }) {
                 controls.forEach { (c, on) ->
-                    val focused = c == focusedControl
                     val iconLabel: Pair<androidx.compose.ui.graphics.vector.ImageVector, String> = when (c) {
                         Control.RESTART -> FerryIcons.Replay to "Restart"
                         Control.BACK30 -> FerryIcons.Rewind to "30s back"
@@ -551,25 +579,12 @@ private fun InfoCard(
                         Control.OPTIONS -> FerryIcons.Tune to "Options"
                     }
                     val (icon, label) = iconLabel
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp)) {
-                        Box(
-                            Modifier.size(52.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                                .background(when { focused -> FerryColors.Gold; on -> Color.White.copy(alpha = 0.12f); else -> Color.White.copy(alpha = 0.05f) }),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            androidx.tv.material3.Icon(
-                                icon, null,
-                                tint = when { focused -> FerryColors.Deep; on -> FerryColors.Text; else -> FerryColors.Muted.copy(alpha = 0.35f) },
-                                modifier = Modifier.size(28.dp),
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            label,
-                            color = when { focused -> FerryColors.Gold; on -> FerryColors.Muted; else -> FerryColors.Faint.copy(alpha = 0.5f) },
-                            style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
-                        )
-                    }
+                    ControlButton(
+                        icon, label, enabled = on,
+                        modifier = if (c == focusedControl) Modifier.focusRequester(controlFocus) else Modifier,
+                        onFocused = { onControlFocused(c) },
+                        onClick = { onControl(c) },
+                    )
                 }
             }
         }
@@ -585,7 +600,50 @@ private fun InfoCard(
                 p != null && p.stop <= nowMs && canCatchUp(p) -> "OK  watch from the start   ·   ◀ ▶  programmes"
                 else -> "▲ ▼  channels   ·   ◀ ▶  programmes   ·   Back  close"
             },
-            color = if (message != null) FerryColors.Sea else FerryColors.Faint,
+            color = if (message != null) FerryColors.Sea else FerryColors.Muted,
+            icon = if (message?.startsWith("Reminder set") == true) FerryIcons.Bell else null,
+        )
+    }
+}
+
+/** One round control on the info card: a real button, so focus, OK and screen readers all work on it. */
+@Composable
+private fun ControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(92.dp)) {
+        Surface(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.size(52.dp).onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() },
+            shape = ClickableSurfaceDefaults.shape(CircleShape),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.White.copy(alpha = 0.12f),
+                contentColor = FerryColors.Text,
+                focusedContainerColor = FerryColors.Gold,
+                focusedContentColor = FerryColors.Deep,
+                pressedContainerColor = FerryColors.Gold,
+                pressedContentColor = FerryColors.Deep,
+                disabledContainerColor = Color.White.copy(alpha = 0.05f),
+                disabledContentColor = FerryColors.Muted.copy(alpha = 0.35f),
+            ),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                androidx.tv.material3.Icon(icon, label, modifier = Modifier.size(28.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            label,
+            color = when { focused -> FerryColors.Gold; enabled -> FerryColors.Muted; else -> FerryColors.Faint.copy(alpha = 0.5f) },
+            style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
         )
     }
 }

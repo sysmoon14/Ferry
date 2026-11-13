@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SourceEntity::class, ChannelEntity::class, ProgrammeEntity::class],
-    version = 6,
+    version = FerryDatabase.VERSION,
     exportSchema = true,
 )
 abstract class FerryDatabase : RoomDatabase() {
@@ -20,10 +20,18 @@ abstract class FerryDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): FerryDatabase =
             Room.databaseBuilder(context, FerryDatabase::class.java, "ferry.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
-                // Last resort only; real migrations keep favourites and hidden groups.
-                .fallbackToDestructiveMigration()
+                .addMigrations(*MIGRATIONS)
+                // Only when an older Ferry is installed over a newer one. Upgrades must have a
+                // migration (MigrationsTest checks the chain): a missing one used to wipe
+                // favourites and hidden channels without a word.
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
+
+        /** Schema version. Bump it together with a new entry in [MIGRATIONS]. */
+        const val VERSION = 6
+
+        /** Every upgrade step, oldest first: one per version from 1 to [VERSION]. */
+        val MIGRATIONS: Array<Migration> get() = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         /** v2: catch-up support. */
         val MIGRATION_1_2 = object : Migration(1, 2) {

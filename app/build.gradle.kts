@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -44,6 +45,12 @@ android {
         }
     }
 
+    lint {
+        // Reported by CI, not enforced yet: clear the backlog, then set abortOnError = true.
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -66,6 +73,13 @@ android {
             )
         }
     }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.file("detekt.yml"))
+    // Reported by CI, not enforced yet.
+    ignoreFailures = true
 }
 
 ksp {

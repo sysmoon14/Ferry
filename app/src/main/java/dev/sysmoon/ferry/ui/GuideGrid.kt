@@ -74,6 +74,11 @@ import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 
 private const val SLOT_MS = 30 * 60_000L
 private const val WINDOW_MS = 2 * 3_600_000L        // visible span: 2 hours
@@ -82,8 +87,9 @@ private const val DAY_MS = 86_400_000L
 private const val FUTURE_LIMIT_MS = DAY_MS           // how far ahead the grid scrolls
 private const val NO_ARCHIVE_BACK_MS = 2 * 3_600_000L // how far back rows without catch-up go
 private const val LOAD_MARGIN = 30                    // rows either side of the screen to load programmes for
-private val CHANNEL_COL: Dp = 210.dp
-private val ROW_HEIGHT: Dp = 34.dp
+private val CHANNEL_COL: Dp = 176.dp
+private val ROW_COMPACT: Dp = 34.dp
+private val ROW_COMFORTABLE: Dp = 44.dp
 
 private fun floorSlot(t: Long) = t - Math.floorMod(t, SLOT_MS)
 
@@ -139,7 +145,9 @@ fun GuideGrid(
     val listState = rememberLazyListState()
     var programmes by remember { mutableStateOf(emptyMap<String, List<ProgrammeEntity>>()) }
     LaunchedEffect(channels, bucket, epgVersion) {
-        programmes = emptyMap()
+        // The cells already on screen stay until their replacements are loaded: emptying the map
+        // first made every row flash "No guide data" on each reload.
+        var firstLoad = true
         val loaded = HashSet<String>()
         val from = bucket * LOAD_BUCKET_MS - LOAD_BUCKET_MS
         val until = bucket * LOAD_BUCKET_MS + 3 * LOAD_BUCKET_MS
@@ -152,9 +160,23 @@ fun GuideGrid(
                 if (keys.isEmpty()) return@collectLatest
                 val rows = runCatching { graph.db.programmes().window(keys, from, until) }.getOrDefault(emptyList()).groupBy { it.channelKey }
                 loaded += keys
-                programmes = programmes + keys.associateWith { rows[it].orEmpty() }
+                val fresh = keys.associateWith { rows[it].orEmpty() }
+                // The first load of a new list / time block replaces everything (rows off screen
+                // load when they scroll into view); later ones add to it.
+                programmes = if (firstLoad) fresh else programmes + fresh
+                firstLoad = false
             }
     }
+
+    // The timeline slides when the window moves instead of jumping: the cells are laid out at
+    // their new places straight away and drawn offset by however far the animation still has to go.
+    val slideBase = remember { windowStart }
+    val windowMinutes = ((windowStart - slideBase) / 60_000L).toFloat()
+    val animatedMinutes = animateFloatAsState(windowMinutes, tween(180), label = "guide-window")
+    val slide: () -> Float = { ((windowMinutes - animatedMinutes.value) / (WINDOW_MS / 60_000f)).coerceIn(-1f, 1f) }
+    // Compact (about ten and a half rows on a 1080p TV) or comfortable (bigger rows and text).
+    val comfortable by remember { graph.settings.guideComfortable }.collectAsState(initial = false)
+    val rowHeight = if (comfortable) ROW_COMFORTABLE else ROW_COMPACT
 
     var focused by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
     val reminderList by graph.reminders.reminders.collectAsState()
@@ -164,7 +186,9 @@ fun GuideGrid(
     // lands on whatever is on at the same time instead of the geometrically nearest cell.
     var cursorTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var verticalNav by remember { mutableStateOf(false) }
-    val requesters = remember { HashMap<Pair<String, Long>, FocusRequester>() }
+    // Started again with the list and with each 3-hour block of the timeline, so it holds the cells
+    // of what can be on screen, not every cell ever shown.
+    val requesters = remember(channels, bucket) { HashMap<Pair<String, Long>, FocusRequester>() }
     fun requester(channelId: String, start: Long) = requesters.getOrPut(channelId to start) { FocusRequester() }
 
     // Back: jump back to now and go to the group list in one press (no scrolling back through
@@ -264,7 +288,7 @@ fun GuideGrid(
         },
     ) {
         DetailPanel(focused, now, reminded)
-        TimeRuler(windowStart, now)
+        TimeRuler(windowStart, now, slide)
         // Fill the rest of the screen; the last row may be partly visible.
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
@@ -278,6 +302,10 @@ fun GuideGrid(
                     windowStart = windowStart,
                     windowEnd = windowEnd,
                     now = now,
+                    rowHeight = rowHeight,
+                    comfortable = comfortable,
+                    rowFocused = gridFocused && focusedIndex == index,
+                    slide = slide,
                     canGoBack = { target ->
                         val limit = if (channel.archiveDays > 0) nowSlot - channel.archiveDays.coerceAtMost(7) * DAY_MS
                             else nowSlot - NO_ARCHIVE_BACK_MS
@@ -331,6 +359,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
     val miniShowing = graph.player.state.collectAsState().value.channel != null
     Column(Modifier.fillMaxWidth().height(92.dp).padding(start = 4.dp, bottom = 6.dp, end = if (miniShowing) MINI_CLEARANCE else 0.dp)) {
         val (channel, p) = focused ?: return@Column
+        val live = p != null && p.start <= now && p.stop > now
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 p?.title ?: channel.displayName,
@@ -341,7 +370,7 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
             )
             Spacer(Modifier.width(12.dp))
             when {
-                p != null && p.start <= now && p.stop > now -> Tag("Live", FerryColors.Live, dot = true)
+                live -> Tag("Live", FerryColors.Live, dot = true)
                 p != null && p.stop <= now && graph.player.canCatchUp(channel, p, now) -> Tag("Catch-up", FerryColors.Sea)
                 p != null && p.start > now && "${channel.epgKey}@${p.start}" in reminded -> Tag("Reminder set", FerryColors.Sea)
             }
@@ -352,20 +381,26 @@ private fun DetailPanel(focused: Pair<ChannelEntity, ProgrammeEntity?>?, now: Lo
                     val dayText = if (floorDay(p.start) == floorDay(now)) "Today" else day.format(Date(p.start))
                     add("$dayText ${time.format(Date(p.start))}–${time.format(Date(p.stop))}")
                 }
+                if (live && p != null) add("${((p.stop - now) / 60_000).coerceAtLeast(1)} min left")
                 add(channel.displayName)
                 if (channel.streamCount > 1) add("${channel.streamCount} streams")
                 if (p != null && p.start > now && "${channel.epgKey}@${p.start}" !in reminded) add("OK to set a reminder")
             }
             if (channel.favourite) {
-                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(14.dp))
+                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Text, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
+            }
+            // The same elapsed bar the live cell carries in the grid.
+            if (live && p != null) {
+                ProgressLine((now - p.start).toFloat() / (p.stop - p.start).coerceAtLeast(1), Modifier.width(96.dp))
+                Spacer(Modifier.width(10.dp))
             }
             Text(bits.joinToString("  ·  "), color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(
             p?.description ?: if (p == null) "No guide data for this channel" else "",
-            color = FerryColors.Faint, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+            color = FerryColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 3.dp),
         )
     }
@@ -376,39 +411,85 @@ private fun floorDay(t: Long): Long {
     return java.time.Instant.ofEpochMilli(t).atZone(z).toLocalDate().toEpochDay()
 }
 
+private val PILL_WIDTH: Dp = 64.dp
+
+/**
+ * The half-hour marks, with the current time as a gold pill sitting on the ruler. Nothing is
+ * drawn over the grid: the pill's tick and the tinted part of each live cell line up instead.
+ */
 @Composable
-private fun TimeRuler(windowStart: Long, now: Long) {
+private fun TimeRuler(windowStart: Long, now: Long, slide: () -> Float) {
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }
-    Row(Modifier.fillMaxWidth().height(22.dp).padding(bottom = 2.dp)) {
+    val dayFormat = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
+    Row(Modifier.fillMaxWidth().height(26.dp)) {
         Box(Modifier.width(CHANNEL_COL).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
-            val label = if (floorDay(windowStart) == floorDay(now)) "Today"
-                else SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
-            Text(label.uppercase(), color = FerryColors.Gold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 2.dp))
+            val label = if (floorDay(windowStart) == floorDay(now)) "Today" else dayFormat.format(Date(windowStart))
+            Text(label.uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 2.dp))
         }
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
             val perMs = maxWidth / WINDOW_MS.toFloat()
-            var t = windowStart
-            while (t < windowStart + WINDOW_MS) {
-                Text(
-                    time.format(Date(t)),
-                    color = FerryColors.Faint,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.align(Alignment.CenterStart).offset(x = perMs * (t - windowStart).toFloat() + 6.dp),
-                )
-                t += SLOT_MS
+            val nowShowing = now >= windowStart && now < windowStart + WINDOW_MS
+            Box(Modifier.fillMaxSize().graphicsLayer { translationX = slide() * size.width }) {
+                var t = windowStart
+                while (t < windowStart + WINDOW_MS) {
+                    // A mark the pill would sit on is left out; the pill says the time itself.
+                    val underPill = nowShowing && t > now - 13 * 60_000L && t < now + 6 * 60_000L
+                    if (!underPill) Text(
+                        time.format(Date(t)),
+                        color = FerryColors.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.align(Alignment.CenterStart).offset(x = perMs * (t - windowStart).toFloat() + 6.dp),
+                    )
+                    t += SLOT_MS
+                }
             }
-            NowLine(windowStart, now, perMs)
+            if (nowShowing) {
+                val x = perMs * (now - windowStart).toFloat() - PILL_WIDTH / 2
+                Column(
+                    Modifier.offset(x = x.coerceIn(0.dp, (maxWidth - PILL_WIDTH).coerceAtLeast(0.dp))).width(PILL_WIDTH).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth().height(19.dp).clip(RoundedCornerShape(10.dp)).background(FerryColors.Gold),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(time.format(Date(now)), color = FerryColors.Deep, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+                    }
+                    Box(Modifier.width(2.dp).weight(1f).background(FerryColors.Gold))
+                }
+            }
         }
     }
 }
 
+/** A channel in the grid's left column: its logo when it has one that loads, otherwise its name. */
 @Composable
-private fun NowLine(windowStart: Long, now: Long, perMs: Dp) {
-    if (now < windowStart || now >= windowStart + WINDOW_MS) return
-    Box(
-        Modifier.offset(x = perMs * (now - windowStart).toFloat()).width(2.dp).fillMaxHeight()
-            .background(FerryColors.Gold)
-    )
+private fun ChannelBadge(channel: ChannelEntity, focused: Boolean, comfortable: Boolean, modifier: Modifier = Modifier) {
+    var failed by remember(channel.logo) { mutableStateOf(false) }
+    Box(modifier, contentAlignment = Alignment.CenterStart) {
+        if (channel.logo != null && !failed) {
+            Box(
+                Modifier.size(if (comfortable) 92.dp else 76.dp, if (comfortable) 34.dp else 26.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(if (focused) FerryColors.FocusFill else FerryColors.Raised),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = channel.logo, contentDescription = channel.displayName,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    onError = { failed = true },
+                )
+            }
+        } else {
+            Text(
+                channel.displayName,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (focused) FerryColors.Text else FerryColors.Muted,
+                style = (if (comfortable) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
+                    .copy(fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium),
+            )
+        }
+    }
 }
 
 @Composable
@@ -419,6 +500,12 @@ private fun GridRow(
     windowStart: Long,
     windowEnd: Long,
     now: Long,
+    rowHeight: Dp,
+    comfortable: Boolean,
+    /** Focus is on one of this row's programmes: its channel stands out in the left column. */
+    rowFocused: Boolean,
+    /** How far the timeline is from its resting place while the window slides (fraction of its width). */
+    slide: () -> Float,
     canGoBack: (Long) -> Boolean,
     onShift: (Long, ProgrammeEntity?) -> Unit,
     onFocus: (ProgrammeEntity?) -> Unit,
@@ -427,103 +514,107 @@ private fun GridRow(
     onSelect: (ProgrammeEntity?) -> Unit,
     onLongPress: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().height(ROW_HEIGHT).padding(vertical = 2.dp)) {
+    val cellShape = RoundedCornerShape(6.dp)
+    Row(Modifier.fillMaxWidth().height(rowHeight).padding(vertical = 2.dp)) {
         // Channel column
-        Row(Modifier.width(CHANNEL_COL).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.width(CHANNEL_COL).fillMaxHeight().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${channel.shownNumber}",
-                color = FerryColors.Faint,
+                color = if (rowFocused) FerryColors.Text else FerryColors.Muted,
                 modifier = Modifier.width(38.dp),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
             )
-            LogoChip(channel.logo, channel.name, width = 40.dp, height = 24.dp)
+            ChannelBadge(channel, rowFocused, comfortable, Modifier.weight(1f))
             if (channel.favourite) {
-                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.padding(start = 7.dp).size(12.dp))
+                androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Muted, modifier = Modifier.padding(start = 6.dp).size(12.dp))
             }
-            Text(
-                channel.displayName,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
-                modifier = Modifier.padding(start = if (channel.favourite) 5.dp else 8.dp, end = 8.dp),
-            )
         }
 
         // Programmes
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
             val perMs = maxWidth / WINDOW_MS.toFloat()
             val visible = programmes.filter { it.stop > windowStart && it.start < windowEnd }
             val cells: List<ProgrammeEntity?> = visible.ifEmpty { listOf(null) }
 
-            cells.forEachIndexed { i, p ->
-                key(p?.start ?: -1L) {
-                    val left = p?.let { maxOf(it.start, windowStart) } ?: windowStart
-                    val right = p?.let { minOf(it.stop, windowEnd) } ?: windowEnd
-                    val x = perMs * (left - windowStart).toFloat()
-                    val w = (perMs * (right - left).toFloat() - 3.dp).coerceAtLeast(6.dp)
-                    val past = p != null && p.stop <= now
-                    val live = p == null || (p.start <= now && p.stop > now)
-                    val mod = Modifier.offset(x = x).width(w).fillMaxHeight().focusRequester(requesterFor(p?.start ?: -1L))
-                    Surface(
-                        onClick = { onSelect(p) },
-                        onLongClick = onLongPress,
-                        modifier = mod
-                            .onFocusChanged { if (it.isFocused) onFocus(p) }
-                            .onPreviewKeyEvent { e ->
-                                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                when (e.key) {
-                                    // At the right edge: move the window on rather than leaving the row.
-                                    Key.DirectionRight -> if (i == cells.lastIndex && right >= windowEnd) {
-                                        onShift(SLOT_MS, p); true
-                                    } else false
-                                    Key.DirectionUp -> onVertical(-1)
-                                    Key.DirectionDown -> onVertical(1)
-                                    // At the left edge: go back in time while there's history to show;
-                                    // otherwise let focus move out to the group list.
-                                    Key.DirectionLeft -> if (i == 0 && left <= windowStart && canGoBack(windowStart - SLOT_MS)) {
-                                        onShift(-SLOT_MS, p); true
-                                    } else false
-                                    else -> false
-                                }
-                            },
-                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(6.dp)),
-                        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-                        colors = ClickableSurfaceDefaults.colors(
-                            containerColor = when { p == null -> Color(0xFF0F1828); live -> Color(0xFF1A2A44); else -> FerryColors.Navy },
-                            contentColor = when { p == null -> FerryColors.Faint; past -> FerryColors.Muted; else -> FerryColors.Text },
-                            focusedContainerColor = FerryColors.FocusFill,
-                            focusedContentColor = FerryColors.Text,
-                        ),
-                        border = ClickableSurfaceDefaults.border(
-                            focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = RoundedCornerShape(6.dp)),
-                        ),
-                    ) {
-                        // Very short programmes are too narrow for any text; the detail panel names them.
-                        if (w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            val reminderSet = p != null && "${channel.epgKey}@${p.start}" in reminded
-                            val catchUp = p != null && p.stop <= now && channel.archiveDays > 0 &&
-                                p.start > now - channel.archiveDays * 86_400_000L
-                            if (reminderSet || catchUp) {
-                                androidx.tv.material3.Icon(
-                                    if (reminderSet) FerryIcons.Bell else FerryIcons.Replay, null,
-                                    tint = if (reminderSet) FerryColors.Sea else FerryColors.Muted,
-                                    modifier = Modifier.padding(end = 5.dp).size(13.dp),
+            Box(Modifier.fillMaxSize().graphicsLayer { translationX = slide() * size.width }) {
+                cells.forEachIndexed { i, p ->
+                    key(p?.start ?: -1L) {
+                        val left = p?.let { maxOf(it.start, windowStart) } ?: windowStart
+                        val right = p?.let { minOf(it.stop, windowEnd) } ?: windowEnd
+                        val x = perMs * (left - windowStart).toFloat()
+                        val w = (perMs * (right - left).toFloat() - 3.dp).coerceAtLeast(6.dp)
+                        val past = p != null && p.stop <= now
+                        val live = p != null && p.start <= now && p.stop > now
+                        var cellFocused by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { onSelect(p) },
+                            onLongClick = onLongPress,
+                            modifier = Modifier.offset(x = x).width(w).fillMaxHeight().focusRequester(requesterFor(p?.start ?: -1L))
+                                .onFocusChanged { cellFocused = it.isFocused; if (it.isFocused) onFocus(p) }
+                                .onPreviewKeyEvent { e ->
+                                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (e.key) {
+                                        // At the right edge: move the window on rather than leaving the row.
+                                        Key.DirectionRight -> if (i == cells.lastIndex && right >= windowEnd) {
+                                            onShift(SLOT_MS, p); true
+                                        } else false
+                                        Key.DirectionUp -> onVertical(-1)
+                                        Key.DirectionDown -> onVertical(1)
+                                        // At the left edge: go back in time while there's history to show;
+                                        // otherwise let focus move out to the group list.
+                                        Key.DirectionLeft -> if (i == 0 && left <= windowStart && canGoBack(windowStart - SLOT_MS)) {
+                                            onShift(-SLOT_MS, p); true
+                                        } else false
+                                        else -> false
+                                    }
+                                },
+                            shape = ClickableSurfaceDefaults.shape(cellShape),
+                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+                            colors = ClickableSurfaceDefaults.colors(
+                                // No listings: an empty outlined track, not a cell full of "No guide data".
+                                containerColor = when { p == null -> Color.Transparent; past -> FerryColors.CellPast; live -> FerryColors.CellLive; else -> FerryColors.Navy },
+                                contentColor = if (past) FerryColors.Dim else FerryColors.Text,
+                                focusedContainerColor = FerryColors.FocusFill,
+                                focusedContentColor = FerryColors.Text,
+                            ),
+                            border = ClickableSurfaceDefaults.border(
+                                border = if (p == null) Border(BorderStroke(1.dp, FerryColors.Line), shape = cellShape) else Border.None,
+                                focusedBorder = Border(BorderStroke(2.dp, FerryColors.Gold), shape = cellShape),
+                            ),
+                        ) {
+                            // What has already aired of the programme that's on: its right edge is "now".
+                            if (live) {
+                                val elapsed = (perMs * (now - left).toFloat()).coerceIn(0.dp, w)
+                                Box(
+                                    Modifier.fillMaxHeight().width(elapsed).clip(RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp))
+                                        .background(if (cellFocused) FerryColors.CellElapsedFocused else FerryColors.CellElapsed)
                                 )
                             }
-                            Text(
-                                p?.title ?: "No guide data",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = if (live && p != null) androidx.compose.ui.text.font.FontWeight.Medium else androidx.compose.ui.text.font.FontWeight.Normal,
-                                ),
-                            )
+                            // Very short programmes are too narrow for any text; the detail panel names them.
+                            if (p != null && w > 40.dp) Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                val reminderSet = "${channel.epgKey}@${p.start}" in reminded
+                                val catchUp = p.stop <= now && channel.archiveDays > 0 &&
+                                    p.start > now - channel.archiveDays * 86_400_000L
+                                if (reminderSet || catchUp) {
+                                    androidx.tv.material3.Icon(
+                                        if (reminderSet) FerryIcons.Bell else FerryIcons.Replay, null,
+                                        tint = if (reminderSet) FerryColors.Sea else FerryColors.Muted,
+                                        modifier = Modifier.padding(end = 5.dp).size(13.dp),
+                                    )
+                                }
+                                Text(
+                                    p.title,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = (if (comfortable) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
+                                        .copy(fontWeight = if (live) FontWeight.Medium else FontWeight.Normal),
+                                )
+                            }
                         }
                     }
                 }
             }
-            NowLine(windowStart, now, perMs)
         }
     }
 }
