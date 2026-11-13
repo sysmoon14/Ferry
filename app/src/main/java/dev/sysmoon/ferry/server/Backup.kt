@@ -17,6 +17,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class FerryExport(
     val ferryExport: Int = 1,
+    /** False when playlist logins and the MQTT password were left out. */
+    val includesPasswords: Boolean = true,
     val exportedAt: Long = 0,
     val from: String = "",
     val sources: List<ExportSource> = emptyList(),
@@ -66,7 +68,8 @@ data class ExportChannel(
 data class ImportResult(val sources: Int, val channels: Int, val removedSources: Int)
 
 object Backup {
-    suspend fun export(g: AppGraph): FerryExport {
+    /** [secrets]: include playlist logins and the MQTT password (a Ferry that follows this one needs them). */
+    suspend fun export(g: AppGraph, secrets: Boolean): FerryExport {
         val s = g.settings
         val hiddenGroups = s.hiddenGroups()
         // Only choices that differ from what the group settings would give anyway.
@@ -74,10 +77,11 @@ object Backup {
             .filter { it.favourite || it.sortOrder != Int.MAX_VALUE || it.hidden != (it.groupTitle != null && it.groupTitle in hiddenGroups) }
             .map { ExportChannel(it.sourceId, it.name, it.tvgId, it.streamUrl, it.favourite, it.hidden, it.sortOrder) }
         return FerryExport(
+            includesPasswords = secrets,
             exportedAt = System.currentTimeMillis(),
             from = s.deviceName(),
             sources = g.db.sources().all().map {
-                ExportSource(it.id, it.name, it.type, it.url, it.username, it.password, it.epgUrl, it.refreshHours)
+                ExportSource(it.id, it.name, it.type, it.url, it.username, it.password.takeIf { secrets }, it.epgUrl, it.refreshHours)
             },
             settings = ExportSettings(
                 hiddenGroups = hiddenGroups.sorted(),
@@ -88,7 +92,7 @@ object Backup {
                 skyOverrides = s.skyOverrides().mapKeys { it.key.toString() },
                 backupEpgUrls = s.backupEpgUrls(),
                 resumeLastChannel = s.resumeLastChannel(),
-                mqtt = s.mqtt(),
+                mqtt = s.mqtt().let { if (secrets) it else it.copy(password = "") },
             ),
             channels = channels,
         )
@@ -136,7 +140,8 @@ object Backup {
             }.toMap())
             s.setBackupEpgUrls(backupEpgUrls)
             s.setResumeLastChannel(resumeLastChannel)
-            mqtt?.let { s.setMqtt(it) }
+            // An export without passwords keeps the MQTT password already here.
+            mqtt?.let { s.setMqtt(if (it.password.isEmpty()) it.copy(password = s.mqtt().password) else it) }
         }
 
         val byRef = e.channels.groupBy { it.source }

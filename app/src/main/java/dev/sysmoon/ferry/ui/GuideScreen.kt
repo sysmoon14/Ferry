@@ -78,6 +78,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+import androidx.tv.material3.rememberDrawerState
 
 const val FAVOURITES = "\u0000fav"
 const val ALL = "\u0000all"
@@ -171,6 +172,8 @@ fun GuideScreen(
     val recents by remember { graph.settings.recents }.collectAsState(initial = emptyList())
 
     val gridView = section != Section.LIST
+    // One clock for the channel list: now/next and the progress bars follow it.
+    val listNow = rememberMinute()
     val hasRail = section != Section.FAVOURITES
     val validKeys = buildSet {
         add(ALL); if (recents.isNotEmpty()) add(RECENT)
@@ -337,13 +340,23 @@ fun GuideScreen(
         if (!focused && r.target is GuideFocus.Channel) backFromContent()
     }
 
+    // The drawer opens itself when it sees focus arrive, but it ignores focus changes until its
+    // own first effect has run. Focus given by the system at launch could land in the menu before
+    // that, leaving the menu focused but collapsed. So the open state is set here, from focus.
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var menuFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(menuFocused) {
+        drawerState.setValue(if (menuFocused) DrawerValue.Open else DrawerValue.Closed)
+    }
     ModalNavigationDrawer(
         modifier = Modifier.fillMaxSize().background(FerryColors.Deep),
+        drawerState = drawerState,
         drawerContent = { drawerValue ->
             NavRail(
                 open = drawerValue == DrawerValue.Open,
                 current = currentMenuItem,
                 menuFocus = menuFocus,
+                onFocus = { menuFocused = it },
                 onEnter = ::enter,
             )
         },
@@ -463,6 +476,7 @@ fun GuideScreen(
                         items(shown, key = { it.id }) { channel ->
                             ChannelRow(
                                 channel = channel,
+                                nowMs = listNow,
                                 playing = nowPlaying.channel?.id == channel.id,
                                 modifier = if (channel.id == listTargetId) Modifier.focusRequester(listTargetFocus) else Modifier,
                                 onLongClick = { menuFor = channel },
@@ -485,9 +499,10 @@ fun GuideScreen(
  * what's behind it), like the side menu of any streaming app.
  */
 @Composable
-private fun NavigationDrawerScope.NavRail(open: Boolean, current: MenuItem, menuFocus: FocusRequester, onEnter: (MenuItem) -> Unit) {
+private fun NavigationDrawerScope.NavRail(open: Boolean, current: MenuItem, menuFocus: FocusRequester, onFocus: (Boolean) -> Unit, onEnter: (MenuItem) -> Unit) {
     Column(
         Modifier
+            .onFocusChanged { onFocus(it.hasFocus) }
             .fillMaxHeight()
             .background(FerryColors.Deep)
             .padding(horizontal = 12.dp, vertical = 16.dp),
@@ -554,6 +569,7 @@ private fun Clock() {
 @Composable
 private fun ChannelRow(
     channel: ChannelEntity,
+    nowMs: Long,
     playing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -561,10 +577,10 @@ private fun ChannelRow(
 ) {
     val graph = LocalContext.current.graph
     // Per-row lookup is indexed and cheap; swap for a windowed query when the grid view lands.
-    val programmes by produceState(initialValue = emptyList(), channel.epgKey) {
-        value = graph.db.programmes().upcoming(channel.epgKey, System.currentTimeMillis(), 2)
+    // Reloaded every minute: a list left open across a programme change used to keep the old one.
+    val programmes by produceState<List<dev.sysmoon.ferry.data.ProgrammeEntity>>(emptyList(), channel.epgKey, nowMs / 60_000) {
+        value = runCatching { graph.db.programmes().upcoming(channel.epgKey, nowMs, 2) }.getOrDefault(value)
     }
-    val nowMs = System.currentTimeMillis()
     val now = programmes.firstOrNull()?.takeIf { it.start <= nowMs }
     val next = if (now != null) programmes.getOrNull(1) else programmes.firstOrNull()
     val time = remember { DateFormat.getTimeInstance(DateFormat.SHORT) }

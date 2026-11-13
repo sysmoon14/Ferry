@@ -164,7 +164,9 @@ fun GuideGrid(
     // lands on whatever is on at the same time instead of the geometrically nearest cell.
     var cursorTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var verticalNav by remember { mutableStateOf(false) }
-    val requesters = remember { HashMap<Pair<String, Long>, FocusRequester>() }
+    // Started again with the list and with each 3-hour block of the timeline, so it holds the cells
+    // of what can be on screen, not every cell ever shown.
+    val requesters = remember(channels, bucket) { HashMap<Pair<String, Long>, FocusRequester>() }
     fun requester(channelId: String, start: Long) = requesters.getOrPut(channelId to start) { FocusRequester() }
 
     // Back: jump back to now and go to the group list in one press (no scrolling back through

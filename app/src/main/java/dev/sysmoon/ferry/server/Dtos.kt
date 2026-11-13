@@ -9,7 +9,9 @@ import dev.sysmoon.ferry.data.SourceType
 import dev.sysmoon.ferry.player.NowPlaying
 import kotlinx.serialization.Serializable
 
-@Serializable data class PairRequest(val pin: String)
+/** [label] names the device being paired ("Ferry: Kitchen TV"); the server falls back to the User-Agent. */
+@Serializable data class PairRequest(val pin: String, val label: String? = null)
+@Serializable data class PairedDeviceDto(val id: String, val label: String, val pairedAt: Long, val lastUsedAt: Long, val current: Boolean)
 @Serializable data class PairResponse(val token: String)
 @Serializable data class ErrorDto(val error: String)
 @Serializable data class OkDto(val ok: Boolean = true)
@@ -120,9 +122,10 @@ data class MqttDto(
     val hasPassword: Boolean,
     val discoveryPrefix: String,
     val baseTopic: String,
+    val tls: Boolean = false,
 )
 
-fun MqttConfig.toDto() = MqttDto(enabled, host, port, username, password.isNotEmpty(), discoveryPrefix, baseTopic)
+fun MqttConfig.toDto() = MqttDto(enabled, host, port, username, password.isNotEmpty(), discoveryPrefix, baseTopic, tls)
 
 @Serializable
 data class MqttInput(
@@ -134,6 +137,7 @@ data class MqttInput(
     val password: String? = null,
     val discoveryPrefix: String = "homeassistant",
     val baseTopic: String = "ferry",
+    val tls: Boolean = false,
 )
 
 @Serializable data class TestResult(val ok: Boolean, val message: String)

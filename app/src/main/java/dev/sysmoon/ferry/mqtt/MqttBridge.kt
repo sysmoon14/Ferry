@@ -28,12 +28,16 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.time.Instant
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.combine
 
 /**
  * Home Assistant bridge over MQTT discovery. Creates one HA device per TV with:
  *  - select.<name>_channel     favourites; choosing one tunes the TV
  *  - sensor.<name>_state       idle / buffering / playing / paused / error
- *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (+ JSON attributes)
+ *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (details are attributes of _state)
+ *  - sensor.<name>_resolution, _bitrate, _dropped_frames, _buffer  (diagnostic)
  *  - button.<name>_channel_up / _channel_down / _stop / _pause / _previous_channel / _live
  *  - image.<name>_channel_logo, number.<name>_sleep_timer, sensor.<name>_next_reminder
  *  - sensor.<name>_next_match  kick-off of the next match for My teams, with title/deep link attributes
@@ -47,7 +51,8 @@ import java.time.Instant
  *  base/cmd/play       "tvg:BBCOne.uk" | "id:<channelId>" | "number:101" | "101" | channel name
  *  base/cmd/key        up | down | stop | pause | previous_channel | live
  *  base/cmd/sleep      minutes (0 = off)
- *  base/logo           current channel's logo URL (retained)
+ *  base/stats          JSON: resolution, bitrate, dropped frames, buffer (retained; diagnostic sensors)
+ *  base/logo           current channel's logo URL, or Ferry's icon when idle (retained)
  *  base/reminders      JSON: next reminder + list (retained)
  *  base/event          JSON events (not retained)
  *  base/crash          JSON: last crash / caught error (retained)
@@ -58,7 +63,10 @@ class MqttBridge(private val g: AppGraph) {
     fun start() {
         if (job?.isActive == true) return
         job = g.scope.launch {
-            g.settings.mqtt.distinctUntilChanged().collectLatest { cfg ->
+            // A new session whenever the broker settings or the device name change, so Home
+            // Assistant's discovery (which carries the name) is published again.
+            combine(g.settings.mqtt, g.settings.deviceName) { cfg, name -> cfg to name }
+                .distinctUntilChanged().collectLatest { (cfg, _) ->
                 if (!cfg.enabled || cfg.host.isBlank()) return@collectLatest
                 // Reconnect loop: collectLatest cancels this when settings change.
                 while (true) {
@@ -106,11 +114,25 @@ class MqttBridge(private val g: AppGraph) {
                 // Re-published every minute too, so the sleep timer's minutes count down in HA.
                 val minutes = kotlinx.coroutines.flow.flow { while (true) { emit(Unit); delay(60_000) } }
                 kotlinx.coroutines.flow.combine(g.player.state, g.sleep.endsAt, minutes) { st, _, _ -> st }
-                    .collect { client.publish("$base/state", stateJson(it, if (it.channel != null) g.player.stats() else null).toString()) }
+                    .collect { client.publish("$base/state", stateJson(it).toString()) }
             }
             launch {
-                g.player.state.map { it.channel?.logo }.distinctUntilChanged().collect { logo ->
-                    if (!logo.isNullOrBlank()) client.publish("$base/logo", logo)
+                // Picture quality on its own topic, behind diagnostic sensors: these numbers change
+                // constantly, and as attributes of the main sensors they filled HA's recorder.
+                var last: String? = null
+                while (true) {
+                    val playing = g.player.state.value.channel != null
+                    val payload = statsJson(if (playing) g.player.stats() else null).toString()
+                    if (payload != last) { client.publish("$base/stats", payload); last = payload }
+                    delay(if (playing) 30_000 else 5_000)
+                }
+            }
+            launch {
+                // The channel's logo, or Ferry's own icon when nothing is playing (or the channel
+                // has none): the picture in HA no longer stays on the last channel watched.
+                g.player.state.map { it.channel?.logo?.takeIf { l -> l.isNotBlank() } }.distinctUntilChanged().collect { logo ->
+                    val url = logo ?: Network.localIpv4()?.let { "http://$it:${FerryService.PORT}/icon.png" }
+                    if (url != null) client.publish("$base/logo", url)
                 }
             }
             launch {
@@ -170,9 +192,12 @@ class MqttBridge(private val g: AppGraph) {
             }
             awaitCancellation()
         } finally {
-            runCatching {
-                client.publish("$base/availability", "offline")
-                client.disconnect().await()
+            // This runs while the coroutine is being cancelled (settings changed, service stopping).
+            // Without NonCancellable the first suspension throws, the disconnect is skipped, and the
+            // old client stays connected and subscribed: every command then ran twice.
+            withContext(NonCancellable) {
+                runCatching { withTimeout(3_000) { client.publish("$base/availability", "offline") } }
+                runCatching { withTimeout(3_000) { client.disconnect().await() } }
             }
         }
     }
@@ -221,9 +246,25 @@ class MqttBridge(private val g: AppGraph) {
             c.publish("$p/sensor/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
                 "state_topic" to "$base/state",
                 "value_template" to template,
-                "json_attributes_topic" to "$base/state",
                 "icon" to "mdi:television-classic",
-            )))
+            // The details (ids, times, description, deep link) hang off the State sensor only.
+            ) + (if (key == "state") mapOf("json_attributes_topic" to "$base/state") else emptyMap())))
+        }
+        // Picture quality: diagnostic sensors fed from their own topic.
+        for ((key, label, field, unit) in listOf(
+            Diag("resolution", "Resolution", "resolution", null),
+            Diag("bitrate", "Bitrate", "bitrate_kbps", "kbit/s"),
+            Diag("dropped_frames", "Dropped frames", "dropped_frames", "frames"),
+            Diag("buffer", "Buffer", "buffer_seconds", "s"),
+        )) {
+            c.publish("$p/sensor/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
+                "state_topic" to "$base/stats",
+                "value_template" to "{{ value_json.$field if value_json.$field is not none else 'None' }}",
+                "json_attributes_topic" to (if (key == "resolution") "$base/stats" else null),
+                "unit_of_measurement" to unit,
+                "entity_category" to "diagnostic",
+                "icon" to "mdi:chart-line",
+            ).filterValues { it != null }))
         }
         c.publish("$p/sensor/ferry_$id/progress/config", json(common(id, name, base, "progress", "Programme progress") + mapOf(
             "state_topic" to "$base/state",
@@ -387,7 +428,21 @@ class MqttBridge(private val g: AppGraph) {
         )))
     }
 
-    private fun stateJson(s: NowPlaying, stats: dev.sysmoon.ferry.player.PlayerStats?): JsonObject = buildJsonObject {
+    private data class Diag(val key: String, val label: String, val field: String, val unit: String?)
+
+    /** What the player reports about the stream; every value null when nothing is playing. */
+    private fun statsJson(stats: dev.sysmoon.ferry.player.PlayerStats?): JsonObject = buildJsonObject {
+        put("resolution", stats?.resolution)
+        put("frame_rate", stats?.frameRate?.takeIf { it > 0 }?.let { Math.round(it) })
+        put("bitrate_kbps", stats?.bitrate?.takeIf { it > 0 }?.div(1000))
+        put("video_codec", stats?.videoCodec)
+        put("audio_codec", stats?.audioCodec)
+        put("dropped_frames", stats?.droppedFrames)
+        put("buffer_seconds", stats?.bufferedMs?.div(1000))
+        put("tunnelled", stats?.tunnelled)
+    }
+
+    private fun stateJson(s: NowPlaying): JsonObject = buildJsonObject {
         put("state", s.state.name.lowercase())
         put("channel", s.channel?.name)
         put("favourite", s.channel?.takeIf { it.favourite }?.name)
@@ -408,15 +463,6 @@ class MqttBridge(private val g: AppGraph) {
         put("stream", s.stream?.name?.takeIf { s.streamCount > 1 })
         put("streams", s.streamCount)
         put("hdr", s.hdr)
-        // Picture quality, so HA can graph dropped frames or flag a stream that fell back to SD.
-        put("resolution", stats?.resolution)
-        put("frame_rate", stats?.frameRate?.takeIf { it > 0 }?.let { Math.round(it) })
-        put("bitrate_kbps", stats?.bitrate?.takeIf { it > 0 }?.div(1000))
-        put("video_codec", stats?.videoCodec)
-        put("audio_codec", stats?.audioCodec)
-        put("dropped_frames", stats?.droppedFrames)
-        put("buffer_seconds", stats?.bufferedMs?.div(1000))
-        put("tunnelled", stats?.tunnelled)
         putJsonObject("deep_link") {
             s.channel?.let { ch -> put("url", ch.tvgId?.let { "ferry://tvg/$it" } ?: "ferry://channel/${ch.id}") }
         }
@@ -444,6 +490,7 @@ class MqttBridge(private val g: AppGraph) {
                 .identifier("ferry-$id-${System.currentTimeMillis() % 10_000}")
                 .serverHost(cfg.host)
                 .serverPort(cfg.port)
+                .let { if (cfg.tls) it.sslWithDefaultConfig() else it }
                 .buildAsync()
 
         private suspend fun connect(client: Mqtt3AsyncClient, cfg: MqttConfig, availabilityTopic: String?) {

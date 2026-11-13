@@ -27,7 +27,15 @@ data class MqttConfig(
     val password: String = "",
     val discoveryPrefix: String = "homeassistant",
     val baseTopic: String = "ferry",
+    /** Connect to the broker over TLS (usually port 8883), checked against the TV's trusted certificates. */
+    val tls: Boolean = false,
 )
+
+/** A phone, Home Assistant or another Ferry that paired with this box. */
+data class PairedDevice(val token: String, val label: String, val pairedAt: Long, val lastUsedAt: Long) {
+    /** Safe to show and to use in URLs: it doesn't reveal the token. */
+    val id: String get() = Settings.tokenId(token)
+}
 
 class Settings(private val context: Context) {
     private val store get() = context.dataStore
@@ -51,6 +59,7 @@ class Settings(private val context: Context) {
         val deviceName = stringPreferencesKey("device_name")
         val pin = stringPreferencesKey("pair_pin")
         val tokens = stringSetPreferencesKey("tokens")
+        val mqttTls = booleanPreferencesKey("mqtt_tls")
         val lastChannel = stringPreferencesKey("last_channel")
         val hiddenGroups = stringSetPreferencesKey("hidden_groups")
         val mergeDuplicates = booleanPreferencesKey("merge_duplicates")
@@ -86,6 +95,7 @@ class Settings(private val context: Context) {
         it[Keys.mqttPass] = cfg.password
         it[Keys.mqttPrefix] = cfg.discoveryPrefix.ifBlank { "homeassistant" }
         it[Keys.mqttBase] = cfg.baseTopic.ifBlank { "ferry" }
+        it[Keys.mqttTls] = cfg.tls
     }
 
     private fun Preferences.toMqtt() = MqttConfig(
@@ -96,6 +106,7 @@ class Settings(private val context: Context) {
         password = this[Keys.mqttPass] ?: "",
         discoveryPrefix = this[Keys.mqttPrefix] ?: "homeassistant",
         baseTopic = this[Keys.mqttBase] ?: "ferry",
+        tls = this[Keys.mqttTls] ?: false,
     )
 
     /**
@@ -187,8 +198,48 @@ class Settings(private val context: Context) {
     suspend fun pin(): String = getOrCreate(Keys.pin) { newPin() }
     suspend fun regeneratePin() = store.edit { it[Keys.pin] = newPin() }
 
-    suspend fun tokens(): Set<String> = store.data.first()[Keys.tokens] ?: emptySet()
-    suspend fun addToken(token: String) = store.edit { it[Keys.tokens] = (it[Keys.tokens] ?: emptySet()) + token }
+    // Paired devices. Each entry is "token<TAB>pairedAt<TAB>lastUsedAt<TAB>label"; an entry with no
+    // tabs is a token from before devices were listed.
+    private fun parseDevice(entry: String): PairedDevice {
+        val p = entry.split('\t', limit = 4)
+        return if (p.size < 4) PairedDevice(p[0], "Paired before devices were listed", 0, 0)
+        else PairedDevice(p[0], p[3], p[1].toLongOrNull() ?: 0, p[2].toLongOrNull() ?: 0)
+    }
+    private fun PairedDevice.encode() = "$token\t$pairedAt\t$lastUsedAt\t${label.replace('\t', ' ')}"
+
+    /** Everything paired with this box, most recently used first. */
+    suspend fun pairedDevices(): List<PairedDevice> =
+        (store.data.first()[Keys.tokens] ?: emptySet()).map(::parseDevice).sortedByDescending { it.lastUsedAt }
+
+    suspend fun addToken(token: String, label: String) = store.edit {
+        val now = System.currentTimeMillis()
+        val device = PairedDevice(token, label.trim().take(60).ifBlank { "Unnamed device" }, now, now)
+        it[Keys.tokens] = (it[Keys.tokens] ?: emptySet()) + device.encode()
+    }
+
+    /**
+     * True if [token] is paired. A device that hasn't called for [TOKEN_IDLE_DAYS] days is unpaired
+     * instead; each use is noted (at most once an hour, to spare the flash).
+     */
+    suspend fun useToken(token: String): Boolean {
+        val now = System.currentTimeMillis()
+        val bytes = token.toByteArray()
+        val device = (store.data.first()[Keys.tokens] ?: return false).asSequence().map(::parseDevice)
+            .firstOrNull { java.security.MessageDigest.isEqual(it.token.toByteArray(), bytes) } ?: return false
+        // Paired before expiry existed (no dates): the clock starts now.
+        val last = if (device.lastUsedAt > 0) device.lastUsedAt else now
+        if (now - last > TOKEN_IDLE_DAYS * 86_400_000L) { revokeToken(device.id); return false }
+        if (now - device.lastUsedAt > 3_600_000L) store.edit { p ->
+            p[Keys.tokens] = (p[Keys.tokens] ?: emptySet()).map(::parseDevice).map {
+                if (it.token == device.token) it.copy(pairedAt = if (it.pairedAt == 0L) now else it.pairedAt, lastUsedAt = now) else it
+            }.map { it.encode() }.toSet()
+        }
+        return true
+    }
+
+    suspend fun revokeToken(id: String) = store.edit { p ->
+        p[Keys.tokens] = (p[Keys.tokens] ?: emptySet()).filter { parseDevice(it).id != id }.toSet()
+    }
     suspend fun revokeAllTokens() = store.edit { it[Keys.tokens] = emptySet() }
 
     /** Groups the user has hidden; applied to new channels on every refresh. */
@@ -259,6 +310,11 @@ class Settings(private val context: Context) {
 
     companion object {
         const val DEFAULT_IDLE_STOP_HOURS = 4
+        /** A paired device that hasn't called for this long is unpaired. */
+        const val TOKEN_IDLE_DAYS = 90L
+        /** A short id for a pairing token that doesn't reveal it. */
+        fun tokenId(token: String): String =
+            java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).take(6).joinToString("") { "%02x".format(it) }
         private const val RECENTS_MAX = 20
         private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         private val reminderList = kotlinx.serialization.builtins.ListSerializer(Reminder.serializer())
