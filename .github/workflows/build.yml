@@ -70,6 +70,28 @@ jobs:
       - name: Assemble APKs
         run: ./gradlew assembleDebug assembleRelease --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}
 
+      # Static analysis: reported, not enforced (yet). The reports are attached to the run.
+      - name: Lint and detekt
+        continue-on-error: true
+        run: ./gradlew lintDebug detekt --continue --console=plain
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-reports
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/detekt/
+          if-no-files-found: ignore
+
+      # The Room schema the build generated, so it can be committed alongside a database change.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: room-schemas
+          path: app/schemas/
+          if-no-files-found: ignore
+
       # Surface compiler / Gradle errors as a single annotation so they're readable from the API
       # (and on the run summary page) without downloading logs.
       - name: Summarise errors
