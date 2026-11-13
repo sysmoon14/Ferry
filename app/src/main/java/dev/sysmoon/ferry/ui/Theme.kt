@@ -91,8 +91,17 @@ object FerryColors {
     /** Live: the dot and tag on whatever is on air. */
     val Live = Color(0xFFFF5A5F)
     val Text = Color(0xFFF3F6FA)
+    /** Secondary text: anything meant to be read (5.4:1 or better on every surface). */
     val Muted = Color(0xFFA6B2C4)
+    /** Decoration only (chevrons, disabled controls): too low in contrast for text. */
     val Faint = Color(0xFF6C7A90)
+    /** Titles of programmes that have finished. */
+    val Dim = Color(0xFF8E9BB0)
+    /** Guide cells: finished, on now, the part of it already aired (and that when focused). */
+    val CellPast = Color(0xFF0E1727)
+    val CellLive = Color(0xFF16233A)
+    val CellElapsed = Color(0xFF263A5C)
+    val CellElapsedFocused = Color(0xFF3A5380)
     /** Hairline borders on dark surfaces. */
     val Line = Color(0x1AFFFFFF)
 }
@@ -295,7 +304,7 @@ fun ProgressLine(fraction: Float, modifier: Modifier = Modifier, color: Color = 
 
 /** Key hints at the bottom of a panel: "OK  watch  ·  ▲▼  channels". */
 @Composable
-fun Hint(text: String, color: Color = FerryColors.Faint, modifier: Modifier = Modifier) {
+fun Hint(text: String, color: Color = FerryColors.Muted, modifier: Modifier = Modifier) {
     Text(text, color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 

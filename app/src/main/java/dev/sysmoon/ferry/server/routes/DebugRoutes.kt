@@ -84,6 +84,7 @@ internal fun Route.debugRoutes(api: ApiContext) {
             }
             runCatching { walk(kotlinx.serialization.json.Json.parseToJsonElement(text), "") }
             call.respond(kotlinx.serialization.json.JsonArray(found))
+        }
         // Ferry's own log: the last few hundred lines, newest last (?n=200 for fewer).
         get("/debug/log") {
             val n = call.request.queryParameters["n"]?.toIntOrNull() ?: 600

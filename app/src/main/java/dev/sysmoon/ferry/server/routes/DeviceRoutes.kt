@@ -67,5 +67,6 @@ internal fun Route.deviceRoutes(api: ApiContext) {
             g.player.state.collectLatest { state ->
                 send(Frame.Text(json.encodeToString(state.toStatus(name))))
             }
+        }
     }
 }

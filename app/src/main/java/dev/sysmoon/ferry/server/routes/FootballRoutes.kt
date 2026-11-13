@@ -53,6 +53,7 @@ internal fun Route.footballRoutes(api: ApiContext) {
                     put("broadcasts", kotlinx.serialization.json.JsonArray(f.broadcasts.map { kotlinx.serialization.json.JsonPrimitive(it) }))
                 }) }
             })
+        }
         // Slow on big playlists: computed in the background; poll until it's ready.
         get("/football/candidates") {
             val id = call.request.queryParameters["event"].orEmpty()

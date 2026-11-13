@@ -60,6 +60,7 @@ class Settings(private val context: Context) {
         val pin = stringPreferencesKey("pair_pin")
         val tokens = stringSetPreferencesKey("tokens")
         val mqttTls = booleanPreferencesKey("mqtt_tls")
+        val guideComfortable = booleanPreferencesKey("guide_comfortable")
         val lastChannel = stringPreferencesKey("last_channel")
         val hiddenGroups = stringSetPreferencesKey("hidden_groups")
         val mergeDuplicates = booleanPreferencesKey("merge_duplicates")
@@ -285,6 +286,9 @@ class Settings(private val context: Context) {
     /** Picture zoom mode name (see player Zoom). */
     suspend fun zoom(): String = store.data.first()[Keys.zoom] ?: "FIT"
     suspend fun setZoom(name: String) = store.edit { it[Keys.zoom] = name }
+    /** Bigger rows and text in the TV guide, for watching from further away. */
+    val guideComfortable: Flow<Boolean> = store.data.map { it[Keys.guideComfortable] ?: false }
+    suspend fun setGuideComfortable(on: Boolean) = store.edit { it[Keys.guideComfortable] = on }
     /** Hours of unattended playback before "Still watching?" (0 = never ask). */
     val idleStopHours: Flow<Int> = store.data.map { it[Keys.idleStopHours] ?: DEFAULT_IDLE_STOP_HOURS }
     suspend fun idleStopHours(): Int = idleStopHours.first()
