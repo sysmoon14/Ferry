@@ -66,6 +66,11 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --console=plain 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
 
+      - name: Print Room schema (temporary)
+        if: always()
+        run: |
+          for f in app/schemas/*/*.json; do python3 -c "import sys;print('::notice title=schema '+sys.argv[1]+'::'+open(sys.argv[1]).read().replace('%','%25').replace('\r','').replace('\n','%0A'))" "$f"; done
+
       # Release (not debuggable) starts noticeably faster on TV boxes; debug is kept for diagnostics.
       - name: Assemble APKs
         run: ./gradlew assembleDebug assembleRelease --console=plain 2>&1 | tee -a build.log; exit ${PIPESTATUS[0]}

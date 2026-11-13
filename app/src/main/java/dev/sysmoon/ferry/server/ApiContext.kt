@@ -149,9 +149,11 @@ internal fun SourceInput.validated(): SourceInput {
         return copy(name = name.trim(), url = region, username = null, password = null, epgUrl = null,
             refreshHours = refreshHours.coerceIn(1, 168))
     }
-    require(url.startsWith("http://") || url.startsWith("https://")) { "URL must start with http:// or https://" }
+    // Trimmed first: a URL pasted with a space in front of it used to be turned away.
+    val address = url.trim()
+    require(address.startsWith("http://") || address.startsWith("https://")) { "URL must start with http:// or https://" }
     require(refreshHours in 1..168) { "Refresh must be 1–168 hours" }
-    return copy(name = name.trim(), url = url.trim(), epgUrl = epgUrl?.trim()?.ifBlank { null })
+    return copy(name = name.trim(), url = address, epgUrl = epgUrl?.trim()?.ifBlank { null })
 }
 
 internal fun MqttInput.toConfig(existingPassword: String) = MqttConfig(

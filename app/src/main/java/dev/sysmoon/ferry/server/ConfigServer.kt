@@ -82,10 +82,10 @@ class ConfigServer(private val g: AppGraph) {
             exception<BadRequestException> { call, e -> call.respond(HttpStatusCode.BadRequest, ErrorDto(e.message ?: "Bad request")) }
             exception<ContentTransformationException> { call, e -> call.respond(HttpStatusCode.BadRequest, ErrorDto(e.message ?: "Bad request")) }
             exception<NotFound> { call, e -> call.respond(HttpStatusCode.NotFound, ErrorDto(e.message ?: "Not found")) }
-            // Ferry's mistake: log the detail, keep it out of the response.
+            // Ferry's own failure (a provider that didn't answer, a bug): 500, logged, with the reason.
             exception<Throwable> { call, e ->
                 Logs.w(TAG, "API error on ${call.request.local.uri.substringBefore('?')}", e)
-                call.respond(HttpStatusCode.InternalServerError, ErrorDto("Ferry hit an error handling this (${e.javaClass.simpleName}); see /api/debug/log"))
+                call.respond(HttpStatusCode.InternalServerError, ErrorDto(e.message ?: e.javaClass.simpleName))
             }
         }
 
