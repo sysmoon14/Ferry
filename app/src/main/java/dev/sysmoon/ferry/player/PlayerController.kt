@@ -373,6 +373,12 @@ class PlayerController(
         }
     }
 
+    /** Picks how the picture fills the screen. Remembered across launches. */
+    fun setZoom(z: Zoom) {
+        _zoom.value = z
+        scope.launch { settings.setZoom(z.name) }
+    }
+
     /** Fit → Stretch → Zoom → Fit. Remembered across launches. */
     fun cycleZoom(): Zoom {
         val next = Zoom.entries[(_zoom.value.ordinal + 1) % Zoom.entries.size]

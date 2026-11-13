@@ -114,6 +114,21 @@ interface ChannelDao {
     @Query("SELECT groupTitle FROM channels WHERE groupTitle IS NOT NULL GROUP BY groupTitle ORDER BY MIN(sourceId * 10000000 + position)")
     suspend fun groups(): List<String>
 
+    /** How many rows each visible group shows (duplicates folded into a row count once). */
+    @Query("SELECT groupTitle AS name, COUNT(*) AS count FROM channels WHERE hidden = 0 AND primaryId IS NULL AND groupTitle IS NOT NULL GROUP BY groupTitle")
+    fun observeGroupCounts(): Flow<List<GroupSummary>>
+
+    /**
+     * Channels hidden one at a time (from the long-press menu or the web page), not those in a
+     * hidden group: hidden rows whose group still shows other channels, or that have no group.
+     */
+    @Query(
+        """SELECT * FROM channels WHERE hidden = 1 AND primaryId IS NULL
+           AND (groupTitle IS NULL OR groupTitle IN (SELECT groupTitle FROM channels WHERE hidden = 0 AND groupTitle IS NOT NULL))
+           ORDER BY name COLLATE NOCASE LIMIT 300"""
+    )
+    fun observeHiddenChannels(): Flow<List<ChannelEntity>>
+
     /** Only rows the user has customised; everything else is rebuilt from the playlist. */
     @Query(
         """SELECT id, favourite, hidden, sortOrder, streamUrl FROM channels

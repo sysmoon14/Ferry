@@ -66,6 +66,8 @@ class AppGraph(val context: Context) {
     val matchFinder = dev.sysmoon.ferry.data.MatchFinder(db, settings, sky, footballPicks)
     /** True while Ferry's screen is showing (reminder pop-ups only appear then). */
     val uiVisible = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** Ferry opened something that comes straight back (the TV's voice input): playback carries on. */
+    @Volatile var awaitingResult = false
     val updater = dev.sysmoon.ferry.update.Updater(context, http, scope) { uiVisible.value }
     val mqtt = MqttBridge(this)
 }

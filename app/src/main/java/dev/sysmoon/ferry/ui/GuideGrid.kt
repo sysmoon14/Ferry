@@ -147,7 +147,7 @@ fun GuideGrid(
     LaunchedEffect(channels, bucket, epgVersion) {
         // The cells already on screen stay until their replacements are loaded: emptying the map
         // first made every row flash "No guide data" on each reload.
-        var first = true
+        var firstLoad = true
         val loaded = HashSet<String>()
         val from = bucket * LOAD_BUCKET_MS - LOAD_BUCKET_MS
         val until = bucket * LOAD_BUCKET_MS + 3 * LOAD_BUCKET_MS
@@ -163,8 +163,8 @@ fun GuideGrid(
                 val fresh = keys.associateWith { rows[it].orEmpty() }
                 // The first load of a new list / time block replaces everything (rows off screen
                 // load when they scroll into view); later ones add to it.
-                programmes = if (first) fresh else programmes + fresh
-                first = false
+                programmes = if (firstLoad) fresh else programmes + fresh
+                firstLoad = false
             }
     }
 

@@ -61,6 +61,7 @@ class Settings(private val context: Context) {
         val tokens = stringSetPreferencesKey("tokens")
         val mqttTls = booleanPreferencesKey("mqtt_tls")
         val guideComfortable = booleanPreferencesKey("guide_comfortable")
+        val recentSearches = stringPreferencesKey("recent_searches")
         val lastChannel = stringPreferencesKey("last_channel")
         val hiddenGroups = stringSetPreferencesKey("hidden_groups")
         val mergeDuplicates = booleanPreferencesKey("merge_duplicates")
@@ -159,6 +160,15 @@ class Settings(private val context: Context) {
     suspend fun pushRecent(id: String) = store.edit { p ->
         val old = p[Keys.recents]?.split(',')?.filter { it.isNotEmpty() } ?: emptyList()
         p[Keys.recents] = (listOf(id) + (old - id)).take(RECENTS_MAX).joinToString(",")
+    }
+
+    /** The last few searches that led somewhere (something was played or a reminder set), newest first. */
+    val recentSearches: Flow<List<String>> = store.data.map { p -> p[Keys.recentSearches]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun pushRecentSearch(query: String) = store.edit { p ->
+        val q = query.trim().replace('\n', ' ')
+        if (q.length < 2) return@edit
+        val old = p[Keys.recentSearches]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+        p[Keys.recentSearches] = (listOf(q) + old.filterNot { it.equals(q, ignoreCase = true) }).take(8).joinToString("\n")
     }
 
     val reminders: Flow<List<Reminder>> = store.data.map { p ->

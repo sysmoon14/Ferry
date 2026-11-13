@@ -61,6 +61,13 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.tv.material3.Surface
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Border
 
 /** A tab on the Sports screen: My teams, Today, one per enabled competition, Clubs. */
 sealed interface FootballTab {
@@ -151,7 +158,8 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
         runCatching { entryFocus.requestFocus() }
     }
 
-    val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    // 12- or 24-hour, as the TV is set (it used to be fixed to 24-hour here only).
+    val time = remember { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT) }
     val day = remember { SimpleDateFormat("EEEE d MMMM", Locale.getDefault()) }
 
     Column(Modifier.fillMaxSize().background(FerryColors.Deep).padding(horizontal = 56.dp, vertical = 40.dp)) {
@@ -181,11 +189,6 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     onOpenPlayer()
                 },
             )
-            state.tab == FootballTab.Clubs && state.club == null -> {
-                Tabs(state, competitions, myTeams.isNotEmpty(), entryFocus)
-                Spacer(Modifier.height(10.dp))
-                ClubList(teams, myTeams, onPick = { state.club = it })
-            }
             else -> {
                 if (state.club == null) Tabs(state, competitions, myTeams.isNotEmpty(), entryFocus)
                 else {
@@ -198,6 +201,10 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                if (state.tab == FootballTab.Clubs && state.club == null) {
+                    ClubList(teams, myTeams, onPick = { state.club = it })
+                    return@Column
+                }
                 val all = fixtures
                 val tab = state.tab
                 val now = System.currentTimeMillis()
@@ -210,7 +217,8 @@ fun FootballScreen(state: FootballState, active: Boolean, onOpenPlayer: () -> Un
                     else -> all
                 }
                 when {
-                    shown == null -> Text(error ?: "Loading fixtures…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
+                    shown == null -> if (error != null) Text(error ?: "", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
+                        else SkeletonRows(6, Modifier.padding(top = 6.dp))
                     shown.isEmpty() -> EmptyMessage(
                         FerryIcons.Football,
                         if (error != null) "Couldn't load fixtures" else "No matches",
@@ -244,7 +252,9 @@ private fun Tabs(state: FootballState, competitions: List<Competition>, haveMyTe
         competitions.forEach { add(FootballTab.Comp(it)) }
         add(FootballTab.Clubs)
     }
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Moving along the tabs switches straight away (no OK needed). Coming back up from the list,
+    // focusRestorer returns to the tab that was left, so the list doesn't change under you.
+    LazyRow(Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(tabs, key = { it.label }) { t ->
             val selected = state.tab == t
             Button(
@@ -257,7 +267,8 @@ private fun Tabs(state: FootballState, competitions: List<Competition>, haveMyTe
                     pressedContainerColor = FerryColors.Gold,
                     pressedContentColor = FerryColors.Deep,
                 ),
-                modifier = if (selected) Modifier.focusRequester(focus) else Modifier,
+                modifier = (if (selected) Modifier.focusRequester(focus) else Modifier)
+                    .onFocusChanged { if (it.isFocused && state.tab != t) { state.tab = t; state.club = null } },
             ) {
                 if (t == FootballTab.MyTeams) {
                     androidx.tv.material3.Icon(FerryIcons.Star, null, modifier = Modifier.size(16.dp))
@@ -275,7 +286,7 @@ private fun FixtureList(
     fixtures: List<Fixture>,
     myTeams: Set<String>,
     reminded: Set<String>,
-    time: SimpleDateFormat,
+    time: java.text.DateFormat,
     day: SimpleDateFormat,
     showCompetition: Boolean,
     onPick: (Fixture) -> Unit,
@@ -296,7 +307,7 @@ private fun FixtureList(
                             Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(FerryColors.Live))
                             Spacer(Modifier.width(7.dp))
                         }
-                        Text(d.uppercase(), color = if (f.state == MatchState.LIVE) FerryColors.Live else FerryColors.Faint, style = MaterialTheme.typography.labelSmall)
+                        Text(d.uppercase(), color = if (f.state == MatchState.LIVE) FerryColors.Live else FerryColors.Muted, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -323,7 +334,7 @@ private fun FixtureList(
                             TeamName(f.home, f.home.id in myTeams, Modifier.weight(1f), alignEnd = true)
                             Text(
                                 if (f.homeScore != null) "${f.homeScore} – ${f.awayScore}" else "v",
-                                color = if (f.homeScore != null) FerryColors.Text else FerryColors.Faint,
+                                color = if (f.homeScore != null) FerryColors.Text else FerryColors.Muted,
                                 style = (if (f.homeScore != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleSmall).copy(fontFeatureSettings = TABULAR),
                                 modifier = Modifier.padding(horizontal = 14.dp),
                             )
@@ -336,7 +347,7 @@ private fun FixtureList(
                                 androidx.tv.material3.Icon(FerryIcons.Bell, null, tint = FerryColors.Sea, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(8.dp))
                             }
-                            if (showCompetition) Text(f.competition.short, color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium)
+                            if (showCompetition) Text(f.competition.short, color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium)
                         }
                     },
                 )
@@ -349,38 +360,66 @@ private fun FixtureList(
 private fun TeamName(t: Team, mine: Boolean, modifier: Modifier, alignEnd: Boolean) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start) {
         if (!alignEnd) Crest(t)
-        if (mine && alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(13.dp))
+        if (mine && alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Text, modifier = Modifier.size(13.dp))
         Text(t.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.titleSmall)
-        if (mine && !alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(13.dp))
+        if (mine && !alignEnd) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Text, modifier = Modifier.size(13.dp))
         if (alignEnd) Crest(t)
     }
 }
 
 @Composable
-private fun Crest(t: Team) {
-    Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-        if (t.logo != null) AsyncImage(t.logo, null, Modifier.size(28.dp))
+private fun Crest(t: Team, size: androidx.compose.ui.unit.Dp = 28.dp) {
+    var failed by remember(t.logo) { mutableStateOf(false) }
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        if (t.logo != null && !failed) AsyncImage(t.logo, null, Modifier.size(size), onError = { failed = true })
+        else {
+            // No crest (or it didn't load): the club's initials on a disc, so the row isn't lopsided.
+            val initials = t.name.split(' ', '-').filter { it.isNotBlank() && it.first().isLetter() }.take(2)
+                .joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+            Box(Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape).background(FerryColors.Raised), contentAlignment = Alignment.Center) {
+                Text(initials, color = FerryColors.Muted, style = if (size >= 40.dp) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
+        }
     }
 }
 
 @Composable
 private fun ClubList(teams: List<Team>, myTeams: Set<String>, onPick: (Team) -> Unit) {
-    if (teams.isEmpty()) { Text("Loading clubs…", color = FerryColors.Muted); return }
+    if (teams.isEmpty()) { SkeletonRows(5, Modifier.padding(top = 6.dp)); return }
     val mine = teams.filter { it.id in myTeams }
     val ordered = mine + teams.filterNot { it.id in myTeams }
-    LazyColumn(Modifier.focusRestorer(), verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(vertical = 6.dp, horizontal = 4.dp)) {
+    // A grid of crests: a whole league fits on one screen instead of a long single column.
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(6),
+        modifier = Modifier.focusRestorer(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 4.dp),
+    ) {
         items(ordered, key = { it.id }) { t ->
-            ListItem(
-                selected = false,
+            val tile = RoundedCornerShape(14.dp)
+            Surface(
                 onClick = { onPick(t) },
-                colors = ferryListItemColors(),
-                border = ferryListItemBorder(),
-                shape = ferryListItemShape(),
-                scale = ferryListItemScale(),
-                leadingContent = { Crest(t) },
-                headlineContent = { Text(t.name, maxLines = 1, style = MaterialTheme.typography.titleSmall) },
-                trailingContent = { if (t.id in myTeams) androidx.tv.material3.Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(18.dp)) },
-            )
+                shape = ClickableSurfaceDefaults.shape(tile),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1.03f),
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = FerryColors.Navy, contentColor = FerryColors.Text,
+                    focusedContainerColor = FerryColors.FocusFill, focusedContentColor = FerryColors.Text,
+                ),
+                border = ClickableSurfaceDefaults.border(focusedBorder = Border(androidx.compose.foundation.BorderStroke(2.dp, FerryColors.Gold), shape = tile)),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Crest(t, 48.dp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (t.id in myTeams) {
+                            androidx.tv.material3.Icon(FerryIcons.Star, "In My teams", tint = FerryColors.Text, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(t.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }
@@ -394,7 +433,8 @@ private fun Candidates(
     onRemind: () -> Unit,
     onPlay: (StreamCandidate, List<StreamCandidate>) -> Unit,
 ) {
-    val time = remember { SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()) }
+    val dayFormat = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
+    val clock = remember { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT) }
     val list = state.candidates
     val returnFocus = remember { FocusRequester() }
     val watchFocus = remember { FocusRequester() }
@@ -413,7 +453,7 @@ private fun Candidates(
                 when (f.state) {
                     MatchState.LIVE -> "${f.homeScore} – ${f.awayScore}"
                     MatchState.FINISHED -> "Full time ${f.homeScore} – ${f.awayScore}"
-                    MatchState.UPCOMING -> "Kick-off ${time.format(Date(f.kickoff))}"
+                    MatchState.UPCOMING -> "Kick-off ${dayFormat.format(Date(f.kickoff))}, ${clock.format(Date(f.kickoff))}"
                 },
             ).joinToString("  ·  "),
             color = FerryColors.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TABULAR),
@@ -434,7 +474,7 @@ private fun Candidates(
             Text(best?.let { "Watch  ·  ${it.channel.displayName}" } ?: if (state.searching) "Looking for streams…" else "No stream found")
         }
         if (f.state == MatchState.UPCOMING) {
-            Button(onClick = onRemind, colors = ferryOutlinedButtonColorsAsButton()) {
+            Button(onClick = onRemind, colors = ferryOutlinedButtonColorsAsButton(), border = ferrySecondaryButtonBorder()) {
                 androidx.tv.material3.Icon(FerryIcons.Bell, null, tint = if (hasReminder) FerryColors.Sea else FerryColors.Text, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(if (hasReminder) "Reminder set  ·  5 min before" else "Remind me")
@@ -443,7 +483,11 @@ private fun Candidates(
     }
     Spacer(Modifier.height(10.dp))
     when {
-        list == null -> Text("Looking through your playlist and guides…", color = FerryColors.Muted, modifier = Modifier.padding(16.dp))
+        list == null -> Column {
+            Hint("Looking through your playlist and guides…")
+            Spacer(Modifier.height(10.dp))
+            SkeletonRows(5)
+        }
         list.isEmpty() -> EmptyMessage(
             FerryIcons.Search, "No streams found yet",
             "Providers often rename their event channels shortly before kick-off, so check again nearer the time.",
@@ -465,7 +509,7 @@ private fun Candidates(
                     val members = list.filter { it.group == group }
                     if (members.isEmpty()) continue
                     item(key = "h${group.name}") {
-                        Text(group.label.uppercase(), color = FerryColors.Faint, style = MaterialTheme.typography.labelSmall,
+                        Text(group.label.uppercase(), color = FerryColors.Muted, style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 12.dp))
                     }
                     items(members, key = { it.channel.id }) { c ->
@@ -484,7 +528,7 @@ private fun Candidates(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(c.channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f, fill = false))
                                     quality?.let { Spacer(Modifier.width(8.dp)); Tag(it, FerryColors.Muted, filled = false, upper = false) }
-                                    if (country != null && group != StreamCandidate.Group.UK) { Spacer(Modifier.width(6.dp)); Tag(country, FerryColors.Faint, filled = false) }
+                                    if (country != null && group != StreamCandidate.Group.UK) { Spacer(Modifier.width(6.dp)); Tag(country, FerryColors.Muted, filled = false) }
                                 }
                             },
                             supportingContent = {

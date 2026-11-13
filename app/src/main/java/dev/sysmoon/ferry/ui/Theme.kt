@@ -69,6 +69,7 @@ import androidx.tv.material3.Typography
 import androidx.tv.material3.darkColorScheme
 import coil.compose.AsyncImage
 import dev.sysmoon.ferry.R
+import androidx.compose.runtime.remember
 
 // ---------------------------------------------------------------------------------------------
 // Design tokens. Gold is the one accent: focus, selection and primary actions. Everything else
@@ -235,6 +236,14 @@ fun ferryOutlinedButtonColors() = OutlinedButtonDefaults.colors(
     pressedContentColor = FerryColors.Deep,
 )
 
+/** Outline for the quiet second button of a dialog, so it reads as a button before it has focus. */
+@Composable
+fun ferrySecondaryButtonBorder() = ButtonDefaults.border(
+    border = Border(BorderStroke(1.dp, FerryColors.Muted.copy(alpha = 0.55f)), shape = CircleShape),
+    focusedBorder = Border.None,
+    pressedBorder = Border.None,
+)
+
 /** Quiet (tab-like) button: no fill until focused, gold when selected. */
 @Composable
 fun ferryOutlinedButtonColorsAsButton() = ButtonDefaults.colors(
@@ -302,10 +311,48 @@ fun ProgressLine(fraction: Float, modifier: Modifier = Modifier, color: Color = 
     }
 }
 
-/** Key hints at the bottom of a panel: "OK  watch  ·  ▲▼  channels". */
+private val hintPart = Regex("""^(.+?)\s{2,}(.+)$""")
+
+/**
+ * Key hints at the bottom of a panel, written as "OK  watch   ·   ▲ ▼  channels": each part is a
+ * key and what it does, two spaces apart, and is drawn as a keycap with a label. A part with no
+ * key (a message, a count) is drawn as plain text. [icon] goes in front (the bell for reminders).
+ */
 @Composable
-fun Hint(text: String, color: Color = FerryColors.Muted, modifier: Modifier = Modifier) {
-    Text(text, color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+fun Hint(text: String, color: Color = FerryColors.Muted, modifier: Modifier = Modifier, icon: ImageVector? = null) {
+    val parts = remember(text) { text.split("·").map { it.trim() }.filter { it.isNotEmpty() } }
+    val keyShape = RoundedCornerShape(5.dp)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(7.dp))
+        }
+        parts.forEachIndexed { i, part ->
+            if (i > 0) Spacer(Modifier.width(18.dp))
+            val m = hintPart.find(part)
+            if (m == null) {
+                Text(part, color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else {
+                Text(
+                    m.groupValues[1], color = FerryColors.Text, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+                    modifier = Modifier.clip(keyShape).background(FerryColors.Raised).border(BorderStroke(1.dp, FerryColors.Line), keyShape)
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(m.groupValues[2], color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+            }
+        }
+    }
+}
+
+/** Placeholder rows while a list loads. */
+@Composable
+fun SkeletonRows(count: Int = 6, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        repeat(count) { i ->
+            Box(Modifier.fillMaxWidth().height(54.dp).clip(RowShape).background(FerryColors.Navy.copy(alpha = (1f - i * 0.13f).coerceAtLeast(0.2f))))
+        }
+    }
 }
 
 /** Screen heading with an icon, the same on every secondary screen. */
@@ -430,6 +477,7 @@ object FerryIcons {
     val AspectRatio = icon("AspectRatio", "M19 12h-2v3h-3v2h5v-5zM7 9h3V7H5v5h2V9zm14-6H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z")
     val Hide = icon("VisibilityOff", "M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z")
     val Tune = icon("Tune", "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z")
+    val Mic = icon("Mic", "M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z")
     val Phone = icon("Smartphone", "M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z")
     val Football = ImageVector.Builder("Football", 24.dp, 24.dp, 24f, 24f).apply {
         addPath(PathParser().parsePathString("M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zm0 2a8 8 0 1 1 0 16a8 8 0 1 1 0-16z").toNodes(),

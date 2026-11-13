@@ -162,6 +162,8 @@ fun GuideScreen(
     val groups by remember { dao.observeGroups().catch { emit(emptyList()) } }
         .collectAsState(initial = emptyList())
     val total by remember { dao.observeVisibleCount().catch { emit(0) } }.collectAsState(initial = 0)
+    val groupCounts by remember { dao.observeGroupCounts().map { rows -> rows.associate { it.name to it.count } }.catch { emit(emptyMap()) } }
+        .collectAsState(initial = emptyMap())
     // Sky layout: Sky's sections replace provider groups; picked provider groups follow as extras.
     val skyLayout by remember { graph.settings.skyLayout }.collectAsState(initial = false)
     val skySections by remember { dao.observeSkySections().catch { emit(emptyList()) } }.collectAsState(initial = emptyList())
@@ -393,7 +395,18 @@ fun GuideScreen(
                                     headlineContent = {
                                         Text(entry.label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                     },
-                                    trailingContent = if (isSelected) ({ Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Gold, modifier = Modifier.size(20.dp)) }) else null,
+                                    trailingContent = {
+                                        // How many channels the group holds, so a 4-channel group and a 400-channel one look different.
+                                        val count = when (entry.key) {
+                                            ALL -> total.takeIf { it > 0 }
+                                            RECENT -> null
+                                            else -> groupCounts[entry.key]
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (count != null) Text("%,d".format(count), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                                            if (isSelected) Icon(FerryIcons.ChevronRight, null, tint = FerryColors.Gold, modifier = Modifier.padding(start = 6.dp).size(20.dp))
+                                        }
+                                    },
                                     colors = ferryListItemColors(),
                                     border = ferryListItemBorder(),
                                     shape = ferryListItemShape(),
@@ -431,6 +444,8 @@ fun GuideScreen(
                     if (effective == ALL && !sky && total > GUIDE_LIMIT) {
                         Spacer(Modifier.width(14.dp))
                         Tag("first $GUIDE_LIMIT of $total", FerryColors.Muted, filled = false)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Pick a group, or use Search, for the rest", color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                     }
                     Spacer(Modifier.weight(1f))
                     Clock()
@@ -599,7 +614,7 @@ private fun ChannelRow(
                 Text(
                     "${channel.shownNumber}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = FerryColors.Faint,
+                    color = FerryColors.Muted,
                     modifier = Modifier.width(44.dp),
                 )
                 LogoChip(channel.logo, channel.name, width = 64.dp, height = 40.dp)
@@ -608,18 +623,18 @@ private fun ChannelRow(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (channel.favourite) {
-                    Icon(FerryIcons.Star, null, tint = FerryColors.Gold, modifier = Modifier.size(15.dp))
+                    Icon(FerryIcons.Star, null, tint = FerryColors.Text, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(channel.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f, fill = false))
                 if (channel.streamCount > 1) {
                     Spacer(Modifier.width(10.dp))
-                    Text("${channel.streamCount} streams", color = FerryColors.Faint, style = MaterialTheme.typography.labelMedium)
+                    Text("${channel.streamCount} streams", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium)
                 }
                 if (playing) {
                     Spacer(Modifier.width(10.dp))
-                    Tag("Watching", FerryColors.Gold)
+                    Tag("Watching", FerryColors.Text)
                 }
             }
         },
@@ -630,7 +645,7 @@ private fun ChannelRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (now != null) FerryColors.Muted else FerryColors.Faint,
+                    color = if (now != null) FerryColors.Muted else FerryColors.Muted,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 5.dp)) {
                     if (now != null) {
@@ -642,7 +657,7 @@ private fun ChannelRow(
                             "Next ${time.format(Date(it.start))}  ${it.title}",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            color = FerryColors.Faint,
+                            color = FerryColors.Muted,
                             style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR),
                         )
                     }
