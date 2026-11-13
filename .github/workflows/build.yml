@@ -69,7 +69,14 @@ jobs:
       - name: Print Room schema (temporary)
         if: always()
         run: |
-          for f in app/schemas/*/*.json; do python3 -c "import sys;print('::notice title=schema '+sys.argv[1]+'::'+open(sys.argv[1]).read().replace('%','%25').replace('\r','').replace('\n','%0A'))" "$f"; done
+          python3 - <<'PY'
+          import glob
+          for f in glob.glob('app/schemas/*/*.json'):
+              t = open(f).read()
+              for i in range(0, len(t), 3000):
+                  part = t[i:i+3000].replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+                  print(f"::notice title=schema-{i//3000:02d} {f}::{part}")
+          PY
 
       # Release (not debuggable) starts noticeably faster on TV boxes; debug is kept for diagnostics.
       - name: Assemble APKs
