@@ -506,9 +506,16 @@ class PlayerController(
         playJob = scope.launch { step(delta) }
     }
 
+    /**
+     * Resolves [target] and tunes it as the in-flight start, like [start]: a later zap, stop or
+     * tune cancels it instead of racing it (a deep link landing just after Ferry's onStop stop).
+     */
     suspend fun play(target: PlayTarget): Boolean {
         val channel = resolve(target) ?: return false
-        play(channel)
+        withContext(Dispatchers.Main.immediate) {
+            playJob?.cancel()
+            playJob = scope.launch { play(channel) }
+        }
         return true
     }
 
