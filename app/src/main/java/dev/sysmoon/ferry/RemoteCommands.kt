@@ -2,6 +2,8 @@ package dev.sysmoon.ferry
 
 import dev.sysmoon.ferry.Logs
 import dev.sysmoon.ferry.player.PlayTarget
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** One entry point for commands arriving from MQTT and the web API. */
 class RemoteCommands(private val graph: AppGraph) {
@@ -11,18 +13,24 @@ class RemoteCommands(private val graph: AppGraph) {
             .onFailure { Logs.w(TAG, "Couldn't bring Ferry to the front", it) }
     }
 
-    suspend fun key(key: String): Boolean {
+    /**
+     * On the main thread, like the remote's own keys: MQTT and the web API call this from
+     * background threads, and the player's zap/tune bookkeeping is main-thread only. Channel
+     * up/down go through zap, which cancels a tune still in flight, so quick presses from Home
+     * Assistant can't land out of order.
+     */
+    suspend fun key(key: String): Boolean = withContext(Dispatchers.Main.immediate) {
         when (key.lowercase().trim()) {
-            "up", "channel_up", "next" -> graph.player.step(1)
-            "down", "channel_down", "prev", "previous" -> graph.player.step(-1)
+            "up", "channel_up", "next" -> graph.player.zap(1)
+            "down", "channel_down", "prev", "previous" -> graph.player.zap(-1)
             "stop" -> graph.player.stop()
             "pause", "play_pause", "toggle" -> graph.player.togglePause()
             "last", "previous_channel" ->
                 if (graph.player.state.value.channel != null) graph.player.previousChannel() else play(PlayTarget.Last)
             "live" -> graph.player.goLive()
-            else -> return false
+            else -> return@withContext false
         }
-        return true
+        true
     }
 
     /**
