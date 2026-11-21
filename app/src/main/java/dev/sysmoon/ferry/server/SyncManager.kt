@@ -38,7 +38,7 @@ class SyncManager(private val g: AppGraph) {
         val me = g.settings.deviceId()
         return NsdBrowser.discover(g.context)
             .filter { it.id != me }
-            .map { PeerDto(it.name, "http://${it.host}:${it.port}") }
+            .map { PeerDto(it.name, it.url) }
     }
 
     /** Pairs with [url] using its on-screen PIN, then syncs straight away. */
