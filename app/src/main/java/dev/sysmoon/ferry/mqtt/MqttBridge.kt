@@ -34,11 +34,11 @@ import kotlinx.coroutines.flow.combine
 
 /**
  * Home Assistant bridge over MQTT discovery. Creates one HA device per TV with:
- *  - select.<name>_channel     favourites; choosing one tunes the TV
+ *  - select.<name>_favourite_channel  favourites; choosing one tunes the TV
  *  - sensor.<name>_state       idle / buffering / playing / paused / error
- *  - sensor.<name>_channel_name, _programme, _next_programme, _progress  (details are attributes of _state)
+ *  - sensor.<name>_channel, _programme, _next_programme, _programme_progress  (details are attributes of _state)
  *  - sensor.<name>_resolution, _bitrate, _dropped_frames, _buffer  (diagnostic)
- *  - button.<name>_channel_up / _channel_down / _stop / _pause / _previous_channel / _live
+ *  - button.<name>_channel_up / _channel_down / _stop / _pause_play / _previous_channel / _back_to_live
  *  - image.<name>_channel_logo, number.<name>_sleep_timer, sensor.<name>_next_reminder
  *  - sensor.<name>_next_match  kick-off of the next match for My teams, with title/deep link attributes
  *  - event.<name>_events       "reminder" (a reminded programme is starting), "sleep" (timer stopped
@@ -226,10 +226,12 @@ class MqttBridge(private val g: AppGraph) {
         Network.localIpv4()?.let { put("configuration_url", "http://$it:${FerryService.PORT}") }
     }
 
-    private fun common(id: String, name: String, base: String, key: String, label: String) = buildMap<String, Any?> {
+    private fun common(domain: String, id: String, name: String, base: String, key: String, label: String) = buildMap<String, Any?> {
         put("name", label)
         put("unique_id", "ferry_${id}_$key")
-        put("object_id", "${slug(name)}_$key")
+        // Only used when HA first creates the entity: "update.kitchen_shield_ferry", not HA's own
+        // area-prefixed "update.kitchen_kitchen_shield_ferry". Existing entities keep their ids.
+        put("default_entity_id", defaultEntityId(domain, name, label))
         put("availability_topic", "$base/availability")
         put("device", device(id, name))
     }
@@ -243,7 +245,7 @@ class MqttBridge(private val g: AppGraph) {
             Triple("next_programme", "Next programme", "{{ value_json.next or 'None' }}"),
         )
         for ((key, label, template) in sensors) {
-            c.publish("$p/sensor/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
+            c.publish("$p/sensor/ferry_$id/$key/config", json(common("sensor", id, name, base, key, label) + mapOf(
                 "state_topic" to "$base/state",
                 "value_template" to template,
                 "icon" to "mdi:television-classic",
@@ -257,7 +259,7 @@ class MqttBridge(private val g: AppGraph) {
             Diag("dropped_frames", "Dropped frames", "dropped_frames", "frames"),
             Diag("buffer", "Buffer", "buffer_seconds", "s"),
         )) {
-            c.publish("$p/sensor/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
+            c.publish("$p/sensor/ferry_$id/$key/config", json(common("sensor", id, name, base, key, label) + mapOf(
                 "state_topic" to "$base/stats",
                 "value_template" to "{{ value_json.$field if value_json.$field is not none else 'None' }}",
                 "json_attributes_topic" to (if (key == "resolution") "$base/stats" else null),
@@ -266,7 +268,7 @@ class MqttBridge(private val g: AppGraph) {
                 "icon" to "mdi:chart-line",
             ).filterValues { it != null }))
         }
-        c.publish("$p/sensor/ferry_$id/progress/config", json(common(id, name, base, "progress", "Programme progress") + mapOf(
+        c.publish("$p/sensor/ferry_$id/progress/config", json(common("sensor", id, name, base, "progress", "Programme progress") + mapOf(
             "state_topic" to "$base/state",
             "value_template" to "{{ value_json.progress if value_json.progress is not none else 'unknown' }}",
             "unit_of_measurement" to "%",
@@ -280,7 +282,7 @@ class MqttBridge(private val g: AppGraph) {
             Triple("previous_channel", "Previous channel", "previous_channel"),
             Triple("live", "Back to live", "live"),
         )) {
-            c.publish("$p/button/ferry_$id/$key/config", json(common(id, name, base, key, label) + mapOf(
+            c.publish("$p/button/ferry_$id/$key/config", json(common("button", id, name, base, key, label) + mapOf(
                 "command_topic" to "$base/cmd/key",
                 "payload_press" to cmd,
             )))
@@ -289,10 +291,10 @@ class MqttBridge(private val g: AppGraph) {
 
     private suspend fun publishExtras(c: Mqtt3AsyncClient, cfg: MqttConfig, id: String, name: String, base: String) {
         val p = cfg.discoveryPrefix
-        c.publish("$p/image/ferry_$id/channel_logo/config", json(common(id, name, base, "channel_logo", "Channel logo") + mapOf(
+        c.publish("$p/image/ferry_$id/channel_logo/config", json(common("image", id, name, base, "channel_logo", "Channel logo") + mapOf(
             "url_topic" to "$base/logo",
         )))
-        c.publish("$p/number/ferry_$id/sleep_timer/config", json(common(id, name, base, "sleep_timer", "Sleep timer") + mapOf(
+        c.publish("$p/number/ferry_$id/sleep_timer/config", json(common("number", id, name, base, "sleep_timer", "Sleep timer") + mapOf(
             "command_topic" to "$base/cmd/sleep",
             "state_topic" to "$base/state",
             "value_template" to "{{ value_json.sleep_minutes or 0 }}",
@@ -301,13 +303,13 @@ class MqttBridge(private val g: AppGraph) {
             "mode" to "slider",
             "icon" to "mdi:sleep",
         )))
-        c.publish("$p/sensor/ferry_$id/next_reminder/config", json(common(id, name, base, "next_reminder", "Next reminder") + mapOf(
+        c.publish("$p/sensor/ferry_$id/next_reminder/config", json(common("sensor", id, name, base, "next_reminder", "Next reminder") + mapOf(
             "state_topic" to "$base/reminders",
             "value_template" to "{{ value_json.next or 'None' }}",
             "json_attributes_topic" to "$base/reminders",
             "icon" to "mdi:bell-ring-outline",
         )))
-        c.publish("$p/sensor/ferry_$id/next_match/config", json(common(id, name, base, "next_match", "Next match") + mapOf(
+        c.publish("$p/sensor/ferry_$id/next_match/config", json(common("sensor", id, name, base, "next_match", "Next match") + mapOf(
             "state_topic" to "$base/next_match",
             "value_template" to "{{ value_json.kickoff if value_json.kickoff else None }}",
             "device_class" to "timestamp",
@@ -315,14 +317,14 @@ class MqttBridge(private val g: AppGraph) {
             "json_attributes_template" to "{{ value_json.attributes | tojson }}",
             "icon" to "mdi:soccer",
         )))
-        c.publish("$p/update/ferry_$id/ferry/config", json(common(id, name, base, "ferry_update", "Ferry") + mapOf(
+        c.publish("$p/update/ferry_$id/ferry/config", json(common("update", id, name, base, "ferry_update", "Ferry") + mapOf(
             "state_topic" to "$base/update",
             "command_topic" to "$base/cmd/update",
             "payload_install" to "install",
             "entity_category" to "config",
             "icon" to "mdi:update",
         )))
-        c.publish("$p/sensor/ferry_$id/last_crash/config", json(common(id, name, base, "last_crash", "Last crash") + mapOf(
+        c.publish("$p/sensor/ferry_$id/last_crash/config", json(common("sensor", id, name, base, "last_crash", "Last crash") + mapOf(
             "state_topic" to "$base/crash",
             "value_template" to "{{ value_json.at if value_json.at else None }}",
             "device_class" to "timestamp",
@@ -331,7 +333,7 @@ class MqttBridge(private val g: AppGraph) {
             "entity_category" to "diagnostic",
             "icon" to "mdi:alert-octagon-outline",
         )))
-        c.publish("$p/event/ferry_$id/events/config", json(common(id, name, base, "events", "Events") + mapOf(
+        c.publish("$p/event/ferry_$id/events/config", json(common("event", id, name, base, "events", "Events") + mapOf(
             "state_topic" to "$base/event",
             "event_types" to JsonArray(listOf("reminder", "sleep", "failover", "backstop").map(::JsonPrimitive)),
             "icon" to "mdi:bell",
@@ -418,7 +420,7 @@ class MqttBridge(private val g: AppGraph) {
     ) {
         // HA requires at least one option; show a hint until favourites exist.
         val options = favourites.ifEmpty { listOf(NO_FAVOURITES) }
-        c.publish("${cfg.discoveryPrefix}/select/ferry_$id/channel/config", json(common(id, name, base, "channel", "Favourite channel") + mapOf(
+        c.publish("${cfg.discoveryPrefix}/select/ferry_$id/channel/config", json(common("select", id, name, base, "channel", "Favourite channel") + mapOf(
             "command_topic" to "$base/cmd/channel",
             "state_topic" to "$base/state",
             // Only favourites are options; anything else reports "None" (HA's reset payload) to avoid warnings.
@@ -483,6 +485,9 @@ class MqttBridge(private val g: AppGraph) {
         const val NO_FAVOURITES = "(add favourites in Ferry)"
 
         private fun slug(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifEmpty { "ferry" }
+
+        /** "update", "Kitchen Shield", "Ferry" → "update.kitchen_shield_ferry": device name + entity name, as HA names them. */
+        fun defaultEntityId(domain: String, device: String, label: String) = "$domain.${slug(device)}_${slug(label)}"
 
         private fun buildClient(cfg: MqttConfig, id: String): Mqtt3AsyncClient =
             MqttClient.builder()

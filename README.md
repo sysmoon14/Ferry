@@ -47,7 +47,7 @@ Open the folder in Android Studio (Ladybug or newer), let Gradle sync, run on yo
   sources and favourites are kept, and Ferry restarts on the new version.
   - The first time, Android may ask you to allow Ferry to *install unknown apps*.
   - **Settings** shows the installed version with **Check for updates** / **Update to x.y.z**.
-  - In Home Assistant each box has an **update** entity (`update.<area>_<name>_ferry`): it shows when a release is
+  - In Home Assistant each box has an **update** entity (`update.<name>_ferry`): it shows when a release is
     waiting, and **Install** starts the update on that TV (confirm on the TV). To pop the confirmation up
     while Ferry isn't open, Ferry needs *Display over other apps* (see below); without it the update waits
     and asks the next time Ferry is opened.
@@ -265,18 +265,18 @@ Each TV's device page has a **Visit** link to its web setup page.
 
 | Entity | What it does |
 |---|---|
-| `select.<name>_channel` | Favourites; choosing one tunes the TV |
+| `select.<name>_favourite_channel` | Favourites; choosing one tunes the TV |
 | `sensor.<name>_state` | idle / buffering / playing / paused / error. Its attributes carry the details: channel, logo, tvg_id, programme times and description, the stream playing, `hdr`, the deep link |
-| `sensor.<name>_channel_name`, `_programme`, `_next_programme` | The names only (the details are attributes of `_state`, so Home Assistant's recorder stores them once) |
+| `sensor.<name>_channel`, `_programme`, `_next_programme` | The names only (the details are attributes of `_state`, so Home Assistant's recorder stores them once) |
 | `sensor.<name>_resolution`, `_bitrate`, `_dropped_frames`, `_buffer` | Picture quality (diagnostic). `_resolution` also has `frame_rate`, `video_codec`, `audio_codec` and `tunnelled` as attributes |
-| `sensor.<name>_progress` | Programme progress % |
-| `button.<name>_channel_up` / `_channel_down` / `_stop` / `_pause` / `_previous_channel` / `_live` | Remote keys |
+| `sensor.<name>_programme_progress` | Programme progress % |
+| `button.<name>_channel_up` / `_channel_down` / `_stop` / `_pause_play` / `_previous_channel` / `_back_to_live` | Remote keys |
 | `image.<name>_channel_logo` | Logo of the channel playing; Ferry's icon when nothing is |
 | `number.<name>_sleep_timer` | Minutes left; set it to start the timer (0 = off) |
 | `sensor.<name>_next_reminder` | Next reminder, with the full list as attributes |
 | `sensor.<name>_next_match` | Kick-off of the next match for My teams (timestamp), with title, competition, score and `deep_link` attributes |
 | `event.<name>_events` | `reminder` (a reminded programme is starting), `sleep` (timer stopped playback), `failover` (fell back to another stream: `channel`, `reason`, `from_stream`, `to_stream`) and `backstop` (retuned a frozen stream) |
-| `update.<area>_<name>_ferry` | Installed vs latest GitHub release; **Install** downloads it and asks to confirm the next time Ferry is on screen (never over another app) |
+| `update.<name>_ferry` | Installed vs latest GitHub release; **Install** downloads it and asks to confirm the next time Ferry is on screen (never over another app) |
 | `sensor.<name>_last_crash` | When Ferry last crashed or caught an error (diagnostic), with the error, where in the code, the version, whether it closed Ferry and whether it reopened the channel, and the last 25 lines of Ferry's log |
 
 Topics (`base = ferry/<device-id>`):
