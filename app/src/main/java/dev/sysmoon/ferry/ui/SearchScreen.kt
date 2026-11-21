@@ -77,6 +77,8 @@ private sealed interface Hit {
     val channel: ChannelEntity
     data class Channel(override val channel: ChannelEntity) : Hit
     data class Programme(override val channel: ChannelEntity, val programme: ProgrammeEntity) : Hit
+    /** A stream from the provider list: plays that stream only. [group] is the source's category. */
+    data class Raw(override val channel: ChannelEntity, val group: String?) : Hit
 }
 
 /**
@@ -84,6 +86,8 @@ private sealed interface Hit {
  * programme that's on plays it, on a past one plays catch-up, on a future one sets a reminder.
  * Results are grouped under headings; before anything is typed the screen offers recent searches.
  * The microphone button (or the remote's search key) takes the query by voice where the TV can.
+ * "Provider lists" adds every matching stream as the provider lists it (backups and hidden
+ * channels too), each playing on its own with no fallback.
  */
 @Composable
 fun SearchScreen(onOpenPlayer: () -> Unit) {
@@ -93,6 +97,7 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<Hit>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    var raw by remember { mutableStateOf(false) }
     var fieldFocused by remember { mutableStateOf(false) }
     val field = remember { FocusRequester() }
     val firstResult = remember { FocusRequester() }
@@ -127,12 +132,12 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
         runCatching { field.requestFocus() }
         keyboard?.show()
     }
-    LaunchedEffect(query) {
+    LaunchedEffect(query, raw) {
         val q = query.trim()
         if (q.length < 2) { hits = emptyList(); searching = false; return@LaunchedEffect }
         searching = true
         delay(350) // wait for typing to pause
-        hits = runCatching { search(graph, q) }.getOrDefault(emptyList())
+        hits = runCatching { search(graph, q, raw) }.getOrDefault(emptyList())
         searching = false
     }
 
@@ -185,6 +190,12 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Text("Speak")
             }
+            Spacer(Modifier.width(12.dp))
+            Button(onClick = { raw = !raw }, colors = ferryButtonColors()) {
+                androidx.tv.material3.Icon(if (raw) FerryIcons.Check else FerryIcons.Layers, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (raw) "Provider lists: on" else "Provider lists: off")
+            }
         }
         Spacer(Modifier.height(12.dp))
         Hint(
@@ -226,7 +237,8 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
             searching && hits.isEmpty() -> SkeletonRows(5, Modifier.weight(1f))
             hits.isEmpty() -> EmptyMessage(
                 FerryIcons.Search, "Nothing found",
-                "No channel or programme matches “${query.trim()}”. Hidden channels aren't searched.",
+                if (raw) "Nothing in your channels or the provider lists matches “${query.trim()}”."
+                else "No channel or programme matches “${query.trim()}”. Hidden channels aren't searched; turn on Provider lists to search every stream.",
                 Modifier.weight(1f).fillMaxWidth(),
             )
             else -> {
@@ -236,6 +248,7 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                     "On now" to programmes.filter { it.programme.start <= now && it.programme.stop > now },
                     "Coming up" to programmes.filter { it.programme.start > now },
                     "Catch-up" to programmes.filter { it.programme.stop <= now },
+                    "Provider lists" to hits.filterIsInstance<Hit.Raw>(),
                 ).filter { it.second.isNotEmpty() }
                 val firstHit = sections.first().second.first()
                 LazyColumn(
@@ -245,10 +258,19 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                 ) {
                     sections.forEach { (title, list) ->
                         item(key = "h$title") { SectionLabel("$title  ·  ${list.size}") }
-                        items(list, key = { h -> if (h is Hit.Programme) "p${h.channel.id}@${h.programme.start}" else "c${h.channel.id}" }) { h ->
+                        items(list, key = { h ->
+                            when (h) {
+                                is Hit.Programme -> "p${h.channel.id}@${h.programme.start}"
+                                is Hit.Raw -> "x${h.channel.id}"
+                                is Hit.Channel -> "c${h.channel.id}"
+                            }
+                        }) { h ->
                             val ch = h.channel
                             val p = (h as? Hit.Programme)?.programme
+                            val rawHit = h as? Hit.Raw
                             val status: (@Composable () -> Unit)? = when {
+                                rawHit != null && ch.primaryId != null -> ({ Tag("Backup", FerryColors.Muted, filled = false) })
+                                rawHit != null && ch.hidden -> ({ Tag("Hidden", FerryColors.Muted, filled = false) })
                                 p == null -> null
                                 p.start <= now && p.stop > now -> ({ Tag("Live", FerryColors.Live, dot = true) })
                                 p.stop <= now -> ({ Tag("Catch-up", FerryColors.Sea, filled = false) })
@@ -261,6 +283,7 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                                     val t = System.currentTimeMillis()
                                     scope.launch { graph.settings.pushRecentSearch(query) }
                                     when {
+                                        rawHit != null -> { graph.player.startExact(ch); onOpenPlayer() }
                                         p == null || (p.start <= t && p.stop > t) -> { graph.player.start(ch); onOpenPlayer() }
                                         p.stop <= t -> { graph.player.startCatchUp(ch, p); onOpenPlayer() }
                                         else -> scope.launch {
@@ -277,17 +300,18 @@ fun SearchScreen(onOpenPlayer: () -> Unit) {
                                 scale = ferryListItemScale(),
                                 leadingContent = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("${ch.shownNumber}", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp), maxLines = 1)
+                                        Text(if (rawHit != null) ch.number?.toString().orEmpty() else "${ch.shownNumber}", color = FerryColors.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp), maxLines = 1)
                                         LogoChip(ch.logo, ch.name, width = 58.dp, height = 36.dp)
                                     }
                                 },
                                 headlineContent = {
-                                    Text(p?.title ?: ch.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                    Text(p?.title ?: if (rawHit != null) ch.name else ch.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                                 },
                                 supportingContent = {
                                     val dayText = p?.let { if (sameDay(it.start, now)) "Today" else day.format(Date(it.start)) }
                                     Text(
-                                        if (p == null) "Channel" + (ch.groupTitle?.let { "  ·  $it" } ?: "")
+                                        if (rawHit != null) listOfNotNull("Provider stream", rawHit.group, dev.sysmoon.ferry.data.StreamQuality.parse(ch.name).label).joinToString("  ·  ")
+                                        else if (p == null) "Channel" + (ch.groupTitle?.let { "  ·  $it" } ?: "")
                                         else "$dayText ${time.format(Date(p.start))}–${time.format(Date(p.stop))}  ·  ${ch.displayName}",
                                         color = FerryColors.Muted, style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR), maxLines = 1,
                                     )
@@ -308,7 +332,7 @@ private fun SectionLabel(text: String) {
         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 12.dp))
 }
 
-private suspend fun search(graph: dev.sysmoon.ferry.AppGraph, q: String): List<Hit> {
+private suspend fun search(graph: dev.sysmoon.ferry.AppGraph, q: String, raw: Boolean): List<Hit> {
     val now = System.currentTimeMillis()
     val channels = graph.db.channels().searchVisible(q, 20).map { Hit.Channel(it) }
     // Programmes from the last week (catch-up) onwards; matched to visible channels by guide key.
@@ -328,7 +352,10 @@ private suspend fun search(graph: dev.sysmoon.ferry.AppGraph, q: String): List<H
         { when { it.programme.start <= now && it.programme.stop > now -> 0; it.programme.start > now -> 1; else -> 2 } },
         { if (it.programme.start > now) it.programme.start else -it.programme.start },
     ))
-    return channels + sorted.take(80)
+    val rawHits = if (!raw) emptyList() else graph.db.channels().searchAll(q, 100).map {
+        Hit.Raw(it, graph.repository.providerList.groupOf(it))
+    }
+    return channels + sorted.take(80) + rawHits
 }
 
 private fun sameDay(a: Long, b: Long): Boolean {

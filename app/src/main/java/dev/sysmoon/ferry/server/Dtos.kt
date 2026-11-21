@@ -4,6 +4,8 @@ import dev.sysmoon.ferry.data.ChannelEntity
 import dev.sysmoon.ferry.data.displayName
 import dev.sysmoon.ferry.data.archiveDays
 import dev.sysmoon.ferry.data.MqttConfig
+import dev.sysmoon.ferry.data.ProviderList
+import dev.sysmoon.ferry.data.StreamQuality
 import dev.sysmoon.ferry.data.SourceEntity
 import dev.sysmoon.ferry.data.SourceType
 import dev.sysmoon.ferry.player.NowPlaying
@@ -208,3 +210,29 @@ fun NowPlaying.toStatus(deviceName: String, stats: dev.sysmoon.ferry.player.Play
 
 @Serializable data class BbcRegionDto(val id: String, val label: String)
 @Serializable data class BbcCheckDto(val channel: String, val ok: Boolean, val service: String?, val detail: String)
+
+// ---- Provider list (every stream as the source sends it)
+@Serializable data class ProviderCategoryDto(val sourceId: Long, val source: String, val name: String?, val count: Int)
+
+@Serializable
+data class ProviderStreamDto(
+    val id: String,
+    val name: String,
+    val tvgId: String?,
+    val logo: String?,
+    /** The category the source put it in. */
+    val group: String?,
+    val number: Int?,
+    /** "1080p", "HD"… from the name, if it says. */
+    val quality: String?,
+    /** Folded into another channel row as one of its streams. */
+    val backup: Boolean,
+    val hidden: Boolean,
+)
+
+fun ProviderList.Stream.toDto() = ProviderStreamDto(
+    channel.id, channel.name, channel.tvgId, channel.logo, group, channel.number,
+    StreamQuality.parse(channel.name).label, channel.primaryId != null, channel.hidden,
+)
+
+@Serializable data class ProviderPlayRequest(val id: String)

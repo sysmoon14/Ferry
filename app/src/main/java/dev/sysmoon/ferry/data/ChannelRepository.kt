@@ -25,6 +25,8 @@ class ChannelRepository(
     private val bbc: BbcIplayer,
     private val sky: SkyLineup,
     private val cacheDir: java.io.File,
+    /** The playlist's own order, saved on each refresh for the provider list. */
+    val providerList: ProviderList = ProviderList(db, java.io.File(cacheDir, "provider")),
 ) {
     private val refreshLock = Mutex()
     private val xtream = XtreamClient(http)
@@ -294,10 +296,13 @@ class ChannelRepository(
     /** Favourites / hidden / order to apply on [sourceId]'s next refresh (settings import). */
     fun seedPrefs(sourceId: Long, prefs: List<ChannelPrefs>) { seededPrefs[sourceId] = prefs }
 
-    suspend fun deleteSource(id: Long) = db.withTransaction {
-        db.channels().deleteForSource(id)
-        db.programmes().deleteForSource(id)
-        db.sources().delete(id)
+    suspend fun deleteSource(id: Long) {
+        db.withTransaction {
+            db.channels().deleteForSource(id)
+            db.programmes().deleteForSource(id)
+            db.sources().delete(id)
+        }
+        providerList.delete(id)
     }
 
     /** Refresh every source whose refresh interval has elapsed (or all, if [force]). */
@@ -379,6 +384,9 @@ class ChannelRepository(
             db.channels().deleteForSource(src.id)
             channels.chunked(500).forEach { db.channels().upsert(it) }
         }
+        // Before merging, rows still have the playlist's own categories and order.
+        runCatching { providerList.save(src.id, parsed.map { ProviderList.Entry(it.groupTitle?.takeIf(String::isNotBlank), it.id) }) }
+            .onFailure { Logs.w(TAG, "Couldn't save the provider list for ${src.name}", it) }
         return channels.count { it.primaryId == null }
     }
 

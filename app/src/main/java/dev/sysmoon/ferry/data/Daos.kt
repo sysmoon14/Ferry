@@ -40,6 +40,8 @@ data class KeyDays(val epgKey: String, val days: Int)
 
 data class GroupSummary(val name: String, val count: Int)
 
+data class PlaylistOrderRow(val id: String, val groupTitle: String?)
+
 data class UserPrefRow(
     val sourceId: Long, val name: String, val tvgId: String?, val groupTitle: String?, val streamUrl: String,
     val favourite: Boolean, val hidden: Boolean, val sortOrder: Int,
@@ -210,6 +212,19 @@ interface ChannelDao {
     /** Rows that may be a region of ITV 1, BBC One/Two, STV or UTV (narrowed by SkyMatcher.regionalFamily). */
     @Query("SELECT * FROM channels WHERE hidden = 0 AND (name LIKE 'ITV%' OR name LIKE 'BBC%' OR name LIKE 'STV%' OR name LIKE 'UTV%')")
     suspend fun regionalCandidates(): List<ChannelEntity>
+
+    // ---- Provider list (every stream as the source sends it; see ProviderList)
+    /** A source's rows in playlist order, for a source not yet refreshed with ProviderList in place. */
+    @Query("SELECT id, groupTitle FROM channels WHERE sourceId = :sourceId ORDER BY position, primaryId IS NOT NULL")
+    suspend fun playlistOrder(sourceId: Long): List<PlaylistOrderRow>
+
+    /** Callers chunk [ids] to stay under SQLite's bound-variable limit. */
+    @Query("SELECT * FROM channels WHERE id IN (:ids)")
+    suspend fun byIds(ids: List<String>): List<ChannelEntity>
+
+    /** Every stream whose name matches, duplicates and hidden ones included, in playlist order. */
+    @Query("SELECT * FROM channels WHERE name LIKE '%' || :q || '%' ORDER BY sourceId, position LIMIT :limit")
+    suspend fun searchAll(q: String, limit: Int): List<ChannelEntity>
 
     @Query("SELECT * FROM channels WHERE tvgId = :tvgId AND hidden = 0 ORDER BY primaryId IS NOT NULL, favourite DESC LIMIT 1")
     suspend fun byTvgId(tvgId: String): ChannelEntity?
