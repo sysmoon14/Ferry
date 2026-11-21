@@ -9,7 +9,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Area | What you get |
 |---|---|
 | Sources | M3U / M3U Plus, Xtream Codes, and BBC iPlayer (UK). Favourites, hidden channels and order survive refreshes, even when the provider renames a channel |
-| Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first. If a stream fails, drops or stalls (when tuning in or mid-programme), Ferry switches to the channel's other streams in turn, then keeps retrying for a minute. Long-press OK to pick a stream |
+| Duplicates | Backup / other-quality copies of a channel fold into one row; the best stream plays first. If a stream fails, drops or stalls (when tuning in or mid-programme), Ferry switches to the channel's other streams in turn, then keeps retrying for a minute. Streams that failed in the last two days move down the list. Long-press OK to pick a stream: your pick plays first from then on, until you choose **Let Ferry choose**. In the Sky layout, ITV 1, BBC One, BBC Two, STV and UTV also fall back to the playlist's national and other-region copies |
 | Sky layout | Optional: channels numbered and grouped like a Sky box (Entertainment, Movies, Sports…), for your Sky region, using Sky's own channel list |
 | Menu | Main menu: Search, Favourites, Sports, TV Guide, Channel List, Settings. TV Guide and Channel List have their own group list |
 | Guide | EPG grid (TV Guide) or channel list (Channel List). The menus hide while you browse; Back brings them back. Up/down keeps your place in time |
@@ -266,6 +266,7 @@ Each TV's device page has a **Visit** link to its web setup page.
 | Entity | What it does |
 |---|---|
 | `select.<name>_favourite_channel` | Favourites; choosing one tunes the TV |
+| `select.<name>_stream` | The playing channel's streams, in the order Ferry tries them. Choosing one plays it and keeps it as that channel's first choice; **Automatic** lets Ferry choose again |
 | `sensor.<name>_state` | idle / buffering / playing / paused / error. Its attributes carry the details: channel, logo, tvg_id, programme times and description, the stream playing, `hdr`, the deep link |
 | `sensor.<name>_channel`, `_programme`, `_next_programme` | The names only (the details are attributes of `_state`, so Home Assistant's recorder stores them once) |
 | `sensor.<name>_resolution`, `_bitrate`, `_dropped_frames`, `_buffer` | Picture quality (diagnostic). `_resolution` also has `frame_rate`, `video_codec`, `audio_codec` and `tunnelled` as attributes |
@@ -286,6 +287,7 @@ base/availability   online | offline (LWT)
 base/state          JSON status, retained
 base/cmd/play       tvg:BBCOne.uk | id:<channelId> | number:101 | 101 | <channel name>
 base/cmd/channel    favourite name (used by the select)
+base/cmd/stream     a stream's label from the stream select, or Automatic
 base/cmd/key        up | down | stop | pause | previous_channel | live
 base/cmd/sleep      minutes (0 = off)
 base/stats          picture quality (JSON, retained): resolution, bitrate_kbps, dropped_frames, buffer_seconds…

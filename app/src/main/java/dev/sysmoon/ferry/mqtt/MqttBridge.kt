@@ -30,11 +30,14 @@ import kotlinx.serialization.json.putJsonObject
 import java.time.Instant
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import dev.sysmoon.ferry.player.StreamChoice
 import kotlinx.coroutines.flow.combine
 
 /**
  * Home Assistant bridge over MQTT discovery. Creates one HA device per TV with:
  *  - select.<name>_favourite_channel  favourites; choosing one tunes the TV
+ *  - select.<name>_stream      the playing channel's streams; choosing one pins it, Automatic unpins
  *  - sensor.<name>_state       idle / buffering / playing / paused / error
  *  - sensor.<name>_channel, _programme, _next_programme, _programme_progress  (details are attributes of _state)
  *  - sensor.<name>_resolution, _bitrate, _dropped_frames, _buffer  (diagnostic)
@@ -48,6 +51,7 @@ import kotlinx.coroutines.flow.combine
  *  base/availability   online | offline (LWT, retained)
  *  base/state          JSON status (retained)
  *  base/cmd/channel    favourite name (from the select)
+ *  base/cmd/stream     a stream's label from the stream select, or "Automatic"
  *  base/cmd/play       "tvg:BBCOne.uk" | "id:<channelId>" | "number:101" | "101" | channel name
  *  base/cmd/key        up | down | stop | pause | previous_channel | live
  *  base/cmd/sleep      minutes (0 = off)
@@ -109,6 +113,13 @@ class MqttBridge(private val g: AppGraph) {
                     .map { favs -> favs.map { it.name }.distinct() }
                     .distinctUntilChanged()
                     .collect { names -> publishSelect(client, cfg, id, name, base, names) }
+            }
+            launch {
+                // The stream select's options are the playing channel's streams, so it's re-published on each tune.
+                g.player.currentStreams
+                    .map { StreamChoice.labels(it) }
+                    .distinctUntilChanged()
+                    .collect { labels -> publishStreamSelect(client, cfg, id, name, base, labels) }
             }
             launch {
                 // Re-published every minute too, so the sleep timer's minutes count down in HA.
@@ -205,6 +216,7 @@ class MqttBridge(private val g: AppGraph) {
     private suspend fun handleCommand(command: String, payload: String) {
         when (command) {
             "channel" -> if (payload != NO_FAVOURITES) g.commands.playPayload(payload)
+            "stream" -> if (payload != NOT_PLAYING) withContext(Dispatchers.Main) { chooseStream(payload) }
             "play" -> g.commands.playPayload(payload)
             "key" -> g.commands.key(payload)
             "sleep" -> payload.toFloatOrNull()?.let { g.sleep.set(it.toInt()) }
@@ -430,6 +442,28 @@ class MqttBridge(private val g: AppGraph) {
         )))
     }
 
+    private suspend fun publishStreamSelect(
+        c: Mqtt3AsyncClient, cfg: MqttConfig, id: String, name: String, base: String, labels: List<String>,
+    ) {
+        val options = if (labels.isEmpty()) listOf(NOT_PLAYING) else listOf(StreamChoice.AUTOMATIC) + labels
+        c.publish("${cfg.discoveryPrefix}/select/ferry_$id/stream/config", json(common("select", id, name, base, "stream", "Stream") + mapOf(
+            "command_topic" to "$base/cmd/stream",
+            "state_topic" to "$base/state",
+            "value_template" to "{{ value_json.stream_option or 'None' }}",
+            "options" to JsonArray(options.map(::JsonPrimitive)),
+            "icon" to "mdi:swap-horizontal",
+        )))
+    }
+
+    /** A stream select choice: pin that stream on the playing channel, or let Ferry choose again. */
+    private fun chooseStream(label: String) {
+        val row = g.player.state.value.channel ?: return
+        if (label == StreamChoice.AUTOMATIC) return g.player.unpinStream(row)
+        val streams = g.player.currentStreams.value
+        val stream = streams.getOrNull(StreamChoice.labels(streams).indexOf(label)) ?: return
+        g.player.pickStream(stream, row)
+    }
+
     private data class Diag(val key: String, val label: String, val field: String, val unit: String?)
 
     /** What the player reports about the stream; every value null when nothing is playing. */
@@ -463,6 +497,10 @@ class MqttBridge(private val g: AppGraph) {
         put("catchup", s.catchup)
         put("sleep_minutes", g.sleep.minutesLeft())
         put("stream", s.stream?.name?.takeIf { s.streamCount > 1 })
+        put("stream_option", s.stream?.let { st ->
+            val streams = g.player.currentStreams.value
+            StreamChoice.labels(streams).getOrNull(streams.indexOfFirst { it.id == st.id })
+        })
         put("streams", s.streamCount)
         put("hdr", s.hdr)
         putJsonObject("deep_link") {
@@ -483,6 +521,7 @@ class MqttBridge(private val g: AppGraph) {
     companion object {
         private const val TAG = "MqttBridge"
         const val NO_FAVOURITES = "(add favourites in Ferry)"
+        const val NOT_PLAYING = "(nothing playing)"
 
         private fun slug(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifEmpty { "ferry" }
 
