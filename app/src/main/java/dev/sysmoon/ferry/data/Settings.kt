@@ -69,6 +69,8 @@ class Settings(private val context: Context) {
         val skyRegion = intPreferencesKey("sky_region")
         val skyExtraGroups = stringSetPreferencesKey("sky_extra_groups")
         val skyOverrides = stringSetPreferencesKey("sky_overrides")
+        val pinnedStreams = stringSetPreferencesKey("pinned_streams")
+        val streamFailures = stringSetPreferencesKey("stream_failures")
         val backupEpgUrls = stringPreferencesKey("backup_epg_urls")
         val resumeLastChannel = booleanPreferencesKey("resume_last_channel")
         val tunnelling = booleanPreferencesKey("tunnelling")
@@ -280,6 +282,29 @@ class Settings(private val context: Context) {
     suspend fun setSkyOverride(number: Int, streamKey: String?) = store.edit { prefs ->
         val rest = (prefs[Keys.skyOverrides] ?: emptySet()).filterNot { it.startsWith("$number=") }.toSet()
         prefs[Keys.skyOverrides] = if (streamKey == null) rest else rest + "$number=$streamKey"
+    }
+
+    /** The stream the viewer picked for a row ("row id=stream id"), played first until unpinned. */
+    suspend fun pinnedStreams(): Map<String, String> = (store.data.first()[Keys.pinnedStreams] ?: emptySet())
+        .mapNotNull { e -> e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (r, s) -> r to s } }
+        .toMap()
+    suspend fun setPinnedStream(rowId: String, streamId: String?) = store.edit { prefs ->
+        val rest = (prefs[Keys.pinnedStreams] ?: emptySet()).filterNot { it.startsWith("$rowId=") }.toSet()
+        prefs[Keys.pinnedStreams] = if (streamId == null) rest else rest + "$rowId=$streamId"
+    }
+
+    /** Recent failure times per stream id, for moving unreliable streams down ("id=t1,t2"). */
+    suspend fun streamFailures(): Map<String, List<Long>> = (store.data.first()[Keys.streamFailures] ?: emptySet())
+        .mapNotNull { e ->
+            e.split('=', limit = 2).takeIf { it.size == 2 }?.let { (id, ts) -> id to ts.split(',').mapNotNull { it.toLongOrNull() } }
+        }
+        .toMap()
+    suspend fun setStreamFailures(id: String, times: List<Long>, keepAfter: Long) = store.edit { prefs ->
+        // Drop this stream's old entry and any stream whose failures have all aged out.
+        val rest = (prefs[Keys.streamFailures] ?: emptySet()).filterNot {
+            it.startsWith("$id=") || (it.substringAfterLast(',').substringAfter('=').toLongOrNull() ?: 0L) < keepAfter
+        }.toSet()
+        prefs[Keys.streamFailures] = if (times.isEmpty()) rest else rest + "$id=${times.joinToString(",")}"
     }
 
     /** Extra XMLTV feeds used only for channels the provider's guide doesn't cover. One URL per line. */

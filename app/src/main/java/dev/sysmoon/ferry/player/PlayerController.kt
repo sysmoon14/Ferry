@@ -508,9 +508,37 @@ class PlayerController(
         val primaryId = channel.primaryId ?: channel.id
         val own = db.channels().streamsOf(primaryId).ifEmpty { listOf(channel) }
         val primary = own.firstOrNull { it.primaryId == null } ?: channel
-        if (primary.skyNumber == null || SkyMatcher.regionalFamily(primary.name) == null) return own
-        return own + SkyMatcher.regionalBackups(primary, db.channels().regionalCandidates(), own.map { it.id }.toSet())
+        val backups = if (primary.skyNumber == null || SkyMatcher.regionalFamily(primary.name) == null) emptyList()
+        else SkyMatcher.regionalBackups(primary, db.channels().regionalCandidates(), own.map { it.id }.toSet())
+        if (own.size + backups.size == 1) return own
+        return StreamChoice.order(own, backups, settings.pinnedStreams()[primaryId], settings.streamFailures(), System.currentTimeMillis())
     }
+
+    /** The stream pinned on [row], if any: it plays first until unpinned. */
+    suspend fun pinnedStream(row: ChannelEntity): String? = settings.pinnedStreams()[row.primaryId ?: row.id]
+
+    /** Plays [stream] on [row] and keeps it as that row's first choice (long-press menu, HA). */
+    fun pickStream(stream: ChannelEntity, row: ChannelEntity, scope: ZapScope? = null) {
+        playJob?.cancel()
+        playJob = this.scope.launch {
+            settings.setPinnedStream(row.primaryId ?: row.id, stream.id)
+            play(stream, scope ?: zapScope.takeIf { _state.value.channel != null }, row)
+        }
+    }
+
+    /** Lets Ferry choose [row]'s stream again (best first); retunes if [row] is on. */
+    fun unpinStream(row: ChannelEntity) {
+        val rowId = row.primaryId ?: row.id
+        playJob?.cancel()
+        playJob = this.scope.launch {
+            settings.setPinnedStream(rowId, null)
+            if (_state.value.channel?.id == rowId) play(row, zapScope)
+        }
+    }
+
+    /** The playing channel's streams in play order, for Home Assistant's stream select. */
+    private val _currentStreams = MutableStateFlow<List<ChannelEntity>>(emptyList())
+    val currentStreams: StateFlow<List<ChannelEntity>> = _currentStreams
 
     fun zap(delta: Int) {
         playJob?.cancel()
@@ -545,7 +573,11 @@ class PlayerController(
         val list = streamsFor(primary)
         Logs.i(TAG, "Tune ${primary.name} (${list.size} stream${if (list.size == 1) "" else "s"})")
         streams = list
-        recovery.tuned(list.size, list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0))
+        _currentStreams.value = list
+        // Tuning the row starts at the top (a pinned stream, else the best); a stream asked for by
+        // id (menu, deep link) starts there.
+        val start = if (channel.id == primary.id) 0 else list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0)
+        recovery.tuned(list.size, start)
         // Look up now/next first so the banner never flashes "No guide data".
         val (now, next) = programmesFor(primary)
         playCurrentStream(primary, now, next, notice = null)
@@ -602,6 +634,13 @@ class PlayerController(
         }
     }
 
+    /** Remembers a stream's failure, so it moves down its channel's list for a while. */
+    private suspend fun noteFailure(streamId: String) {
+        val now = System.currentTimeMillis()
+        val times = StreamChoice.recordFailure(settings.streamFailures()[streamId].orEmpty(), now)
+        settings.setStreamFailures(streamId, times, keepAfter = now - StreamChoice.FAILURE_WINDOW_MS)
+    }
+
     /**
      * The live stream failed, dropped or stalled (before or during playback). [Recovery] decides:
      * restart the same stream, switch to the channel's next untried stream, retry a round from the
@@ -612,6 +651,7 @@ class PlayerController(
         val channel = current.channel ?: return
         val from = streamIndex
         val action = recovery.onFailure(hadStarted = streamStarted)
+        streams.getOrNull(from)?.takeIf { streams.size > 1 }?.let { failed -> scope.launch { noteFailure(failed.id) } }
         Logs.w(TAG, "Stream ${from + 1}/${streams.size} of ${channel.name} $reason (started=$streamStarted): $action")
         if (action is Recovery.Action.Switch) _events.tryEmit(PlayerEvent.Failover(reason, from + 1, action.index + 1, streams.size, channel.name))
         when (action) {
@@ -814,6 +854,7 @@ class PlayerController(
         stallJob?.cancel()
         stableJob?.cancel()
         streams = emptyList()
+        _currentStreams.value = emptyList()
         player.stop(); player.clearMediaItems()
         _state.value = NowPlaying()
     }

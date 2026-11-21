@@ -78,6 +78,9 @@ fun ChannelMenu(
     val streams by produceState(emptyList<ChannelEntity>(), primaryId) {
         value = graph.player.streamsFor(channel)
     }
+    val pinnedId by produceState<String?>(null, primaryId) {
+        value = graph.player.pinnedStream(channel)
+    }
     val nowPlaying by graph.player.state.collectAsState()
     val isPlaying = nowPlaying.channel?.id == primaryId && nowPlaying.channel != null
     val playingId = nowPlaying.stream?.id.takeIf { isPlaying }
@@ -161,11 +164,21 @@ fun ChannelMenu(
                 item("streams-head") {
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        if (streams.size > 1) "STREAMS  ·  best first, Ferry falls back down this list" else "STREAM",
+                        when {
+                            streams.size <= 1 -> "STREAM"
+                            pinnedId != null -> "STREAMS  ·  your pick first, Ferry falls back down this list"
+                            else -> "STREAMS  ·  best first, Ferry falls back down this list"
+                        },
                         color = FerryColors.Muted,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
+                }
+                if (pinnedId != null && streams.size > 1) item("unpin") {
+                    MenuRow(FerryIcons.Refresh, "Let Ferry choose", "Start from the best stream again") {
+                        graph.player.unpinStream(primary)
+                        onDismiss()
+                    }
                 }
                 itemsIndexed(streams, key = { _, s -> s.id }) { i, s ->
                     val info = StreamQuality.parse(s.name)
@@ -173,7 +186,7 @@ fun ChannelMenu(
                     ListItem(
                         selected = playing,
                         onClick = {
-                            graph.player.startStream(s, zap, row = primary)
+                            graph.player.pickStream(s, row = primary, scope = zap)
                             onDismiss()
                             onPlayed()
                         },
@@ -186,7 +199,12 @@ fun ChannelMenu(
                             Text(
                                 listOfNotNull(
                                     info.label ?: "quality unknown",
-                                    "best".takeIf { i == 0 && streams.size > 1 },
+                                    when {
+                                        streams.size <= 1 -> null
+                                        s.id == pinnedId -> "your pick"
+                                        i == 0 && pinnedId == null -> "best"
+                                        else -> null
+                                    },
                                     "catch-up".takeIf { s.catchupDays > 0 },
                                 ).joinToString("  ·  "),
                                 color = FerryColors.Muted,
