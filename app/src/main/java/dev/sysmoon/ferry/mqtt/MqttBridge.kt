@@ -282,7 +282,8 @@ class MqttBridge(private val g: AppGraph) {
         }
         c.publish("$p/sensor/ferry_$id/progress/config", json(common("sensor", id, name, base, "progress", "Programme progress") + mapOf(
             "state_topic" to "$base/state",
-            "value_template" to "{{ value_json.progress if value_json.progress is not none else 'unknown' }}",
+            // 'None' is MQTT's "no value" marker; a literal 'unknown' is rejected by HA for a % sensor.
+            "value_template" to "{{ value_json.progress if value_json.progress is not none else 'None' }}",
             "unit_of_measurement" to "%",
             "icon" to "mdi:progress-clock",
         )))
