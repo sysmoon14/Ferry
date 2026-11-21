@@ -28,10 +28,13 @@ class XtreamClient(private val http: OkHttpClient) {
 
     data class Account(val base: String, val username: String, val password: String) {
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+        private fun encPath(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
         fun api(action: String? = null) =
             "$base/player_api.php?username=${enc(username)}&password=${enc(password)}" +
                 (action?.let { "&action=$it" } ?: "")
-        fun liveUrl(streamId: String, ext: String = "ts") = "$base/live/$username/$password/$streamId.$ext"
+        /** Username and password are path segments here: "a/b#c" must not end or split the path. */
+        fun liveUrl(streamId: String, ext: String = "ts") =
+            "$base/live/${encPath(username)}/${encPath(password)}/$streamId.$ext"
         val epgUrl get() = "$base/xmltv.php?username=${enc(username)}&password=${enc(password)}"
     }
 
