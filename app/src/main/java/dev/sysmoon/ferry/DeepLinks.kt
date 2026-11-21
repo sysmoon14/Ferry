@@ -13,6 +13,7 @@ sealed interface LaunchAction {
 
 /**
  * ferry://channel/<channelId>
+ * ferry://stream/<channelId>      that stream only, as the provider list plays it (no fallback)
  * ferry://tvg/<tvg-id>            e.g. ferry://tvg/BBCOne.uk  (best for HA / NFC: survives re-imports)
  * ferry://number/<n>
  * ferry://name/<channel name>
@@ -36,7 +37,7 @@ object DeepLinks {
             action = ACTION_PLAY
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             when (target) {
-                is PlayTarget.Id -> putExtra("channel_id", target.id)
+                is PlayTarget.Id -> { putExtra("channel_id", target.id); putExtra("exact", target.exact) }
                 is PlayTarget.Tvg -> putExtra("tvg_id", target.tvgId)
                 is PlayTarget.Number -> putExtra("number", target.number)
                 is PlayTarget.Name -> putExtra("name", target.name)
@@ -48,7 +49,7 @@ object DeepLinks {
         intent ?: return null
         return when (intent.action) {
             ACTION_PLAY -> {
-                val target = intent.getStringExtra("channel_id")?.let { PlayTarget.Id(it) }
+                val target = intent.getStringExtra("channel_id")?.let { PlayTarget.Id(it, intent.getBooleanExtra("exact", false)) }
                     ?: intent.getStringExtra("tvg_id")?.let { PlayTarget.Tvg(it) }
                     ?: intent.getStringExtra("name")?.let { PlayTarget.Name(it) }
                     ?: intent.getIntExtra("number", -1).takeIf { it > 0 }?.let { PlayTarget.Number(it) }
@@ -61,6 +62,7 @@ object DeepLinks {
                 val arg = uri.pathSegments.firstOrNull()
                 when (uri.host) {
                     "channel" -> arg?.let { LaunchAction.Play(PlayTarget.Id(it)) }
+                    "stream" -> arg?.let { LaunchAction.Play(PlayTarget.Id(it, exact = true)) }
                     "tvg" -> arg?.let { LaunchAction.Play(PlayTarget.Tvg(it)) }
                     "number" -> arg?.toIntOrNull()?.let { LaunchAction.Play(PlayTarget.Number(it)) }
                     "name" -> arg?.let { LaunchAction.Play(PlayTarget.Name(it)) }

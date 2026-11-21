@@ -41,7 +41,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface PlayTarget {
-    data class Id(val id: String) : PlayTarget
+    /** [exact]: that stream only, as the provider list plays it (no other streams, no fallback). */
+    data class Id(val id: String, val exact: Boolean = false) : PlayTarget
     data class Tvg(val tvgId: String) : PlayTarget
     data class Number(val number: Int) : PlayTarget
     data class Name(val name: String) : PlayTarget
@@ -500,6 +501,24 @@ class PlayerController(
     }
 
     /**
+     * Plays exactly [stream], from the provider list: none of its row's other streams, no
+     * regional backups, so if it fails it fails. Favourites, recents and the channel Ferry
+     * reopens on are left as they were; channel up/down carries on in the list you came from.
+     */
+    fun startExact(stream: ChannelEntity) {
+        playJob?.cancel()
+        playJob = scope.launch { playExact(stream) }
+    }
+
+    private suspend fun playExact(stream: ChannelEntity) {
+        Logs.i(TAG, "Tune ${stream.name} (provider list, this stream only)")
+        streams = listOf(stream)
+        recovery.tuned(1, 0)
+        val (now, next) = programmesFor(stream)
+        playCurrentStream(stream, now, next, notice = null)
+    }
+
+    /**
      * A channel's streams, best first. Works for a primary or any of its duplicates. A regional
      * channel the Sky layout placed (ITV 1 Granada on 103) also falls back to the playlist's
      * national and other-region copies of it.
@@ -553,7 +572,7 @@ class PlayerController(
         val channel = resolve(target) ?: return false
         withContext(Dispatchers.Main.immediate) {
             playJob?.cancel()
-            playJob = scope.launch { play(channel) }
+            playJob = scope.launch { if ((target as? PlayTarget.Id)?.exact == true) playExact(channel) else play(channel) }
         }
         return true
     }

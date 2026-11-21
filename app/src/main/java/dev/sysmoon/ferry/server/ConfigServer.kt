@@ -10,6 +10,7 @@ import dev.sysmoon.ferry.server.routes.footballRoutes
 import dev.sysmoon.ferry.server.routes.guideRoutes
 import dev.sysmoon.ferry.server.routes.mqttRoutes
 import dev.sysmoon.ferry.server.routes.playbackRoutes
+import dev.sysmoon.ferry.server.routes.providerRoutes
 import dev.sysmoon.ferry.server.routes.sourceRoutes
 import dev.sysmoon.ferry.server.routes.syncRoutes
 import io.ktor.http.ContentType
@@ -124,6 +125,7 @@ class ConfigServer(private val g: AppGraph) {
                     channelRoutes(api)
                     footballRoutes(api)
                     playbackRoutes(api)
+                    providerRoutes(api)
                     syncRoutes(api)
                     mqttRoutes(api)
                     debugRoutes(api)

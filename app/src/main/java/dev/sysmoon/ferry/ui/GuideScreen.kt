@@ -181,6 +181,7 @@ fun GuideScreen(
         add(ALL); if (recents.isNotEmpty()) add(RECENT)
         if (sky) skySections.forEach { add(SKY_PREFIX + it) }
         addAll(railGroups)
+        add(PROVIDER)
     }
     // Fall back to All when the selection disappears (layout switched, recents cleared…).
     val effective = when {
@@ -193,6 +194,7 @@ fun GuideScreen(
     val shownFlow = remember(effective, sky) {
         when {
             effective == FAVOURITES -> dao.observeFavourites()
+            effective == PROVIDER -> kotlinx.coroutines.flow.flowOf(emptyList<ChannelEntity>()) // ProviderBrowser loads its own
             effective == RECENT -> graph.settings.recents.flatMapLatest { ids ->
                 dao.observeByIds(ids).map { rows -> ids.mapNotNull { id -> rows.firstOrNull { it.id == id && !it.hidden } } }
             }
@@ -236,6 +238,7 @@ fun GuideScreen(
         add(RailEntry(ALL, "All channels"))
         if (sky) skySections.forEach { add(RailEntry(SKY_PREFIX + it, it)) }
         railGroups.forEach { add(RailEntry(it, it)) }
+        add(RailEntry(PROVIDER, "Provider lists", FerryIcons.Layers))
     }
     val currentMenuItem = when (section) {
         Section.FAVOURITES -> MenuItem.FAVOURITES
@@ -313,7 +316,7 @@ fun GuideScreen(
         if (returnSignal == 0) return@LaunchedEffect
         if (returnToRail) { focusMenu(); return@LaunchedEffect }
         val id = playingId
-        val inList = id != null && (gridView || shown.any { it.id == id })
+        val inList = id != null && (gridView || effective == PROVIDER || shown.any { it.id == id })
         if (!inList) { backFromContent(); return@LaunchedEffect }
         level = Level.CONTENT
         focusContent(GuideFocus.Channel(id!!), false, effective)
@@ -322,7 +325,8 @@ fun GuideScreen(
     var doneRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(focusRequest, gridView, shown.isEmpty()) {
         val r = focusRequest ?: return@LaunchedEffect
-        if (gridView || r.n == doneRequest || r.group != effective) return@LaunchedEffect // the grid handles its own
+        // The grid and the provider list handle their own.
+        if (gridView || effective == PROVIDER || r.n == doneRequest || r.group != effective) return@LaunchedEffect
         // The list may still be loading: wait for it (the effect runs again when rows arrive).
         if (shown.isEmpty()) { delay(1_500); if (shown.isEmpty()) { doneRequest = r.n; focusFailed(r) }; return@LaunchedEffect }
         doneRequest = r.n
@@ -435,6 +439,7 @@ fun GuideScreen(
                             effective == FAVOURITES -> "Favourites"
                             effective == RECENT -> "Recently watched"
                             effective == ALL -> "All channels"
+                            effective == PROVIDER -> "Provider lists"
                             else -> effective.removePrefix(SKY_PREFIX)
                         },
                         style = MaterialTheme.typography.headlineSmall,
@@ -450,7 +455,16 @@ fun GuideScreen(
                     Spacer(Modifier.weight(1f))
                     Clock()
                 }
-                if (loading) {
+                if (effective == PROVIDER) {
+                    ProviderBrowser(
+                        active = active,
+                        focusRequest = focusRequest,
+                        refreshKey = total,
+                        onOpenPlayer = onOpenPlayer,
+                        onBack = backFromContent,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (loading) {
                     Spacer(Modifier.weight(1f))
                 } else if (shown.isEmpty()) {
                     if (effective == FAVOURITES && total > 0) {

@@ -19,6 +19,7 @@ An Android TV IPTV player built to be driven by Home Assistant: MQTT discovery, 
 | Mini player | Back from a stream keeps it playing in a corner tile over the guide; picking the same channel goes back to full screen without the info card |
 | Reminders | OK on a programme that hasn't started sets a reminder; a pop-up two minutes before offers to switch |
 | Search | Programmes (catch-up, on now, coming up) and channels, from the main menu |
+| Provider lists | Every category and stream exactly as your provider lists them (backup streams, hidden channels and channels the Sky layout leaves out included), at the bottom of the group list, in Search and on the web page. Plays the one stream you pick, with no fallback |
 | Previous channel | Flip between the last two channels (remote's last-channel key, or the controls row) |
 | Recently watched | A group in TV Guide / Channel List with the channels you've watched lately |
 | Sleep timer | 15–120 minutes from the controls row or Home Assistant, with a one-minute warning |
@@ -103,6 +104,13 @@ Everything is in `ui/Theme.kt` (colours, type, shapes, focus, tags, dialogs, ico
 - **🔍 Search** (main menu) finds programmes and channels as you type. OK plays, plays catch-up,
   or sets a reminder, depending on when the programme is on.
 - **🕘 Recently watched** (top of the group list) lists the channels you've watched lately, newest first.
+- **Provider lists** (bottom of the group list) is the fallback for when Ferry's own lists leave out a stream
+  you want. It shows your provider's categories in the provider's order and, inside one, every stream on its
+  own row: backup streams Ferry folded into another channel, hidden channels and channels the Sky layout
+  doesn't use included, under the provider's own names. **OK** plays exactly that stream: if it fails, Ferry
+  doesn't switch to another one. Back goes to the categories, then the group list. Search's **Provider
+  lists** button adds every matching stream to the results, and the web page's **Channels** tab has the same
+  lists with a **Play** button per stream.
 
 ### Player
 
@@ -310,6 +318,7 @@ ferry://tvg/<tvg-id>     best choice: survives playlist re-imports
 ferry://number/<n>
 ferry://name/<url-encoded name>
 ferry://channel/<channel-id>
+ferry://stream/<channel-id>    that stream only, as the provider lists play it (no fallback)
 ferry://last
 ferry://guide
 ferry://football               the Sports screen
@@ -368,6 +377,10 @@ All under `/api`, `Authorization: Bearer <token>` (WebSocket: `?token=`).
 | POST | `/groups/hidden` | `{group, hidden}` |
 | POST | `/favourites/order` | `{ids: [...]}` |
 | POST | `/play` | `{channelId? tvgId? number? name?}` |
+| GET | `/provider/categories` | the provider lists' categories: `sourceId`, `source`, `name` (null = none), `count` |
+| GET | `/provider/streams?source=&group=` | a category's streams in the provider's order (leave out `group` for the ones without a category): `id`, `name`, `tvgId`, `group`, `number`, `quality`, `backup`, `hidden` |
+| GET | `/provider/search?q=&limit=` | every stream whose name matches, backups and hidden ones included |
+| POST | `/provider/play` | `{id}` plays that stream only, with no fallback |
 | POST | `/key` | `{key}` |
 | GET/PUT | `/mqtt` | passwords are write-only |
 | POST | `/mqtt/test` | |

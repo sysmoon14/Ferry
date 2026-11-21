@@ -170,6 +170,16 @@
         <div id="chMore"></div>
       </div>
       <div class="card">
+        <h2>Provider lists</h2>
+        <p class="muted small">Every category and stream exactly as your provider lists them, including backup streams Ferry folded into another channel and hidden channels. <b>Play</b> sends that one stream to the TV, with no fallback to another.</p>
+        <div class="row pin">
+          <input id="pvQ" placeholder="Search every stream" type="search">
+          <select id="pvCat" style="flex:.8"><option value="">Pick a category</option></select>
+        </div>
+        <ul class="list" id="pvList" style="margin-top:8px"></ul>
+        <div class="pager"><span class="muted small" id="pvInfo"></span></div>
+      </div>
+      <div class="card">
         <h2>Groups</h2>
         <p class="muted small" id="grpHelp"></p>
         <div class="chips" id="prefixChips"></div>
@@ -575,7 +585,57 @@
   $("chGroup").onchange = () => loadChannels();
   $("hideGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: true } }); loadChannels(); };
   $("showGroup").onclick = async () => { await api("/groups/hidden", { method: "POST", body: { group: $("chGroup").value, hidden: false } }); loadChannels(); };
-  loaders.channels = () => { loadGroups(); loadChannels(); loaders.groups(); loaders.favs(); };
+  loaders.channels = () => { loadGroups(); loadChannels(); loaders.groups(); loaders.favs(); loadProviderCats().catch(e => toast(e.message)); };
+
+  // ---------- Provider lists (every stream as the source sends it)
+  let pvCats = [], pvGen = 0, pvTimer;
+  async function loadProviderCats() {
+    const keep = pvCats[+$("pvCat").value];
+    pvCats = await api("/provider/categories");
+    const multi = new Set(pvCats.map(c => c.sourceId)).size > 1;
+    $("pvCat").replaceChildren(el("option", { value: "" }, "Pick a category"),
+      ...pvCats.map((c, i) => el("option", { value: String(i) },
+        `${multi ? c.source + " · " : ""}${c.name ?? "No category"} (${c.count.toLocaleString()})`)));
+    const again = keep ? pvCats.findIndex(c => c.sourceId === keep.sourceId && c.name === keep.name) : -1;
+    $("pvCat").value = again >= 0 ? String(again) : "";
+    if (!$("pvQ").value.trim() && again < 0) {
+      $("pvList").replaceChildren();
+      $("pvInfo").textContent = pvCats.length ? `${pvCats.length.toLocaleString()} categories` : "Nothing from your provider yet";
+    }
+  }
+  function providerRow(s) {
+    const play = el("button", { className: "icon", title: "Play this stream on the TV", ariaLabel: "Play this stream on the TV",
+      onclick: () => api("/provider/play", { method: "POST", body: { id: s.id } }).then(() => toast(`Playing ${s.name}`)).catch(e => toast(e.message)) }, icon("play"));
+    const logo = s.logo ? el("img", { className: "logo", src: s.logo, loading: "lazy", alt: "" }) : el("span", { className: "logo" });
+    const info = [s.group, s.quality, s.tvgId ? `guide ${s.tvgId}` : "no guide id", s.backup ? "backup stream" : null, s.hidden ? "hidden" : null];
+    return el("li", {}, logo,
+      el("div", { className: "grow" }, el("div", {}, s.number != null ? `${s.number}  ${s.name}` : s.name), el("div", { className: "small muted" }, info.filter(Boolean).join(" · "))),
+      play);
+  }
+  async function loadProviderStreams() {
+    const gen = ++pvGen;
+    const q = $("pvQ").value.trim();
+    const c = pvCats[+$("pvCat").value];
+    let items, what;
+    if (q.length >= 2) {
+      items = await api(`/provider/search?q=${encodeURIComponent(q)}&limit=200`);
+      what = `matching “${q}”`;
+    } else if ($("pvCat").value !== "" && c) {
+      const p = new URLSearchParams({ source: c.sourceId });
+      if (c.name != null) p.set("group", c.name);
+      items = await api(`/provider/streams?${p}`);
+      what = `in ${c.name ?? "No category"}`;
+    } else {
+      $("pvList").replaceChildren();
+      $("pvInfo").textContent = pvCats.length ? `${pvCats.length.toLocaleString()} categories` : "";
+      return;
+    }
+    if (gen !== pvGen) return; // a newer pick or search has started
+    $("pvList").replaceChildren(...items.map(providerRow));
+    $("pvInfo").textContent = items.length ? `${items.length.toLocaleString()} streams ${what}` : `No streams ${what}`;
+  }
+  $("pvQ").oninput = () => { clearTimeout(pvTimer); pvTimer = setTimeout(() => loadProviderStreams().catch(e => toast(e.message)), 250); };
+  $("pvCat").onchange = () => { $("pvQ").value = ""; loadProviderStreams().catch(e => toast(e.message)); };
 
   // ---------- Duplicate merging
   async function loadOptions() {
