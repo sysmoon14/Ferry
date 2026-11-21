@@ -255,6 +255,37 @@ object SkyMatcher {
         return Result(matches, unmatched)
     }
 
+    /** Channels a Sky box shows one region of, where the playlist often carries every region. */
+    private val REGIONAL_FAMILIES = listOf("itv1", "stv", "utv", "bbcone", "bbctwo")
+
+    /**
+     * The regional family a channel belongs to: "itv1" for ITV 1, ITV 1 Granada or ITV1 HD,
+     * "itv1plus1" for any ITV 1 +1. Null for everything else, including foreign copies ("CH: BBC One").
+     */
+    fun regionalFamily(name: String): String? {
+        val key = canon(name)
+        val family = REGIONAL_FAMILIES.firstOrNull { key.startsWith(it) } ?: return null
+        return if (key.endsWith("plus1")) family + "plus1" else family
+    }
+
+    /**
+     * Backup streams for a Sky-placed regional channel (ITV 1 Granada on 103): the playlist's other
+     * rows of the same family, after the channel's own streams. National rows ("ITV 1") come
+     * first, then the other regions by name; each row's streams stay together, best first.
+     */
+    fun regionalBackups(primary: ChannelEntity, candidates: List<ChannelEntity>, exclude: Set<String>): List<ChannelEntity> {
+        if (primary.skyNumber == null) return emptyList()
+        val family = regionalFamily(primary.name) ?: return emptyList()
+        val rows = candidates
+            .filter { it.id !in exclude && regionalFamily(it.name) == family }
+            .groupBy { it.primaryId ?: it.id }
+            .values
+            .map { row -> row.sortedWith(compareBy<ChannelEntity> { it.primaryId != null }.thenByDescending { it.quality }.thenBy { it.position }) }
+        return rows
+            .sortedWith(compareBy<List<ChannelEntity>> { canon(it.first().name) != family }.thenBy { it.first().name.lowercase() })
+            .flatten()
+    }
+
     /** A programme in the playlist's guide, for schedule comparison. */
     data class GuideEntry(val channelId: String, val start: Long, val title: String)
 

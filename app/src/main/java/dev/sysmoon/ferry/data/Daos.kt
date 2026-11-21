@@ -207,6 +207,10 @@ interface ChannelDao {
     @Query("SELECT * FROM channels WHERE id = :primaryId OR primaryId = :primaryId ORDER BY primaryId IS NOT NULL, quality DESC, position")
     suspend fun streamsOf(primaryId: String): List<ChannelEntity>
 
+    /** Rows that may be a region of ITV 1, BBC One/Two, STV or UTV (narrowed by SkyMatcher.regionalFamily). */
+    @Query("SELECT * FROM channels WHERE hidden = 0 AND (name LIKE 'ITV%' OR name LIKE 'BBC%' OR name LIKE 'STV%' OR name LIKE 'UTV%')")
+    suspend fun regionalCandidates(): List<ChannelEntity>
+
     @Query("SELECT * FROM channels WHERE tvgId = :tvgId AND hidden = 0 ORDER BY primaryId IS NOT NULL, favourite DESC LIMIT 1")
     suspend fun byTvgId(tvgId: String): ChannelEntity?
 

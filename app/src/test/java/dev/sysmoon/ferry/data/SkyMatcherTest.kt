@@ -119,4 +119,32 @@ class SkyMatcherTest {
         assertEquals("1:https://x/a.m3u8", streamKey(1, "https://x/a.m3u8?token=abc"))
     }
 
+    @Test fun regionalFamilies() {
+        assertEquals("itv1", SkyMatcher.regionalFamily("ITV 1 Granada"))
+        assertEquals("itv1", SkyMatcher.regionalFamily("ITV 1"))
+        assertEquals("itv1", SkyMatcher.regionalFamily("ITV1 FHD (1080p)"))
+        assertEquals("itv1plus1", SkyMatcher.regionalFamily("ITV 1 Granada +1"))
+        assertEquals("bbcone", SkyMatcher.regionalFamily("BBC One North West"))
+        assertEquals(null, SkyMatcher.regionalFamily("ITV 2"))
+        assertEquals(null, SkyMatcher.regionalFamily("CH: BBC One"))
+        assertEquals(null, SkyMatcher.regionalFamily("MUTV"))
+    }
+
+    @Test fun regionalBackupsFollowTheOwnRegion() {
+        fun row(id: String, name: String, pos: Int, primaryId: String? = null, q: Int = 0, sky: Int? = null) =
+            ChannelEntity(id, 1, name, null, null, null, "http://x/$id", pos, null, primaryId = primaryId, quality = q, skyNumber = sky)
+        val granada = row("gr", "ITV 1 Granada", 0, sky = 103)
+        val all = listOf(
+            granada,
+            row("lon", "ITV 1 London", 1),
+            row("nat", "ITV 1", 2, q = 720),
+            row("nat2", "ITV 1 FHD", 3, primaryId = "nat", q = 1080),
+            row("anglia", "ITV 1 Anglia West", 4),
+            row("plus", "ITV 1 London +1", 5),
+            row("itv2", "ITV 2", 6),
+        )
+        val backups = SkyMatcher.regionalBackups(granada, all, setOf("gr"))
+        assertEquals(listOf("nat", "nat2", "anglia", "lon"), backups.map { it.id })
+        assertTrue(SkyMatcher.regionalBackups(granada.copy(skyNumber = null), all, setOf("gr")).isEmpty())
+    }
 }
