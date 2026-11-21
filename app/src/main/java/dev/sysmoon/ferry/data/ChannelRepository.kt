@@ -367,6 +367,9 @@ class ChannelRepository(
         val channels = Duplicates.merge(parsed, settings.mergeDuplicates())
         Logs.i(TAG, "${src.name}: ${channels.count { it.primaryId != null }} duplicate streams folded")
         db.withTransaction {
+            // Deleted while its playlist was downloading: writing now would leave channels for a
+            // source that no longer exists, which no refresh or delete would ever clear.
+            check(db.sources().get(src.id) != null) { "${src.name} was removed during the refresh" }
             db.channels().deleteForSource(src.id)
             channels.chunked(500).forEach { db.channels().upsert(it) }
         }

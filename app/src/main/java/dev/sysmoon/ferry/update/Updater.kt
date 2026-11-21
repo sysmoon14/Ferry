@@ -111,6 +111,9 @@ class Updater(
         val r = release ?: return
         scope.launch {
             lock.withLock {
+                // Already waiting on the install prompt (Install pressed twice in Home Assistant):
+                // don't download again and open a second install session behind it.
+                if (_state.value is UpdateState.Installing) return@withLock
                 try {
                     _state.value = UpdateState.Downloading(r, 0)
                     val apk = download(r)
