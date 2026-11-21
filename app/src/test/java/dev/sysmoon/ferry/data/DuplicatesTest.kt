@@ -92,4 +92,16 @@ class DuplicatesTest {
         )
         assertTrue(merged.all { it.primaryId == null && it.streamCount == 1 })
     }
+    @Test fun sameNamedEntriesKeepARowEach() {
+        fun entry(url: String) = dev.sysmoon.ferry.parse.M3uEntry("ITV 1 FHD", url, "itv1.uk", null, null, "UK | ITV", null, null)
+        with(ChannelRepository) {
+            val first = entry("http://x/1").toChannel(7, 0, emptyMap())
+            val second = entry("http://x/2").toChannel(7, 1, emptyMap(), occurrence = 2)
+            assertEquals(ChannelRepository.channelId(7, "itv1.uk", "ITV 1 FHD"), first.id)
+            assertEquals(first.id + "-2", second.id)
+            val merged = Duplicates.merge(listOf(first, second), enabled = true)
+            assertEquals(1, merged.count { it.primaryId == null })
+            assertEquals(2, merged.first { it.primaryId == null }.streamCount)
+        }
+    }
 }

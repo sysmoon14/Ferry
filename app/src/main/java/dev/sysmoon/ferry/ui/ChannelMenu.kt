@@ -173,7 +173,7 @@ fun ChannelMenu(
                     ListItem(
                         selected = playing,
                         onClick = {
-                            graph.player.startStream(s, zap)
+                            graph.player.startStream(s, zap, row = primary)
                             onDismiss()
                             onPlayed()
                         },

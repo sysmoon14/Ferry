@@ -359,9 +359,15 @@ class ChannelRepository(
         // A renamed channel gets a new id (it hashes the name); find its prefs by stream instead.
         val existingByStream = prefs.associateBy { streamKey(src.id, it.streamUrl) }
         val hiddenGroups = settings.hiddenGroups()
+        // Entries with the same name and guide ID (backup copies, or regions a provider names
+        // alike) each keep a row: the second gets "<id>-2" and so on, and duplicate merging folds
+        // them into one channel with the rest as alternative streams.
+        val seen = HashMap<String, Int>()
         val parsed = entries
-            .mapIndexed { index, entry -> entry.toChannel(src.id, index, existing, hiddenGroups, existingByStream) }
-            .distinctBy { it.id }
+            .mapIndexed { index, entry ->
+                val occurrence = seen.merge(channelId(src.id, entry), 1, Int::plus)!!
+                entry.toChannel(src.id, index, existing, hiddenGroups, existingByStream, occurrence)
+            }
             .toList()
         require(parsed.isNotEmpty()) { "No live channels found" }
         val channels = Duplicates.merge(parsed, settings.mergeDuplicates())
@@ -475,8 +481,9 @@ class ChannelRepository(
             existing: Map<String, ChannelPrefs>,
             hiddenGroups: Set<String> = emptySet(),
             existingByStream: Map<String, ChannelPrefs> = emptyMap(),
+            occurrence: Int = 1,
         ): ChannelEntity {
-            val id = channelId(sourceId, this)
+            val id = channelId(sourceId, this).let { if (occurrence > 1) "$it-$occurrence" else it }
             val prev = existing[id] ?: existingByStream[streamKey(sourceId, url)]
             return ChannelEntity(
                 id = id,

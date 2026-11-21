@@ -23,6 +23,7 @@ import dev.sysmoon.ferry.data.ChannelRepository
 import dev.sysmoon.ferry.data.FerryDatabase
 import dev.sysmoon.ferry.data.ProgrammeEntity
 import dev.sysmoon.ferry.data.Settings
+import dev.sysmoon.ferry.data.SkyMatcher
 import dev.sysmoon.ferry.data.StreamQuality
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -489,16 +490,26 @@ class PlayerController(
         playJob = this.scope.launch { play(channel, scope) }
     }
 
-    /** Plays a specific stream of a merged channel (chosen from the long-press menu). */
-    fun startStream(stream: ChannelEntity, scope: ZapScope? = null) {
+    /**
+     * Plays a specific stream of a row (chosen from the long-press menu). [row] is the row the menu
+     * was opened on, so a backup from another region still plays as that row (ITV 1 on 103).
+     */
+    fun startStream(stream: ChannelEntity, scope: ZapScope? = null, row: ChannelEntity? = null) {
         playJob?.cancel()
-        playJob = this.scope.launch { play(stream, scope ?: zapScope.takeIf { _state.value.channel != null }) }
+        playJob = this.scope.launch { play(stream, scope ?: zapScope.takeIf { _state.value.channel != null }, row) }
     }
 
-    /** A channel's streams, best first. Works for a primary or any of its duplicates. */
+    /**
+     * A channel's streams, best first. Works for a primary or any of its duplicates. A regional
+     * channel the Sky layout placed (ITV 1 Granada on 103) also falls back to the playlist's
+     * national and other-region copies of it.
+     */
     suspend fun streamsFor(channel: ChannelEntity): List<ChannelEntity> {
         val primaryId = channel.primaryId ?: channel.id
-        return db.channels().streamsOf(primaryId).ifEmpty { listOf(channel) }
+        val own = db.channels().streamsOf(primaryId).ifEmpty { listOf(channel) }
+        val primary = own.firstOrNull { it.primaryId == null } ?: channel
+        if (primary.skyNumber == null || SkyMatcher.regionalFamily(primary.name) == null) return own
+        return own + SkyMatcher.regionalBackups(primary, db.channels().regionalCandidates(), own.map { it.id }.toSet())
     }
 
     fun zap(delta: Int) {
@@ -523,15 +534,15 @@ class PlayerController(
      * [scope] defaults to favourites (if starred) or the channel's group, e.g. for HA/deep links.
      * [channel] may be a duplicate stream: the row it belongs to plays, starting from that stream.
      */
-    suspend fun play(channel: ChannelEntity, scope: ZapScope? = null) {
-        val primary = channel.primaryId?.let { db.channels().get(it) } ?: channel
+    suspend fun play(channel: ChannelEntity, scope: ZapScope? = null, row: ChannelEntity? = null) {
+        val primary = row ?: channel.primaryId?.let { db.channels().get(it) } ?: channel
         zapScope = scope ?: when {
             primary.favourite -> ZapScope.Favourites
             primary.skyNumber != null -> ZapScope.Sky(null)
             primary.groupTitle != null -> ZapScope.Group(primary.groupTitle)
             else -> ZapScope.All
         }
-        val list = if (primary.streamCount > 1) streamsFor(primary) else listOf(primary)
+        val list = streamsFor(primary)
         Logs.i(TAG, "Tune ${primary.name} (${list.size} stream${if (list.size == 1) "" else "s"})")
         streams = list
         recovery.tuned(list.size, list.indexOfFirst { it.id == channel.id }.coerceAtLeast(0))
